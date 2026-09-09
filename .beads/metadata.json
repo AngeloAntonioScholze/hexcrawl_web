@@ -1,0 +1,7 @@
+{
+  "database": "dolt",
+  "backend": "dolt",
+  "dolt_mode": "embedded",
+  "dolt_database": "hexcrawl_web",
+  "project_id": "e307553a-fb14-4d24-995c-910f80b3da3b"
+}
