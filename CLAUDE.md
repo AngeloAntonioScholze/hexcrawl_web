@@ -75,3 +75,8 @@ _Add a brief overview of your project architecture_
 ## Conventions & Patterns
 
 _Add your project-specific conventions here_
+
+## Git & Sync Rules
+
+- **The user handles all commits and pushes.** Do NOT run `git commit`, `git push`, `git tag`, or `gh pr create` in this repo — not even at session close, not even for changes you just made. Finish the edits, then report changed files plus a suggested Conventional Commits message and let the user run it.
+- **Beads stays local.** This project has no Dolt remote by choice. Never run `bd dolt push`, `bd dolt pull`, or `bd dolt remote add`. The `no Dolt remote configured` auto-export warning is expected — ignore it.

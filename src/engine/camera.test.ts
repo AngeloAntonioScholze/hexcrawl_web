@@ -1,0 +1,234 @@
+import { NullEngine } from '@babylonjs/core/Engines/nullEngine'
+import { Vector3 } from '@babylonjs/core/Maths/math.vector'
+import { Scene } from '@babylonjs/core/scene'
+import { afterEach, beforeEach, describe, expect, it } from 'vitest'
+import { createIsoCamera, type IsoCamera } from './camera'
+
+// Enough of a canvas for the rig: it only reads client dimensions and never
+// touches a rendering context, which NullEngine provides.
+const fakeCanvas = (width: number, height: number): HTMLCanvasElement =>
+  ({ clientWidth: width, clientHeight: height }) as HTMLCanvasElement
+
+let engine: NullEngine
+let scene: Scene
+let iso: IsoCamera
+
+const settle = (frames = 200): void => {
+  for (let i = 0; i < frames; i++) scene.onBeforeRenderObservable.notifyObservers(scene)
+}
+
+beforeEach(() => {
+  engine = new NullEngine()
+  scene = new Scene(engine)
+  iso = createIsoCamera(scene, fakeCanvas(800, 400), { zoom: 40 })
+})
+
+afterEach(() => {
+  iso.dispose()
+  scene.dispose()
+  engine.dispose()
+})
+
+describe('projection', () => {
+  it('is orthographic', () => {
+    expect(iso.camera.mode).toBe(1)
+  })
+
+  it('derives all four planes from zoom and aspect', () => {
+    iso.updateProjection(2)
+    expect(iso.camera.orthoTop).toBe(40)
+    expect(iso.camera.orthoBottom).toBe(-40)
+    expect(iso.camera.orthoRight).toBe(80)
+    expect(iso.camera.orthoLeft).toBe(-80)
+  })
+
+  it('keeps vertical extent fixed when aspect changes', () => {
+    iso.updateProjection(0.5)
+    expect(iso.camera.orthoTop).toBe(40)
+    expect(iso.camera.orthoRight).toBe(20)
+  })
+
+  it('scales the frustum on zoom rather than moving the camera', () => {
+    const radius = iso.camera.radius
+    iso.zoomBy(0.5)
+    settle()
+    expect(iso.camera.orthoTop).toBeCloseTo(20, 6)
+    expect(iso.camera.radius).toBe(radius)
+  })
+
+  it('clamps zoom to its configured range', () => {
+    for (let i = 0; i < 40; i++) iso.zoomBy(0.5)
+    settle()
+    expect(iso.camera.orthoTop).toBeCloseTo(10, 6)
+
+    for (let i = 0; i < 80; i++) iso.zoomBy(2)
+    settle()
+    expect(iso.camera.orthoTop).toBeCloseTo(200, 6)
+  })
+})
+
+describe('tilt', () => {
+  const betaAtZoom = (zoom: number): number => {
+    const rig = createIsoCamera(scene, fakeCanvas(800, 400), { zoom })
+    const beta = rig.camera.beta
+    rig.dispose()
+    return beta
+  }
+
+  it('drops toward the horizon as the view zooms in', () => {
+    expect(betaAtZoom(11)).toBeGreaterThan(betaAtZoom(15))
+    expect(betaAtZoom(15)).toBeGreaterThan(betaAtZoom(19))
+  })
+
+  it('holds the low angle at the closest zoom, which the rig clamps to', () => {
+    const near = betaAtZoom(10)
+    expect(betaAtZoom(4)).toBeCloseTo(near, 10)
+    expect(betaAtZoom(11)).toBeLessThan(near)
+  })
+
+  it('holds the map angle at and above the far zoom', () => {
+    const far = betaAtZoom(20)
+    expect(betaAtZoom(60)).toBeCloseTo(far, 10)
+    expect(betaAtZoom(200)).toBeCloseTo(far, 10)
+  })
+
+  it('honours a custom tilt band', () => {
+    const rig = createIsoCamera(scene, fakeCanvas(800, 400), {
+      zoom: 50,
+      betaNearZoom: 40,
+      betaFarZoom: 80,
+    })
+    // Halfway across the band on a log scale is zoom 56.6, so 50 is still short
+    // of the far angle but past the near one.
+    expect(rig.camera.beta).toBeLessThan(((90 - 15) * Math.PI) / 180)
+    expect(rig.camera.beta).toBeGreaterThan(((90 - 49) * Math.PI) / 180)
+    rig.dispose()
+  })
+
+  it('stays within the configured tilt range', () => {
+    const near = ((90 - 15) * Math.PI) / 180
+    const far = ((90 - 49) * Math.PI) / 180
+    for (const zoom of [10, 14, 40, 120, 200]) {
+      expect(betaAtZoom(zoom)).toBeGreaterThanOrEqual(far)
+      expect(betaAtZoom(zoom)).toBeLessThanOrEqual(near)
+    }
+  })
+
+  it('reaches 15 degrees above the horizon at the closest zoom', () => {
+    expect(90 - (betaAtZoom(10) * 180) / Math.PI).toBeCloseTo(15, 6)
+  })
+
+  it('reaches 49 degrees above the horizon at the farthest zoom', () => {
+    expect(90 - (betaAtZoom(200) * 180) / Math.PI).toBeCloseTo(49, 6)
+  })
+
+  it('honours custom tilt limits', () => {
+    const rig = createIsoCamera(scene, fakeCanvas(800, 400), {
+      zoom: 4,
+      betaNear: 1.3,
+      betaFar: 0.5,
+    })
+    expect(rig.camera.beta).toBeCloseTo(1.3, 6)
+    rig.dispose()
+  })
+
+  it('follows the zoom as it eases, not in a jump', () => {
+    // Started inside the tilt band, since outside it the angle is pinned and
+    // would legitimately not move at all on the first frames of a zoom.
+    const rig = createIsoCamera(scene, fakeCanvas(800, 400), { zoom: 18 })
+    const start = rig.camera.beta
+
+    rig.zoomBy(11 / 18)
+    scene.onBeforeRenderObservable.notifyObservers(scene)
+    const midway = rig.camera.beta
+    for (let i = 0; i < 200; i++) scene.onBeforeRenderObservable.notifyObservers(scene)
+
+    expect(midway).toBeGreaterThan(start)
+    expect(midway).toBeLessThan(rig.camera.beta)
+    rig.dispose()
+  })
+
+  it('keeps beta limits wide enough for the range it uses', () => {
+    expect(iso.camera.lowerBetaLimit).toBeLessThanOrEqual(iso.camera.beta)
+    expect(iso.camera.upperBetaLimit).toBeGreaterThanOrEqual(iso.camera.beta)
+  })
+})
+
+describe('rotation', () => {
+  it('lands on a 60 degree step', () => {
+    const start = iso.camera.alpha
+    iso.rotate(1)
+    settle()
+    expect(iso.camera.alpha - start).toBeCloseTo(Math.PI / 3, 10)
+  })
+
+  it('returns to the starting orientation after six steps', () => {
+    const start = iso.camera.alpha
+    for (let i = 0; i < 6; i++) iso.rotate(1)
+    settle()
+    expect(iso.camera.alpha - start).toBeCloseTo(2 * Math.PI, 10)
+  })
+
+  it('rotates the other way for negative steps', () => {
+    const start = iso.camera.alpha
+    iso.rotate(-2)
+    settle()
+    expect(iso.camera.alpha - start).toBeCloseTo((-2 * Math.PI) / 3, 10)
+  })
+
+  it('eases toward the target instead of snapping instantly', () => {
+    const start = iso.camera.alpha
+    iso.rotate(1)
+    scene.onBeforeRenderObservable.notifyObservers(scene)
+    const afterOneFrame = iso.camera.alpha - start
+    expect(afterOneFrame).toBeGreaterThan(0)
+    expect(afterOneFrame).toBeLessThan(Math.PI / 3)
+  })
+})
+
+describe('panning', () => {
+  it('stays on the ground plane', () => {
+    iso.panBy(120, -80)
+    expect(iso.camera.target.y).toBeCloseTo(0, 10)
+  })
+
+  it('moves further per pixel when zoomed out', () => {
+    iso.panBy(100, 0)
+    const near = iso.camera.target.subtract(Vector3.Zero()).length()
+
+    iso.camera.target.set(0, 0, 0)
+    iso.zoomBy(4)
+    settle()
+    iso.panBy(100, 0)
+    const far = iso.camera.target.length()
+
+    expect(far).toBeGreaterThan(near)
+  })
+
+  it('respects pan bounds', () => {
+    const bounded = createIsoCamera(scene, fakeCanvas(800, 400), {
+      zoom: 40,
+      panBounds: { minX: -10, maxX: 10, minZ: -10, maxZ: 10 },
+    })
+    bounded.panBy(5000, 5000)
+    expect(bounded.camera.target.x).toBeLessThanOrEqual(10)
+    expect(bounded.camera.target.x).toBeGreaterThanOrEqual(-10)
+    expect(bounded.camera.target.z).toBeLessThanOrEqual(10)
+    expect(bounded.camera.target.z).toBeGreaterThanOrEqual(-10)
+    bounded.dispose()
+  })
+})
+
+describe('dispose', () => {
+  // Asserted behaviourally rather than by observer count: Babylon defers the
+  // actual unregister until the next notify, so the array is still populated
+  // immediately after remove() returns true.
+  it('stops smoothing once disposed', () => {
+    const extra = createIsoCamera(scene, fakeCanvas(800, 400), { zoom: 40 })
+    const start = extra.camera.alpha
+    extra.rotate(1)
+    extra.dispose()
+    settle()
+    expect(extra.camera.alpha).toBe(start)
+  })
+})

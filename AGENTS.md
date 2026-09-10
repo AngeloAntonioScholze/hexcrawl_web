@@ -125,3 +125,8 @@ bd prime                # Refresh Beads context
 
 **Architecture in one line:** issues live in a local Dolt DB; sync uses `refs/dolt/data` on your git remote; `.beads/issues.jsonl` is a passive export. See https://github.com/gastownhall/beads/blob/main/docs/SYNC_CONCEPTS.md for details and anti-patterns.
 <!-- END BEADS CODEX SETUP -->
+
+## Git & Sync Rules
+
+- **The user handles all commits and pushes.** Do NOT run `git commit`, `git push`, `git tag`, or `gh pr create` in this repo — not even at session close, not even for changes you just made. Finish the edits, then report changed files plus a suggested Conventional Commits message and let the user run it.
+- **Beads stays local.** This project has no Dolt remote by choice. Never run `bd dolt push`, `bd dolt pull`, or `bd dolt remote add`. The `no Dolt remote configured` auto-export warning is expected — ignore it.
