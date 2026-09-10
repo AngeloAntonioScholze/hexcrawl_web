@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest'
 import { spiral, type Axial } from '../hex/coords'
 import { createLayout } from '../hex/layout'
-import { bandFor, createTerrain, type TerrainId } from './terrain'
+import { MAX_LEVEL, bandFor, createTerrain, type TerrainId } from './terrain'
 
 const layout = createLayout(2)
 const field = spiral({ q: 0, r: 0 }, 22)
@@ -27,9 +27,44 @@ describe('bandFor', () => {
   })
 
   it('climbs through the bands in order', () => {
-    const order: TerrainId[] = ['deepWater', 'water', 'sand', 'grass', 'forest', 'rock', 'snow']
+    const order: TerrainId[] = ['deepWater', 'water', 'sand', 'grass', 'forest', 'mountains', 'peaks']
     const seen = [-0.5, -0.1, 0.03, 0.15, 0.35, 0.6, 0.9].map((h) => bandFor(h).id)
     expect(seen).toEqual(order)
+  })
+})
+
+describe('levels', () => {
+  it('puts water and the beach together on the ground floor', () => {
+    for (const height of [-1, -0.3, -0.01, 0, 0.05]) {
+      expect(bandFor(height).level).toBe(0)
+    }
+  })
+
+  it('climbs one step at a time through the land bands', () => {
+    const steps = [0.05, 0.15, 0.35, 0.6, 0.9].map((h) => bandFor(h).level)
+    expect(steps).toEqual([0, 1, 2, 3, 4])
+  })
+
+  it('never leaves a gap between the steps it reports', () => {
+    expect(MAX_LEVEL).toBe(4)
+  })
+
+  it('agrees with the rendered height on which hex is higher', () => {
+    const tiles = sampleAll().sort((a, b) => a.elevation - b.elevation)
+    for (let i = 1; i < tiles.length; i++) {
+      expect(tiles[i].level).toBeGreaterThanOrEqual(tiles[i - 1].level)
+    }
+  })
+
+  it('groups many rendered heights under one step', () => {
+    const tiles = sampleAll().filter((tile) => tile.level === 1)
+    expect(tiles.length).toBeGreaterThan(0)
+    expect(new Set(tiles.map((tile) => tile.elevation)).size).toBeGreaterThan(tiles.length * 0.5)
+  })
+
+  it('reaches every step at the default settings', () => {
+    const seen = new Set(sampleAll().map((tile) => tile.level))
+    expect([...seen].sort()).toEqual([0, 1, 2, 3, 4])
   })
 })
 
@@ -83,6 +118,23 @@ describe('createTerrain', () => {
     }
   })
 
+  it('opens a gap between the plains and the peaks', () => {
+    const land = sampleAll().filter((tile) => tile.height >= 0)
+    const peak = Math.max(...land.map((tile) => tile.elevation))
+    const shore = Math.min(...land.map((tile) => tile.elevation))
+    expect(peak - shore).toBeGreaterThan(6)
+  })
+
+  it('holds the lowlands down as the relief curve steepens', () => {
+    const midpoint = (reliefCurve: number): number => {
+      const tiles = sampleAll({ reliefCurve })
+        .filter((tile) => tile.height >= 0)
+        .sort((a, b) => a.elevation - b.elevation)
+      return tiles[Math.floor(tiles.length / 2)].elevation
+    }
+    expect(midpoint(2)).toBeLessThan(midpoint(1))
+  })
+
   it('generates both land and water at the default settings', () => {
     const tiles = sampleAll()
     const water = tiles.filter((tile) => tile.height < 0).length
@@ -113,7 +165,7 @@ describe('createTerrain', () => {
 
   it('reaches every terrain band at the default settings', () => {
     const seen = new Set(sampleAll().map((tile) => tile.terrain))
-    for (const id of ['deepWater', 'water', 'sand', 'grass', 'forest', 'rock', 'snow']) {
+    for (const id of ['deepWater', 'water', 'sand', 'grass', 'forest', 'mountains', 'peaks']) {
       expect(seen, `missing ${id}`).toContain(id)
     }
   })

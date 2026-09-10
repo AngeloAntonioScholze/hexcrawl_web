@@ -153,3 +153,69 @@ describe('overlay', () => {
     expect(() => grid.setOverlay(new Map([['99,99', TINT]]))).not.toThrow()
   })
 })
+
+describe('fog', () => {
+  const FOG: [number, number, number] = [0.055, 0.065, 0.085]
+  const TINT_FLOOR = 0.6
+  const keyOf = (index: number): ReturnType<typeof hexKey> => hexKey(tiles[index].hex)
+
+  const expectColor = (index: number, rgb: [number, number, number]): void => {
+    const [r, g, b] = grid.colorAt(index)
+    expect(r).toBeCloseTo(rgb[0], 6)
+    expect(g).toBeCloseTo(rgb[1], 6)
+    expect(b).toBeCloseTo(rgb[2], 6)
+  }
+
+  it('leaves the terrain untouched when nothing is fogged', () => {
+    grid.setFog(new Map())
+    expectColor(0, [BASE.r, BASE.g, BASE.b])
+  })
+
+  it('buries a hex nobody has seen under the fog colour', () => {
+    grid.setFog(new Map([[keyOf(0), 0]]))
+    expectColor(0, FOG)
+  })
+
+  it('fogs only the hexes it is given', () => {
+    grid.setFog(new Map([[keyOf(0), 0]]))
+    expectColor(1, [BASE.r, BASE.g, BASE.b])
+  })
+
+  it('fades a remembered hex partway toward the fog', () => {
+    grid.setFog(new Map([[keyOf(0), 0.5]]))
+    expectColor(0, [
+      FOG[0] + (BASE.r - FOG[0]) * 0.5,
+      FOG[1] + (BASE.g - FOG[1]) * 0.5,
+      FOG[2] + (BASE.b - FOG[2]) * 0.5,
+    ])
+  })
+
+  it('lifts again when the hex leaves the fog map', () => {
+    grid.setFog(new Map([[keyOf(0), 0]]))
+    grid.setFog(new Map())
+    expectColor(0, [BASE.r, BASE.g, BASE.b])
+  })
+
+  it('keeps a tint legible through the fog', () => {
+    grid.setFog(new Map([[keyOf(0), 0]]))
+    grid.setOverlay(new Map([[keyOf(0), new Color3(1, 1, 1)]]))
+
+    const lit = FOG.map((channel) => channel + (1 - channel) * TINT_FLOOR)
+    expectColor(0, lit as [number, number, number])
+  })
+
+  it('fogs a hex again once its tint is taken away', () => {
+    grid.setFog(new Map([[keyOf(0), 0]]))
+    grid.setOverlay(new Map([[keyOf(0), new Color3(1, 1, 1)]]))
+    grid.setOverlay(new Map())
+    expectColor(0, FOG)
+  })
+
+  it('fogs a tinted hex that was clear when the tint went on', () => {
+    grid.setOverlay(new Map([[keyOf(0), new Color3(1, 1, 1)]]))
+    grid.setFog(new Map([[keyOf(0), 0]]))
+
+    const lit = FOG.map((channel) => channel + (1 - channel) * TINT_FLOOR)
+    expectColor(0, lit as [number, number, number])
+  })
+})

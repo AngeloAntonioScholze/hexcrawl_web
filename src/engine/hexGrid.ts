@@ -31,11 +31,24 @@ export interface HexGrid {
   colorAt(index: number): [number, number, number, number]
   /** Replaces every tinted hex at once; anything absent returns to its terrain colour. */
   setOverlay(overlay: ReadonlyMap<HexKey, Color3>): void
+  /**
+   * Replaces the fog at once: 1 shows the terrain, 0 buries it under the fog
+   * colour. Anything absent is fully clear, so an empty map lifts the fog.
+   */
+  setFog(clarity: ReadonlyMap<HexKey, number>): void
   dispose(): void
 }
 
 const MIN_ELEVATION = 0.05
 const DEFAULT_GAP = 0.06
+
+// Barely above the ground slab, so a hex nobody has seen reads as a hole in the
+// map rather than as a dimmed tile whose terrain can still be guessed.
+const FOG_COLOR = new Color3(0.055, 0.065, 0.085)
+
+// Tints carry no terrain information, so they stay legible through the fog: a
+// route or the hover highlight should not vanish into unexplored ground.
+const TINT_CLARITY_FLOOR = 0.6
 
 export function createHexGrid(
   scene: Scene,
@@ -60,6 +73,8 @@ export function createHexGrid(
   const baseColors = new Float32Array(count * 4)
   const indexByKey = new Map<HexKey, number>()
   const hexByIndex: Axial[] = []
+  const keyByIndex: HexKey[] = []
+  const clarity = new Float32Array(count).fill(1)
 
   const scaling = Vector3.One()
   const translation = Vector3.Zero()
@@ -76,6 +91,7 @@ export function createHexGrid(
     const key = hexKey(tile.hex)
     indexByKey.set(key, index)
     hexByIndex.push(tile.hex)
+    keyByIndex.push(key)
   })
 
   mesh.thinInstanceSetBuffer('matrix', matrices, 16, true)
@@ -84,14 +100,28 @@ export function createHexGrid(
 
   let overlay = new Map<HexKey, Color3>()
 
-  const writeColor = (index: number, rgba: ArrayLike<number>): void => {
-    colors.set(rgba, index * 4)
-  }
+  // The rendered colour is the tint over the terrain, faded toward the fog by
+  // how much of the hex the party has seen. Both layers are kept apart so the
+  // hover tint can change on every pointer move without touching the fog.
+  const composite = (index: number): void => {
+    const tint = overlay.get(keyByIndex[index])
+    const fade = tint ? Math.max(clarity[index], TINT_CLARITY_FLOOR) : clarity[index]
+    const offset = index * 4
 
-  const restore = (key: HexKey): void => {
-    const index = indexByKey.get(key)
-    if (index === undefined) return
-    writeColor(index, baseColors.subarray(index * 4, index * 4 + 4))
+    if (fade === 1) {
+      if (tint) colors.set([tint.r, tint.g, tint.b, 1], offset)
+      else colors.set(baseColors.subarray(offset, offset + 4), offset)
+      return
+    }
+
+    const r = tint ? tint.r : baseColors[offset]
+    const g = tint ? tint.g : baseColors[offset + 1]
+    const b = tint ? tint.b : baseColors[offset + 2]
+
+    colors[offset] = FOG_COLOR.r + (r - FOG_COLOR.r) * fade
+    colors[offset + 1] = FOG_COLOR.g + (g - FOG_COLOR.g) * fade
+    colors[offset + 2] = FOG_COLOR.b + (b - FOG_COLOR.b) * fade
+    colors[offset + 3] = 1
   }
 
   return {
@@ -110,25 +140,40 @@ export function createHexGrid(
     // Whole-overlay diffing rather than per-hex calls: a traced route touches
     // hundreds of tiles, and the colour buffer should upload once, not per tile.
     setOverlay(next): void {
-      let changed = false
+      const stale: number[] = []
 
       for (const key of overlay.keys()) {
-        if (!next.has(key)) {
-          restore(key)
-          changed = true
-        }
+        if (next.has(key)) continue
+        const index = indexByKey.get(key)
+        if (index !== undefined) stale.push(index)
       }
 
+      const fresh: number[] = []
       for (const [key, color] of next) {
         const previous = overlay.get(key)
         if (previous && previous.equals(color)) continue
         const index = indexByKey.get(key)
-        if (index === undefined) continue
-        writeColor(index, [color.r, color.g, color.b, 1])
-        changed = true
+        if (index !== undefined) fresh.push(index)
       }
 
       overlay = new Map(next)
+      for (const index of stale) composite(index)
+      for (const index of fresh) composite(index)
+
+      if (stale.length > 0 || fresh.length > 0) mesh.thinInstanceBufferUpdated('color')
+    },
+
+    setFog(next): void {
+      let changed = false
+
+      for (let index = 0; index < count; index++) {
+        const fade = next.get(keyByIndex[index]) ?? 1
+        if (fade === clarity[index]) continue
+        clarity[index] = fade
+        composite(index)
+        changed = true
+      }
+
       if (changed) mesh.thinInstanceBufferUpdated('color')
     },
 

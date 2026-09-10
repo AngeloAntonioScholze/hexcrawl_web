@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import { computed } from 'vue'
 import HexCanvas from '../components/HexCanvas.vue'
-import { useHexMapStore } from '../stores/hexMap'
+import { MAX_SIGHT, MIN_SIGHT, useHexMapStore } from '../stores/hexMap'
 import { KM_PER_HEX } from '../terrain/travel'
 
 const store = useHexMapStore()
@@ -20,6 +20,10 @@ const onSpeed = (event: Event): void => {
 const onPlay = (): void => {
   if (store.playing) store.stop()
   else store.play()
+}
+
+const onSight = (event: Event): void => {
+  store.setSight(Number((event.target as HTMLInputElement).value))
 }
 
 const hint = computed(() => {
@@ -44,7 +48,9 @@ const straightLine = computed(() =>
         <dt>hover</dt>
         <dd>
           {{ store.hovered ?? '—' }}
-          <span v-if="store.hoveredTile" class="dim">{{ store.hoveredTile.terrain }}</span>
+          <span v-if="store.hoveredTile" class="dim">
+            {{ store.hoveredTile.terrain }} · lv {{ store.hoveredTile.level }}
+          </span>
         </dd>
 
         <dt>start</dt>
@@ -92,6 +98,47 @@ const straightLine = computed(() =>
         <button type="button" :disabled="store.isAuto || !store.route" @click="onPlay">
           {{ playLabel }}
         </button>
+        <button type="button" :disabled="!store.canArrive" @click="store.arrive">
+          move party here
+        </button>
+      </div>
+
+      <label class="control">
+        <input v-model="store.fog" type="checkbox" />
+        <span>fog of war</span>
+      </label>
+
+      <label class="control">
+        <input v-model="store.showSight" type="checkbox" />
+        <span>show the sight field</span>
+      </label>
+
+      <div v-if="store.fog || store.showSight" class="control stack">
+        <div class="row">
+          <span>sight on the flat</span>
+          <span class="value">{{ store.sight }}</span>
+        </div>
+        <input
+          :value="store.sight"
+          type="range"
+          :min="MIN_SIGHT"
+          :max="MAX_SIGHT"
+          step="1"
+          @input="onSight"
+        />
+        <div class="row">
+          <span>seeing</span>
+          <span class="value">{{ store.reach }} hex</span>
+        </div>
+        <template v-if="store.fog">
+          <div class="row">
+            <span>explored</span>
+            <span class="value">{{ store.explored.size }}</span>
+          </div>
+          <button type="button" :disabled="store.explored.size === 0" @click="store.forget">
+            forget the map
+          </button>
+        </template>
       </div>
 
       <p>{{ hint }}</p>
@@ -179,7 +226,10 @@ p {
 }
 
 .control.stack {
-  display: block;
+  display: flex;
+  flex-direction: column;
+  align-items: stretch;
+  gap: 0.4rem;
 }
 
 .control.stack .row {
@@ -199,7 +249,7 @@ p {
 
 .control.stack input[type='range'] {
   width: 100%;
-  margin: 0.4rem 0 0.5rem;
+  margin: 0.1rem 0;
 }
 
 button {

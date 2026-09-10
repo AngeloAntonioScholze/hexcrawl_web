@@ -9,11 +9,12 @@ export const KM_PER_HEX = 10
 export const CLIMB_MULTIPLIER = 2
 
 /**
- * How much higher the next hex must be before it counts as a climb. Below this
- * the ground is merely undulating, so wading ashore or walking up a shallow
- * slope costs the plain distance.
+ * How many steps the next hex must stand above this one before it counts as a
+ * climb. Levels are already the coarse reading of the terrain, so one step up
+ * is a climb and anything within a step is undulating ground: wading ashore or
+ * walking the length of a plain costs the plain distance.
  */
-export const CLIMB_THRESHOLD = 2
+export const CLIMB_THRESHOLD = 1
 
 export interface RouteOptions {
   /** Off by default: parties travel on foot and cannot cross open water. */
@@ -28,7 +29,7 @@ export interface Route {
 }
 
 export function stepCostKm(from: TerrainTile, to: TerrainTile): number {
-  const rise = to.elevation - from.elevation
+  const rise = to.level - from.level
   return rise >= CLIMB_THRESHOLD ? KM_PER_HEX * CLIMB_MULTIPLIER : KM_PER_HEX
 }
 

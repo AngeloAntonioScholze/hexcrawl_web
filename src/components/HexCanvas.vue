@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import { Color3 } from '@babylonjs/core/Maths/math.color'
 import { computed, ref, watch } from 'vue'
-import { hexKey, spiral, type HexKey } from '../hex/coords'
+import { hexKey, parseKey, spiral, type HexKey } from '../hex/coords'
 import { createLayout } from '../hex/layout'
 import { useRouteReveal } from '../composables/useRouteReveal'
 import { useHexScene } from '../engine/useHexScene'
@@ -34,6 +34,9 @@ const ROUTE_TINT = new Color3(0.86, 0.7, 0.36)
 const HEAD_TINT = new Color3(0.99, 0.93, 0.7)
 const START_TINT = new Color3(0.44, 0.78, 0.5)
 const GOAL_TINT = new Color3(0.86, 0.36, 0.36)
+
+/** How much of a hex survives once the party has walked on past it. */
+const REMEMBERED = 0.42
 
 const canvas = ref<HTMLCanvasElement | null>(null)
 const store = useHexMapStore()
@@ -76,12 +79,59 @@ const overlay = computed(() => {
   return result
 })
 
+// Everything the party has never seen is buried, and ground it has left behind
+// keeps a dimmer copy of itself: the map remembers, the party does not watch.
+const fog = computed(() => {
+  const result = new Map<HexKey, number>()
+  if (!store.fog) return result
+
+  for (const key of store.tiles.keys()) {
+    if (store.visible.has(key)) continue
+    result.set(key, store.explored.has(key) ? REMEMBERED : 0)
+  }
+  return result
+})
+
 watch(overlay, (next) => hexScene.value?.grid.setOverlay(next))
+
+watch(fog, (next) => hexScene.value?.grid.setFog(next))
+
+// The disc the party can see, with the pockets the terrain hides carved out of
+// it, so a ridge shows up as the shadow it casts rather than as missing fog.
+const sightField = computed(() =>
+  store.showSight
+    ? { lit: [...store.visible].map(parseKey), shadow: [...store.blocked].map(parseKey) }
+    : { lit: [], shadow: [] },
+)
+
+watch(sightField, ({ lit, shadow }) => hexScene.value?.vision.setField(lit, shadow))
+
+watch(
+  () => store.showSight,
+  (shown) => hexScene.value?.vision.setShown(shown),
+)
 
 watch(
   () => store.visibleHexes,
   (hexes) => hexScene.value?.arrows.setPath(hexes),
 )
+
+watch(
+  () => store.partyHex,
+  (key) => hexScene.value?.party.setHex(key ? parseKey(key) : null),
+)
+
+// The scene only exists from mount onward, so state that was already settled
+// before then has to be pushed across once it appears.
+watch(hexScene, (created) => {
+  if (!created) return
+  created.grid.setOverlay(overlay.value)
+  created.grid.setFog(fog.value)
+  created.arrows.setPath(store.visibleHexes)
+  created.party.setHex(store.partyHex ? parseKey(store.partyHex) : null)
+  created.vision.setField(sightField.value.lit, sightField.value.shadow)
+  created.vision.setShown(store.showSight)
+})
 </script>
 
 <template>

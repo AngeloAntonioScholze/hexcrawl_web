@@ -17,7 +17,9 @@ import { hexToWorld, type Layout } from '../hex/layout'
 import { createIsoCamera, type IsoCamera } from './camera'
 import { attachIsoControls } from './controls'
 import { createHexGrid, type HexGrid, type HexTile } from './hexGrid'
+import { createPartyToken, type PartyToken } from './partyToken'
 import { createRouteArrows, type RouteArrows } from './routeArrows'
+import { createVisionOverlay, type VisionOverlay } from './visionOverlay'
 
 export interface HexSceneOptions {
   layout: Layout
@@ -34,6 +36,8 @@ export interface HexScene {
   iso: IsoCamera
   grid: HexGrid
   arrows: RouteArrows
+  party: PartyToken
+  vision: VisionOverlay
   resize(): void
   dispose(): void
 }
@@ -104,11 +108,10 @@ export function createHexScene(canvas: HTMLCanvasElement, options: HexSceneOptio
   })
 
   const elevations = new Map(options.tiles.map((tile) => [hexKey(tile.hex), tile.elevation]))
-  const arrows = createRouteArrows(
-    scene,
-    options.layout,
-    (hex) => elevations.get(hexKey(hex)) ?? 0,
-  )
+  const elevationOf = (hex: Axial): number => elevations.get(hexKey(hex)) ?? 0
+  const arrows = createRouteArrows(scene, options.layout, elevationOf)
+  const party = createPartyToken(scene, options.layout, elevationOf)
+  const vision = createVisionOverlay(scene, options.layout, elevationOf, { gap: options.gap })
   addGroundSlab(scene, bounds, options.layout.size * 2)
 
   // Plain axial coordinates cross this boundary, never Babylon objects, so
@@ -135,11 +138,15 @@ export function createHexScene(canvas: HTMLCanvasElement, options: HexSceneOptio
     iso,
     grid,
     arrows,
+    party,
+    vision,
     resize,
     dispose(): void {
       scene.onPointerObservable.remove(pointerObserver)
       detachControls()
       engine.stopRenderLoop()
+      vision.dispose()
+      party.dispose()
       arrows.dispose()
       grid.dispose()
       iso.dispose()

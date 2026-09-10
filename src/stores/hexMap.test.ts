@@ -4,13 +4,16 @@ import { beforeEach, describe, expect, it } from 'vitest'
 import { hexKey, range, type Axial, type HexKey } from '../hex/coords'
 import type { TerrainTile } from '../terrain/terrain'
 import { KM_PER_HEX } from '../terrain/travel'
-import { useHexMapStore } from './hexMap'
+import { MAX_SIGHT, MIN_SIGHT, useHexMapStore } from './hexMap'
 
-const tile = (hex: Axial, elevation = 1): TerrainTile => ({
+// The number is the mechanical level; sight and climbs read that, and the
+// rendered height only trails along behind it.
+const tile = (hex: Axial, level = 1): TerrainTile => ({
   hex,
   terrain: 'grass',
-  height: elevation,
-  elevation,
+  height: level,
+  level,
+  elevation: 0.5 + level,
   color: new Color3(0, 0, 0),
 })
 
@@ -197,5 +200,169 @@ describe('animated reveal', () => {
 
     expect(store.playing).toBe(false)
     expect(store.visibleHexes).toHaveLength(3)
+  })
+})
+
+describe('party', () => {
+  it('has no position until a start is chosen', () => {
+    const store = setup()
+    expect(store.partyHex).toBeNull()
+
+    store.select({ q: 0, r: 0 })
+    expect(store.partyHex).toBe('0,0')
+  })
+
+  it('stays on the start hex while the whole route is shown at once', () => {
+    const store = setup()
+    route(store)
+
+    expect(store.isAuto).toBe(true)
+    expect(store.partyHex).toBe('0,0')
+  })
+
+  it('rides the head of the walked stretch while the route animates', () => {
+    const store = setup()
+    store.setSpeed(1)
+    route(store)
+    store.play()
+
+    expect(store.partyHex).toBe('0,0')
+    store.advanceReveal(2)
+    expect(store.partyHex).toBe(hexKey(store.route!.hexes[2]))
+  })
+
+  it('takes up the destination as its new start on arrival', () => {
+    const store = setup()
+    route(store)
+
+    expect(store.canArrive).toBe(true)
+    store.arrive()
+
+    expect(store.start).toBe('4,0')
+    expect(store.goal).toBeNull()
+    expect(store.route).toBeNull()
+    expect(store.partyHex).toBe('4,0')
+  })
+
+  it('will not arrive mid-journey', () => {
+    const store = setup()
+    store.setSpeed(1)
+    route(store)
+    store.play()
+    store.advanceReveal(1)
+
+    expect(store.canArrive).toBe(false)
+    store.arrive()
+    expect(store.start).toBe('0,0')
+  })
+
+  it('arrives once the animation reaches the destination', () => {
+    const store = setup()
+    store.setSpeed(1)
+    route(store)
+    store.play()
+    store.advanceReveal(store.route!.hexes.length)
+
+    expect(store.finished).toBe(true)
+    expect(store.canArrive).toBe(true)
+    store.arrive()
+    expect(store.start).toBe('4,0')
+  })
+})
+
+describe('fog of war', () => {
+  it('knows nothing until the party stands somewhere', () => {
+    const store = setup()
+    expect(store.visible.size).toBe(0)
+    expect(store.explored.size).toBe(0)
+  })
+
+  it('reveals what the party can see from where it stands', () => {
+    const store = setup()
+    store.setSight(2)
+    store.select({ q: 0, r: 0 })
+
+    // The field is level 1, below the treeline, so it buys no extra reach.
+    expect(store.visible.has('0,0')).toBe(true)
+    expect(store.visible.has('2,0')).toBe(true)
+    expect(store.visible.has('3,0')).toBe(false)
+  })
+
+  it('remembers ground the party has left behind', () => {
+    const store = setup()
+    store.setSight(1)
+    store.select({ q: -3, r: 0 })
+    store.select({ q: 3, r: 0 })
+    store.arrive()
+
+    expect(store.visible.has('-3,0')).toBe(false)
+    expect(store.explored.has('-3,0')).toBe(true)
+    expect(store.explored.has('3,0')).toBe(true)
+  })
+
+  it('carves a corridor of explored ground along the walked route', () => {
+    const store = setup()
+    store.setSight(1)
+    store.setSpeed(1)
+    store.select({ q: -4, r: 0 })
+    store.select({ q: 4, r: 0 })
+    store.play()
+
+    const walked = store.route!.hexes.length
+    for (let step = 0; step < walked; step++) store.advanceReveal(1)
+
+    for (const hex of store.route!.hexes) {
+      expect(store.explored.has(hexKey(hex))).toBe(true)
+    }
+  })
+
+  it('sees further from higher ground', () => {
+    const flat = setup()
+    flat.setSight(3)
+    flat.select({ q: 0, r: 0 })
+    const onTheFlat = flat.visible.size
+
+    setActivePinia(createPinia())
+    const summit = useHexMapStore()
+    const raised = flatField(6)
+    raised.set('0,0', tile({ q: 0, r: 0 }, 4))
+    summit.setTiles(raised)
+    summit.setSight(3)
+    summit.select({ q: 0, r: 0 })
+
+    expect(summit.visible.size).toBeGreaterThan(onTheFlat)
+  })
+
+  it('forgets everything but the ground the party is standing in', () => {
+    const store = setup()
+    store.setSight(1)
+    store.select({ q: -3, r: 0 })
+    store.select({ q: 3, r: 0 })
+    store.arrive()
+    expect(store.explored.size).toBeGreaterThan(store.visible.size)
+
+    store.forget()
+    expect(store.explored.size).toBe(store.visible.size)
+    expect(store.explored.has('3,0')).toBe(true)
+    expect(store.explored.has('-3,0')).toBe(false)
+  })
+
+  it('forgets the map when the terrain underneath it is replaced', () => {
+    const store = setup()
+    store.setSight(1)
+    store.select({ q: -3, r: 0 })
+    store.select({ q: 3, r: 0 })
+    store.arrive()
+
+    store.setTiles(flatField(6))
+    expect(store.explored.has('-3,0')).toBe(false)
+  })
+
+  it('clamps the sight setting to the slider range', () => {
+    const store = setup()
+    store.setSight(99)
+    expect(store.sight).toBe(MAX_SIGHT)
+    store.setSight(-4)
+    expect(store.sight).toBe(MIN_SIGHT)
   })
 })

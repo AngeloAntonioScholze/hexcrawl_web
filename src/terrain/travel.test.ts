@@ -5,28 +5,33 @@ import { createLayout } from '../hex/layout'
 import { createTerrain, type TerrainTile } from './terrain'
 import { CLIMB_MULTIPLIER, CLIMB_THRESHOLD, KM_PER_HEX, findRoute, stepCostKm } from './travel'
 
-const tile = (hex: Axial, elevation: number): TerrainTile => ({
+// The number is the mechanical level; the rendered height is derived from it so
+// nothing here can lean on the rendered number by accident.
+const tile = (hex: Axial, level: number): TerrainTile => ({
   hex,
   terrain: 'grass',
-  height: elevation,
-  elevation,
+  height: level,
+  level,
+  elevation: 0.5 + level,
   color: new Color3(0, 0, 0),
 })
 
-// Water is anything below sea level: negative height, flat sea-floor elevation.
+// Water is anything below sea level: negative height, the ground floor, and a
+// flat sea-floor elevation.
 const water = (hex: Axial): TerrainTile => ({
   hex,
   terrain: 'water',
   height: -0.5,
+  level: 0,
   elevation: 0.3,
   color: new Color3(0, 0, 0),
 })
 
 const mapOf = (entries: [Axial, number][]): Map<HexKey, TerrainTile> =>
-  new Map(entries.map(([hex, elevation]) => [hexKey(hex), tile(hex, elevation)]))
+  new Map(entries.map(([hex, level]) => [hexKey(hex), tile(hex, level)]))
 
-const flatField = (radius: number, elevation = 1): Map<HexKey, TerrainTile> =>
-  mapOf(range({ q: 0, r: 0 }, radius).map((hex) => [hex, elevation] as [Axial, number]))
+const flatField = (radius: number, level = 1): Map<HexKey, TerrainTile> =>
+  mapOf(range({ q: 0, r: 0 }, radius).map((hex) => [hex, level] as [Axial, number]))
 
 describe('stepCostKm', () => {
   const step = (from: number, to: number): number =>
@@ -40,9 +45,10 @@ describe('stepCostKm', () => {
     expect(step(5, 1)).toBe(KM_PER_HEX)
   })
 
-  it('charges plain distance for a rise below the threshold', () => {
-    expect(step(2, 2.1)).toBe(KM_PER_HEX)
-    expect(step(2, 3.9)).toBe(KM_PER_HEX)
+  it('reads the level and not the rendered height', () => {
+    const low = { ...tile({ q: 0, r: 0 }, 2), elevation: 0.5 }
+    const towering = { ...tile({ q: 1, r: 0 }, 2), elevation: 40 }
+    expect(stepCostKm(low, towering)).toBe(KM_PER_HEX)
   })
 
   it('charges double once the rise reaches the threshold', () => {
@@ -55,8 +61,8 @@ describe('stepCostKm', () => {
   })
 
   it('lets a party wade ashore at the plain rate', () => {
-    // Sea floor to shoreline, the heights the terrain generator actually uses.
-    expect(step(0.3, 0.5)).toBe(KM_PER_HEX)
+    // Water and the beach share the ground floor, so coming out is not a climb.
+    expect(stepCostKm(water({ q: 0, r: 0 }), tile({ q: 1, r: 0 }, 0))).toBe(KM_PER_HEX)
   })
 })
 
