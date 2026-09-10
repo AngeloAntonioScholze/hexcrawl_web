@@ -3,7 +3,7 @@ import { describe, expect, it } from 'vitest'
 import { hexKey, range, type Axial, type HexKey } from '../hex/coords'
 import { createLayout } from '../hex/layout'
 import { createTerrain, type TerrainTile } from './terrain'
-import { CLIMB_MULTIPLIER, KM_PER_HEX, findRoute, stepCostKm } from './travel'
+import { CLIMB_MULTIPLIER, CLIMB_THRESHOLD, KM_PER_HEX, findRoute, stepCostKm } from './travel'
 
 const tile = (hex: Axial, elevation: number): TerrainTile => ({
   hex,
@@ -29,24 +29,34 @@ const flatField = (radius: number, elevation = 1): Map<HexKey, TerrainTile> =>
   mapOf(range({ q: 0, r: 0 }, radius).map((hex) => [hex, elevation] as [Axial, number]))
 
 describe('stepCostKm', () => {
-  it('charges one hex for level ground', () => {
-    expect(stepCostKm(tile({ q: 0, r: 0 }, 2), tile({ q: 1, r: 0 }, 2))).toBe(KM_PER_HEX)
-  })
+  const step = (from: number, to: number): number =>
+    stepCostKm(tile({ q: 0, r: 0 }, from), tile({ q: 1, r: 0 }, to))
 
-  it('charges double for a climb', () => {
-    expect(stepCostKm(tile({ q: 0, r: 0 }, 2), tile({ q: 1, r: 0 }, 2.1))).toBe(
-      KM_PER_HEX * CLIMB_MULTIPLIER,
-    )
+  it('charges one hex for level ground', () => {
+    expect(step(2, 2)).toBe(KM_PER_HEX)
   })
 
   it('charges plain distance for a descent', () => {
-    expect(stepCostKm(tile({ q: 0, r: 0 }, 5), tile({ q: 1, r: 0 }, 1))).toBe(KM_PER_HEX)
+    expect(step(5, 1)).toBe(KM_PER_HEX)
   })
 
-  it('charges the same for any climb, however steep', () => {
-    const gentle = stepCostKm(tile({ q: 0, r: 0 }, 1), tile({ q: 1, r: 0 }, 1.01))
-    const sheer = stepCostKm(tile({ q: 0, r: 0 }, 1), tile({ q: 1, r: 0 }, 40))
-    expect(gentle).toBe(sheer)
+  it('charges plain distance for a rise below the threshold', () => {
+    expect(step(2, 2.1)).toBe(KM_PER_HEX)
+    expect(step(2, 3.9)).toBe(KM_PER_HEX)
+  })
+
+  it('charges double once the rise reaches the threshold', () => {
+    expect(step(2, 2 + CLIMB_THRESHOLD)).toBe(KM_PER_HEX * CLIMB_MULTIPLIER)
+    expect(step(2, 20)).toBe(KM_PER_HEX * CLIMB_MULTIPLIER)
+  })
+
+  it('charges the same for any climb past the threshold, however steep', () => {
+    expect(step(1, 1 + CLIMB_THRESHOLD)).toBe(step(1, 400))
+  })
+
+  it('lets a party wade ashore at the plain rate', () => {
+    // Sea floor to shoreline, the heights the terrain generator actually uses.
+    expect(step(0.3, 0.5)).toBe(KM_PER_HEX)
   })
 })
 
@@ -70,8 +80,10 @@ describe('findRoute', () => {
   })
 
   it('charges double for every climbing step', () => {
-    // A staircase rising one unit per hex along +q.
-    const tiles = mapOf(range({ q: 0, r: 0 }, 6).map((hex) => [hex, 1 + hex.q] as [Axial, number]))
+    // A staircase rising a full threshold per hex along +q.
+    const tiles = mapOf(
+      range({ q: 0, r: 0 }, 6).map((hex) => [hex, 1 + hex.q * CLIMB_THRESHOLD] as [Axial, number]),
+    )
     const uphill = findRoute(tiles, { q: 0, r: 0 }, { q: 3, r: 0 })!
     expect(uphill.km).toBe(3 * KM_PER_HEX * CLIMB_MULTIPLIER)
 
@@ -84,9 +96,9 @@ describe('findRoute', () => {
   it('contours around a sustained climb instead of going over it', () => {
     const tiles = flatField(6)
     for (const [q, elevation] of [
-      [1, 2],
-      [2, 3],
-      [3, 4],
+      [1, 3],
+      [2, 6],
+      [3, 9],
     ]) {
       tiles.set(hexKey({ q, r: 0 }), tile({ q, r: 0 }, elevation))
     }

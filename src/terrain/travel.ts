@@ -5,8 +5,15 @@ import { isWater, type TerrainTile } from './terrain'
 /** Every hex is ten kilometres across. */
 export const KM_PER_HEX = 10
 
-/** Climbing costs double; holding level or descending costs the plain distance. */
+/** A real climb costs double; gentle rises, level ground and descents do not. */
 export const CLIMB_MULTIPLIER = 2
+
+/**
+ * How much higher the next hex must be before it counts as a climb. Below this
+ * the ground is merely undulating, so wading ashore or walking up a shallow
+ * slope costs the plain distance.
+ */
+export const CLIMB_THRESHOLD = 2
 
 export interface RouteOptions {
   /** Off by default: parties travel on foot and cannot cross open water. */
@@ -21,7 +28,8 @@ export interface Route {
 }
 
 export function stepCostKm(from: TerrainTile, to: TerrainTile): number {
-  return to.elevation > from.elevation ? KM_PER_HEX * CLIMB_MULTIPLIER : KM_PER_HEX
+  const rise = to.elevation - from.elevation
+  return rise >= CLIMB_THRESHOLD ? KM_PER_HEX * CLIMB_MULTIPLIER : KM_PER_HEX
 }
 
 export function findRoute(

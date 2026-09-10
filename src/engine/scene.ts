@@ -12,11 +12,12 @@ import type { PickingInfo } from '@babylonjs/core/Collisions/pickingInfo'
 // returns an empty PickingInfo, so every pick silently misses.
 import '@babylonjs/core/Culling/ray'
 import { Scene } from '@babylonjs/core/scene'
-import type { Axial } from '../hex/coords'
+import { hexKey, type Axial } from '../hex/coords'
 import { hexToWorld, type Layout } from '../hex/layout'
 import { createIsoCamera, type IsoCamera } from './camera'
 import { attachIsoControls } from './controls'
 import { createHexGrid, type HexGrid, type HexTile } from './hexGrid'
+import { createRouteArrows, type RouteArrows } from './routeArrows'
 
 export interface HexSceneOptions {
   layout: Layout
@@ -32,6 +33,7 @@ export interface HexScene {
   scene: Scene
   iso: IsoCamera
   grid: HexGrid
+  arrows: RouteArrows
   resize(): void
   dispose(): void
 }
@@ -100,6 +102,13 @@ export function createHexScene(canvas: HTMLCanvasElement, options: HexSceneOptio
     gap: options.gap,
     bevel: options.bevel,
   })
+
+  const elevations = new Map(options.tiles.map((tile) => [hexKey(tile.hex), tile.elevation]))
+  const arrows = createRouteArrows(
+    scene,
+    options.layout,
+    (hex) => elevations.get(hexKey(hex)) ?? 0,
+  )
   addGroundSlab(scene, bounds, options.layout.size * 2)
 
   // Plain axial coordinates cross this boundary, never Babylon objects, so
@@ -125,11 +134,13 @@ export function createHexScene(canvas: HTMLCanvasElement, options: HexSceneOptio
     scene,
     iso,
     grid,
+    arrows,
     resize,
     dispose(): void {
       scene.onPointerObservable.remove(pointerObserver)
       detachControls()
       engine.stopRenderLoop()
+      arrows.dispose()
       grid.dispose()
       iso.dispose()
       scene.dispose()

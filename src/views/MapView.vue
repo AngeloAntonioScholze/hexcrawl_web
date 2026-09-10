@@ -6,6 +6,22 @@ import { KM_PER_HEX } from '../terrain/travel'
 
 const store = useHexMapStore()
 
+const speedLabel = computed(() => (store.isAuto ? 'auto' : `${store.speed}x`))
+
+const playLabel = computed(() => {
+  if (store.playing) return 'stop'
+  return store.finished ? 'replay' : 'start'
+})
+
+const onSpeed = (event: Event): void => {
+  store.setSpeed(Number((event.target as HTMLInputElement).value))
+}
+
+const onPlay = (): void => {
+  if (store.playing) store.stop()
+  else store.play()
+}
+
 const hint = computed(() => {
   if (!store.start) return 'click a hex to set the start'
   if (!store.goal) return 'click another hex to set the destination'
@@ -40,10 +56,16 @@ const straightLine = computed(() =>
 
       <dl v-if="store.route" class="route">
         <dt>hexes</dt>
-        <dd>{{ store.route.steps }}</dd>
+        <dd>
+          <template v-if="store.isAuto">{{ store.route.steps }}</template>
+          <template v-else>{{ Math.max(0, store.visibleHexes.length - 1) }} / {{ store.route.steps }}</template>
+        </dd>
 
         <dt>travel</dt>
-        <dd>{{ store.route.km }} km</dd>
+        <dd>
+          <template v-if="store.isAuto">{{ store.route.km }} km</template>
+          <template v-else>{{ store.revealedKm }} / {{ store.route.km }} km</template>
+        </dd>
 
         <dt>flat</dt>
         <dd class="dim">{{ straightLine }}</dd>
@@ -53,6 +75,24 @@ const straightLine = computed(() =>
         <input v-model="store.allowWater" type="checkbox" />
         <span>allow water crossings</span>
       </label>
+
+      <div class="control stack">
+        <div class="row">
+          <span>travel speed</span>
+          <span class="value">{{ speedLabel }}</span>
+        </div>
+        <input
+          :value="store.speed"
+          type="range"
+          min="0"
+          max="3"
+          step="1"
+          @input="onSpeed"
+        />
+        <button type="button" :disabled="store.isAuto || !store.route" @click="onPlay">
+          {{ playLabel }}
+        </button>
+      </div>
 
       <p>{{ hint }}</p>
       <p class="dim">drag to pan · wheel to zoom · Q / E to rotate</p>
@@ -136,5 +176,50 @@ p {
   margin: 0;
   accent-color: #7aa2c8;
   cursor: pointer;
+}
+
+.control.stack {
+  display: block;
+}
+
+.control.stack .row {
+  display: flex;
+  justify-content: space-between;
+  gap: 1rem;
+}
+
+.control.stack .value {
+  color: var(--ink);
+  font-variant-numeric: tabular-nums;
+}
+
+.control.stack span {
+  color: var(--ink-dim);
+}
+
+.control.stack input[type='range'] {
+  width: 100%;
+  margin: 0.4rem 0 0.5rem;
+}
+
+button {
+  width: 100%;
+  padding: 0.35rem 0.6rem;
+  border: 1px solid var(--line);
+  border-radius: 0.35rem;
+  background: var(--surface);
+  color: var(--ink);
+  font: inherit;
+  font-size: 0.78rem;
+  cursor: pointer;
+}
+
+button:hover:not(:disabled) {
+  border-color: #7aa2c8;
+}
+
+button:disabled {
+  color: var(--ink-dim);
+  cursor: default;
 }
 </style>
