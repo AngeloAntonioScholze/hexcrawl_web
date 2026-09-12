@@ -3,6 +3,7 @@
   "private": true,
   "type": "module",
   "scripts": {
+    "bench": "bun run scripts/bench-fog.ts",
     "build": "vue-tsc --noEmit && vite build",
     "dev": "vite",
     "format": "prettier --write .",
