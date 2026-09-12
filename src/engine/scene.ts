@@ -38,6 +38,8 @@ export interface HexScene {
   arrows: RouteArrows
   party: PartyToken
   vision: VisionOverlay
+  /** Re-terrains the grid under everything already drawn on it. */
+  setTiles(tiles: readonly HexTile[]): void
   resize(): void
   dispose(): void
 }
@@ -107,6 +109,8 @@ export function createHexScene(canvas: HTMLCanvasElement, options: HexSceneOptio
     bevel: options.bevel,
   })
 
+  // Mutable and captured by the lookups below, so re-terraining the map lifts
+  // the arrows, the pawn and the sight plates along with the ground.
   const elevations = new Map(options.tiles.map((tile) => [hexKey(tile.hex), tile.elevation]))
   const elevationOf = (hex: Axial): number => elevations.get(hexKey(hex)) ?? 0
   const arrows = createRouteArrows(scene, options.layout, elevationOf)
@@ -117,7 +121,10 @@ export function createHexScene(canvas: HTMLCanvasElement, options: HexSceneOptio
   // Plain axial coordinates cross this boundary, never Babylon objects, so
   // nothing engine-owned ends up inside Vue's reactivity.
   const pickHex = (): Axial | null =>
-    hexFromPick(grid, scene.pick(scene.pointerX, scene.pointerY, (mesh) => mesh === grid.mesh))
+    hexFromPick(
+      grid,
+      scene.pick(scene.pointerX, scene.pointerY, (mesh) => mesh === grid.mesh),
+    )
 
   const pointerObserver = scene.onPointerObservable.add((info) => {
     if (info.type === PointerEventTypes.POINTERMOVE) options.onHover?.(pickHex())
@@ -140,6 +147,13 @@ export function createHexScene(canvas: HTMLCanvasElement, options: HexSceneOptio
     arrows,
     party,
     vision,
+
+    setTiles(next): void {
+      elevations.clear()
+      for (const tile of next) elevations.set(hexKey(tile.hex), tile.elevation)
+      grid.setTiles(next)
+    },
+
     resize,
     dispose(): void {
       scene.onPointerObservable.remove(pointerObserver)

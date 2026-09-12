@@ -25,7 +25,10 @@ let iso: IsoCamera
 let grid: HexGrid
 
 const screenPick = (x: number, y: number): Axial | null =>
-  hexFromPick(grid, scene.pick(x, y, (mesh) => mesh === grid.mesh))
+  hexFromPick(
+    grid,
+    scene.pick(x, y, (mesh) => mesh === grid.mesh),
+  )
 
 // Where a hex's top face lands on screen under the current camera.
 const screenPositionOf = (hex: Axial): { x: number; y: number } => {

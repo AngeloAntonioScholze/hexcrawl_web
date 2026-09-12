@@ -5,7 +5,11 @@
   --ink: #e6e8ec;
   --ink-dim: #8b929e;
   --line: #2b303a;
-  font-family: system-ui, -apple-system, 'Segoe UI', sans-serif;
+  font-family:
+    system-ui,
+    -apple-system,
+    'Segoe UI',
+    sans-serif;
 }
 
 * {

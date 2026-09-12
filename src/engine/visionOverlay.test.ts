@@ -92,7 +92,13 @@ describe('createVisionOverlay', () => {
 
   it('replaces the whole field rather than piling plates up', () => {
     overlay.setShown(true)
-    overlay.setField([{ q: 0, r: 0 }, { q: 1, r: 0 }], [{ q: 2, r: 0 }])
+    overlay.setField(
+      [
+        { q: 0, r: 0 },
+        { q: 1, r: 0 },
+      ],
+      [{ q: 2, r: 0 }],
+    )
     overlay.setField([{ q: 5, r: 0 }], [])
 
     expect(overlay.litCount).toBe(1)

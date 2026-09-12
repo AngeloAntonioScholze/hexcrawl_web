@@ -219,3 +219,56 @@ describe('fog', () => {
     expectColor(0, lit as [number, number, number])
   })
 })
+
+describe('re-terraining', () => {
+  const OTHER = new Color3(0.9, 0.1, 0.1)
+
+  const reshaped = (): HexTile[] =>
+    tiles.map((tile) => ({ ...tile, elevation: tile.elevation + 5, color: OTHER }))
+
+  it('takes the new colours', () => {
+    grid.setTiles(reshaped())
+
+    const [r, g, b] = grid.colorAt(0)
+    expect(r).toBeCloseTo(OTHER.r, 6)
+    expect(g).toBeCloseTo(OTHER.g, 6)
+    expect(b).toBeCloseTo(OTHER.b, 6)
+  })
+
+  // A static instance buffer cannot be re-uploaded, and nothing on the CPU side
+  // shows it: the matrices rewrite happily and the GPU keeps the old ones.
+  it('keeps both instance buffers updatable, or nothing reaches the GPU', () => {
+    expect(grid.mesh.getVertexBuffer('world0')?.isUpdatable()).toBe(true)
+    expect(grid.mesh.getVertexBuffer('instanceColor')?.isUpdatable()).toBe(true)
+  })
+
+  it('takes the new heights', () => {
+    grid.setTiles(reshaped())
+
+    const matrices = grid.mesh.thinInstanceGetWorldMatrices()
+    tiles.forEach((tile, index) => {
+      expect(matrices[index].m[5]).toBeCloseTo(tile.elevation + 5, 5)
+    })
+  })
+
+  it('keeps the tint on top of the new ground', () => {
+    const key = hexKey(tiles[0].hex)
+    grid.setOverlay(new Map([[key, new Color3(0, 1, 0)]]))
+    grid.setTiles(reshaped())
+
+    const [r, g, b] = grid.colorAt(0)
+    expect([r, g, b]).toEqual([0, 1, 0])
+  })
+
+  it('keeps the fog over the new ground', () => {
+    const key = hexKey(tiles[0].hex)
+    grid.setFog(new Map([[key, 0]]))
+    grid.setTiles(reshaped())
+
+    expect(grid.colorAt(0)[0]).toBeCloseTo(0.055, 6)
+  })
+
+  it('refuses a tile list that does not match the grid', () => {
+    expect(() => grid.setTiles(tiles.slice(1))).toThrow(RangeError)
+  })
+})

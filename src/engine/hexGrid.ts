@@ -36,6 +36,12 @@ export interface HexGrid {
    * colour. Anything absent is fully clear, so an empty map lifts the fog.
    */
   setFog(clarity: ReadonlyMap<HexKey, number>): void
+  /**
+   * Re-terrains the grid in place: same hexes in the same order, new heights
+   * and colours. The tint and fog layers ride along untouched, so regenerating
+   * a world does not disturb what the party has been shown.
+   */
+  setTiles(tiles: readonly HexTile[]): void
   dispose(): void
 }
 
@@ -79,14 +85,18 @@ export function createHexGrid(
   const scaling = Vector3.One()
   const translation = Vector3.Zero()
 
-  tiles.forEach((tile, index) => {
+  const writeTile = (tile: HexTile, index: number): void => {
     const world = hexToWorld(layout, tile.hex)
     scaling.set(1, Math.max(MIN_ELEVATION, tile.elevation), 1)
     translation.set(world.x, 0, world.z)
     Matrix.Compose(scaling, Quaternion.Identity(), translation).copyToArray(matrices, index * 16)
 
-    colors.set([tile.color.r, tile.color.g, tile.color.b, 1], index * 4)
     baseColors.set([tile.color.r, tile.color.g, tile.color.b, 1], index * 4)
+  }
+
+  tiles.forEach((tile, index) => {
+    writeTile(tile, index)
+    colors.set(baseColors.subarray(index * 4, index * 4 + 4), index * 4)
 
     const key = hexKey(tile.hex)
     indexByKey.set(key, index)
@@ -94,7 +104,9 @@ export function createHexGrid(
     keyByIndex.push(key)
   })
 
-  mesh.thinInstanceSetBuffer('matrix', matrices, 16, true)
+  // Both buffers stay updatable: a static buffer cannot be re-uploaded, so
+  // re-terraining the grid would rewrite the matrices and never reach the GPU.
+  mesh.thinInstanceSetBuffer('matrix', matrices, 16, false)
   mesh.thinInstanceSetBuffer('color', colors, 4, false)
   mesh.thinInstanceEnablePicking = true
 
@@ -175,6 +187,18 @@ export function createHexGrid(
       }
 
       if (changed) mesh.thinInstanceBufferUpdated('color')
+    },
+
+    setTiles(next): void {
+      if (next.length !== count) {
+        throw new RangeError(`expected ${count} tiles to re-terrain the grid, got ${next.length}`)
+      }
+
+      next.forEach(writeTile)
+      for (let index = 0; index < count; index++) composite(index)
+
+      mesh.thinInstanceBufferUpdated('matrix')
+      mesh.thinInstanceBufferUpdated('color')
     },
 
     dispose(): void {

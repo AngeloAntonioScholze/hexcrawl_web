@@ -4,7 +4,12 @@ import { Scene } from '@babylonjs/core/scene'
 import { afterEach, beforeEach, describe, expect, it } from 'vitest'
 import { hexKey, neighbors, type Axial } from '../hex/coords'
 import { createLayout, hexToWorld } from '../hex/layout'
-import { buildArrowGeometry, createRouteArrows, insetOutline, type RouteArrows } from './routeArrows'
+import {
+  buildArrowGeometry,
+  createRouteArrows,
+  insetOutline,
+  type RouteArrows,
+} from './routeArrows'
 
 const layout = createLayout(2)
 const elevations = new Map<string, number>()

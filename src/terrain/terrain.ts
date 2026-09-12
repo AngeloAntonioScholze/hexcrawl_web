@@ -3,14 +3,7 @@ import type { Axial } from '../hex/coords'
 import { hexToWorld, type Layout } from '../hex/layout'
 import { createFbm, type FbmOptions } from './perlin'
 
-export type TerrainId =
-  | 'deepWater'
-  | 'water'
-  | 'sand'
-  | 'grass'
-  | 'forest'
-  | 'mountains'
-  | 'peaks'
+export type TerrainId = 'deepWater' | 'water' | 'sand' | 'grass' | 'forest' | 'mountains' | 'peaks'
 
 export interface TerrainTile {
   hex: Axial
@@ -73,7 +66,7 @@ const BANDS: readonly Band[] = [
 /** The highest step the terrain reaches. */
 export const MAX_LEVEL = BANDS[BANDS.length - 1].level
 
-const DEFAULTS = {
+export const TERRAIN_DEFAULTS = {
   seed: 1337,
   scale: 55,
   seaFloor: 0.3,
@@ -98,14 +91,14 @@ export function createTerrain(
   layout: Layout,
   options: TerrainOptions = {},
 ): (hex: Axial) => TerrainTile {
-  const seed = options.seed ?? DEFAULTS.seed
-  const scale = options.scale ?? DEFAULTS.scale
-  const seaFloor = options.seaFloor ?? DEFAULTS.seaFloor
-  const shore = options.shore ?? DEFAULTS.shore
-  const relief = options.relief ?? DEFAULTS.relief
-  const reliefCurve = options.reliefCurve ?? DEFAULTS.reliefCurve
-  const contrast = options.contrast ?? DEFAULTS.contrast
-  const seaLevel = options.seaLevel ?? DEFAULTS.seaLevel
+  const seed = options.seed ?? TERRAIN_DEFAULTS.seed
+  const scale = options.scale ?? TERRAIN_DEFAULTS.scale
+  const seaFloor = options.seaFloor ?? TERRAIN_DEFAULTS.seaFloor
+  const shore = options.shore ?? TERRAIN_DEFAULTS.shore
+  const relief = options.relief ?? TERRAIN_DEFAULTS.relief
+  const reliefCurve = options.reliefCurve ?? TERRAIN_DEFAULTS.reliefCurve
+  const contrast = options.contrast ?? TERRAIN_DEFAULTS.contrast
+  const seaLevel = options.seaLevel ?? TERRAIN_DEFAULTS.seaLevel
 
   const noise = createFbm(seed, options)
 

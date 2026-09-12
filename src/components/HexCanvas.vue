@@ -7,6 +7,7 @@ import { useRouteReveal } from '../composables/useRouteReveal'
 import { useHexScene } from '../engine/useHexScene'
 import { useHexMapStore } from '../stores/hexMap'
 import { createTerrain, type TerrainTile } from '../terrain/terrain'
+import type { HexTile } from '../engine/hexGrid'
 
 const props = withDefaults(
   defineProps<{
@@ -14,8 +15,6 @@ const props = withDefaults(
     hexSize?: number
     gap?: number
     bevel?: number
-    seed?: number
-    scale?: number
     octaves?: number
   }>(),
   {
@@ -23,8 +22,6 @@ const props = withDefaults(
     hexSize: 2,
     gap: 0.06,
     bevel: 0.14,
-    seed: 1337,
-    scale: 55,
     octaves: 4,
   },
 )
@@ -43,13 +40,18 @@ const store = useHexMapStore()
 useRouteReveal()
 
 const layout = createLayout(props.hexSize)
-const terrain = createTerrain(layout, {
-  seed: props.seed,
-  scale: props.scale,
-  octaves: props.octaves,
-})
-const tiles = spiral({ q: 0, r: 0 }, props.radius).map(terrain)
-store.setTiles(new Map<HexKey, TerrainTile>(tiles.map((tile) => [hexKey(tile.hex), tile])))
+const field = spiral({ q: 0, r: 0 }, props.radius)
+
+// The hex set never changes, only what the terrain makes of it, so a new world
+// rewrites the grid in place instead of tearing the scene down.
+const generate = (): TerrainTile[] => {
+  const terrain = createTerrain(layout, { ...store.terrain, octaves: props.octaves })
+  const next = field.map(terrain)
+  store.setTiles(new Map<HexKey, TerrainTile>(next.map((tile) => [hexKey(tile.hex), tile])))
+  return next
+}
+
+const tiles = generate()
 
 const { hexScene } = useHexScene(canvas, {
   layout,
@@ -112,7 +114,7 @@ watch(
 )
 
 watch(
-  () => store.visibleHexes,
+  () => store.pathHexes,
   (hexes) => hexScene.value?.arrows.setPath(hexes),
 )
 
@@ -121,17 +123,32 @@ watch(
   (key) => hexScene.value?.party.setHex(key ? parseKey(key) : null),
 )
 
-// The scene only exists from mount onward, so state that was already settled
-// before then has to be pushed across once it appears.
-watch(hexScene, (created) => {
-  if (!created) return
+// Everything the store knows, pushed at the scene in one go. Needed both when
+// the scene first appears, since state settled before mount reaches no watcher,
+// and after a new world, since every layer is pinned to heights that just moved.
+const pushEverything = (created: NonNullable<typeof hexScene.value>): void => {
   created.grid.setOverlay(overlay.value)
   created.grid.setFog(fog.value)
-  created.arrows.setPath(store.visibleHexes)
+  created.arrows.setPath(store.pathHexes)
   created.party.setHex(store.partyHex ? parseKey(store.partyHex) : null)
   created.vision.setField(sightField.value.lit, sightField.value.shadow)
   created.vision.setShown(store.showSight)
+}
+
+watch(hexScene, (created) => {
+  if (created) pushEverything(created)
 })
+
+watch(
+  () => store.terrain,
+  () => {
+    const next: HexTile[] = generate()
+    const created = hexScene.value
+    if (!created) return
+    created.setTiles(next)
+    pushEverything(created)
+  },
+)
 </script>
 
 <template>

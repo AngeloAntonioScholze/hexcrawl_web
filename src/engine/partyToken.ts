@@ -51,23 +51,29 @@ const SIDES = 6
 function buildPawn(scene: Scene, height: number): Mesh {
   const plinth = MeshBuilder.CreateCylinder(
     'partyPlinth',
-    { height: height * 0.2, diameterTop: height * 0.56, diameterBottom: height * 0.74, tessellation: SIDES },
+    {
+      height: height * 0.2,
+      diameterTop: height * 0.56,
+      diameterBottom: height * 0.74,
+      tessellation: SIDES,
+    },
     scene,
   )
   plinth.position.y = height * 0.1
 
   const body = MeshBuilder.CreateCylinder(
     'partyBody',
-    { height: height * 0.58, diameterTop: height * 0.16, diameterBottom: height * 0.5, tessellation: SIDES },
+    {
+      height: height * 0.58,
+      diameterTop: height * 0.16,
+      diameterBottom: height * 0.5,
+      tessellation: SIDES,
+    },
     scene,
   )
   body.position.y = height * 0.49
 
-  const head = MeshBuilder.CreateSphere(
-    'partyHead',
-    { diameter: height * 0.3, segments: 8 },
-    scene,
-  )
+  const head = MeshBuilder.CreateSphere('partyHead', { diameter: height * 0.3, segments: 8 }, scene)
   head.position.y = height * 0.85
 
   const merged = Mesh.MergeMeshes([plinth, body, head], true, true)

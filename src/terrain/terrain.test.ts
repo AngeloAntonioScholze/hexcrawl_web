@@ -27,7 +27,15 @@ describe('bandFor', () => {
   })
 
   it('climbs through the bands in order', () => {
-    const order: TerrainId[] = ['deepWater', 'water', 'sand', 'grass', 'forest', 'mountains', 'peaks']
+    const order: TerrainId[] = [
+      'deepWater',
+      'water',
+      'sand',
+      'grass',
+      'forest',
+      'mountains',
+      'peaks',
+    ]
     const seen = [-0.5, -0.1, 0.03, 0.15, 0.35, 0.6, 0.9].map((h) => bandFor(h).id)
     expect(seen).toEqual(order)
   })

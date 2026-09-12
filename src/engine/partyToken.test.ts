@@ -66,7 +66,11 @@ describe('createPartyToken', () => {
   })
 
   it('bobs around the tile height without drifting off it', () => {
-    const bobbing = createPartyToken(scene, layout, elevationOf, { lift: 0, bob: 0.25, bobPeriod: 2 })
+    const bobbing = createPartyToken(scene, layout, elevationOf, {
+      lift: 0,
+      bob: 0.25,
+      bobPeriod: 2,
+    })
     bobbing.setHex({ q: 0, r: 0 })
 
     bobbing.advanceBob(0.5)

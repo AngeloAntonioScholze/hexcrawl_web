@@ -109,7 +109,11 @@ describe('round', () => {
   })
 
   it('never returns negative zero', () => {
-    for (const frac of [{ q: -0.2, r: 0.1 }, { q: 0.1, r: -0.2 }, { q: -0.1, r: -0.1 }]) {
+    for (const frac of [
+      { q: -0.2, r: 0.1 },
+      { q: 0.1, r: -0.2 },
+      { q: -0.1, r: -0.1 },
+    ]) {
       const result = round(frac)
       expect(Object.is(result.q, -0)).toBe(false)
       expect(Object.is(result.r, -0)).toBe(false)
