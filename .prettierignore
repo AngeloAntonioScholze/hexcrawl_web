@@ -1,0 +1,11 @@
+dist
+coverage
+bun.lock
+
+# Owned by tools, not by us: beads rewrites the managed blocks in these and
+# reflowing them would fight the generator on every sync.
+.beads
+.agents
+.claude
+AGENTS.md
+CLAUDE.md
