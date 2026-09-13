@@ -63,3 +63,33 @@ export function findRoute(
   if (!result) return null
   return { hexes: result.path, steps: result.path.length - 1, km: result.cost }
 }
+
+/**
+ * One route per leg, each starting where the last one ended. A single leg that
+ * cannot be walked sinks the whole chain: half a journey is not an order.
+ */
+export function chainRoute(
+  field: TerrainField,
+  start: Axial,
+  waypoints: readonly Axial[],
+  options: RouteOptions = {},
+): Route[] | null {
+  const legs: Route[] = []
+  let from = start
+  for (const to of waypoints) {
+    const leg = findRoute(field, from, to, options)
+    if (!leg) return null
+    legs.push(leg)
+    from = to
+  }
+  return legs
+}
+
+/** The legs laid end to end, the hex each one shares with the next counted once. */
+export function joinLegs(start: Axial, legs: readonly Route[]): Route {
+  return {
+    hexes: [start, ...legs.flatMap((leg) => leg.hexes.slice(1))],
+    steps: legs.reduce((total, leg) => total + leg.steps, 0),
+    km: legs.reduce((total, leg) => total + leg.km, 0),
+  }
+}

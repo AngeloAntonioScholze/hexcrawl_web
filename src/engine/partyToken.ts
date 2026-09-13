@@ -2,9 +2,8 @@ import { StandardMaterial } from '@babylonjs/core/Materials/standardMaterial'
 import { Color3 } from '@babylonjs/core/Maths/math.color'
 import { Vector3 } from '@babylonjs/core/Maths/math.vector'
 import { Mesh } from '@babylonjs/core/Meshes/mesh'
-import { MeshBuilder } from '@babylonjs/core/Meshes/meshBuilder'
-import '@babylonjs/core/Meshes/Builders/cylinderBuilder'
-import '@babylonjs/core/Meshes/Builders/sphereBuilder'
+import { CreateCylinder } from '@babylonjs/core/Meshes/Builders/cylinderBuilder'
+import { CreateSphere } from '@babylonjs/core/Meshes/Builders/sphereBuilder'
 import type { Scene } from '@babylonjs/core/scene'
 import type { Axial } from '../hex/coords'
 import { hexToWorld, type Layout } from '../hex/layout'
@@ -72,7 +71,7 @@ const MIN_CROWD_SCALE = 0.45
  * costs a single draw call and moves as a unit.
  */
 function buildPawn(scene: Scene, height: number): Mesh {
-  const plinth = MeshBuilder.CreateCylinder(
+  const plinth = CreateCylinder(
     'partyPlinth',
     {
       height: height * 0.2,
@@ -84,7 +83,7 @@ function buildPawn(scene: Scene, height: number): Mesh {
   )
   plinth.position.y = height * 0.1
 
-  const body = MeshBuilder.CreateCylinder(
+  const body = CreateCylinder(
     'partyBody',
     {
       height: height * 0.58,
@@ -96,7 +95,7 @@ function buildPawn(scene: Scene, height: number): Mesh {
   )
   body.position.y = height * 0.49
 
-  const head = MeshBuilder.CreateSphere('partyHead', { diameter: height * 0.3, segments: 8 }, scene)
+  const head = CreateSphere('partyHead', { diameter: height * 0.3, segments: 8 }, scene)
   head.position.y = height * 0.85
 
   const merged = Mesh.MergeMeshes([plinth, body, head], true, true)

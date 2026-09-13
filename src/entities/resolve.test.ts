@@ -46,6 +46,13 @@ const standing = (at: HexKey, over: Partial<EntityState> = {}): EntityState => (
 const east = (count: number): HexKey[] =>
   Array.from({ length: count + 1 }, (_, q) => hexKey({ q, r: 0 }))
 
+/** A one-leg order along the route; a route of one hex has nowhere to go. */
+const move = (route: HexKey[], waypoints = route.length > 1 ? route.slice(-1) : []): Action => ({
+  kind: 'move',
+  route,
+  waypoints,
+})
+
 /** Runs `turns` turns over one entity, the order given on the first of them. */
 const run = (
   who: Entity,
@@ -77,13 +84,7 @@ describe('the cost of a step', () => {
 
 describe('resolving a turn', () => {
   it('crosses a hex a turn at a pace of one', () => {
-    const { state, trail } = run(
-      entity(),
-      flatField(4),
-      standing('0,0'),
-      { kind: 'move', route: east(3) },
-      3,
-    )
+    const { state, trail } = run(entity(), flatField(4), standing('0,0'), move(east(3)), 3)
 
     expect(trail).toEqual([['1,0'], ['2,0'], ['3,0']])
     expect(state.at).toBe('3,0')
@@ -91,26 +92,14 @@ describe('resolving a turn', () => {
   })
 
   it('takes two turns over a climb, and stands still on the first of them', () => {
-    const { trail } = run(
-      entity(),
-      ridgeField(4),
-      standing('0,0'),
-      { kind: 'move', route: east(3) },
-      4,
-    )
+    const { trail } = run(entity(), ridgeField(4), standing('0,0'), move(east(3)), 4)
 
     expect(trail).toEqual([['1,0'], [], ['2,0'], ['3,0']])
   })
 
   it('carries a caravan half-step between turns rather than losing it', () => {
     const caravan = entity({ id: 'caravan', kind: 'caravan', ...KIND_DEFAULTS.caravan })
-    const { state, trail } = run(
-      caravan,
-      flatField(4),
-      standing('0,0'),
-      { kind: 'move', route: east(2) },
-      4,
-    )
+    const { state, trail } = run(caravan, flatField(4), standing('0,0'), move(east(2)), 4)
 
     expect(trail).toEqual([[], ['1,0'], [], ['2,0']])
     expect(state.carry).toBe(0)
@@ -138,7 +127,7 @@ describe('resolving a turn', () => {
       fieldFromTiles(tiles),
       [who],
       new Map([[who.id, standing('0,0')]]),
-      new Map<string, Action>([[who.id, { kind: 'move', route: east(3) }]]),
+      new Map<string, Action>([[who.id, move(east(3))]]),
     )
 
     const second = resolveTurn(
@@ -146,7 +135,7 @@ describe('resolving a turn', () => {
       fieldFromTiles(tiles),
       [who],
       first.states,
-      new Map<string, Action>([[who.id, { kind: 'move', route: ['1,0', '1,-1'] }]]),
+      new Map<string, Action>([[who.id, move(['1,0', '1,-1'])]]),
     )
 
     expect(second.records[0].entered).toEqual(['1,-1'])
@@ -185,7 +174,7 @@ describe('resolving a turn', () => {
       fieldFromTiles(tiles),
       [who],
       states,
-      new Map<string, Action>([[who.id, { kind: 'move', route: east(5) }]]),
+      new Map<string, Action>([[who.id, move(east(5))]]),
     )
 
     expect(moved.records[0].entered).toEqual(['1,0'])
@@ -201,7 +190,7 @@ describe('resolving a turn', () => {
       fieldFromTiles(tiles),
       [scout],
       new Map([[scout.id, standing('0,0')]]),
-      new Map<string, Action>([[scout.id, { kind: 'move', route: ['0,0'] }]]),
+      new Map<string, Action>([[scout.id, move(['0,0'])]]),
     )
 
     expect(idle.states.get(scout.id)!.carry).toBe(MAX_CARRY)
@@ -238,7 +227,7 @@ describe('resolving a turn', () => {
       fieldFromTiles(flatField(4)),
       [who],
       new Map([[who.id, idleState()]]),
-      new Map<string, Action>([[who.id, { kind: 'move', route: east(2) }]]),
+      new Map<string, Action>([[who.id, move(east(2))]]),
     )
 
     expect(records[0].from).toBeNull()
@@ -259,12 +248,60 @@ describe('resolving a turn', () => {
         [scout.id, standing('0,0')],
       ]),
       new Map<string, Action>([
-        [party.id, { kind: 'move', route: east(4) }],
-        [scout.id, { kind: 'move', route: east(4) }],
+        [party.id, move(east(4))],
+        [scout.id, move(east(4))],
       ]),
     )
 
     expect(states.get(party.id)!.at).toBe('1,0')
     expect(states.get(scout.id)!.at).toBe('2,0')
+  })
+})
+
+describe('walking a chain of legs', () => {
+  it('drops each stop once it is reached and keeps the ones ahead', () => {
+    const { state, trail } = run(
+      entity(),
+      flatField(4),
+      standing('0,0'),
+      move(east(3), ['1,0', '3,0']),
+      2,
+    )
+
+    expect(trail).toEqual([['1,0'], ['2,0']])
+    expect(state.waypoints).toEqual(['3,0'])
+  })
+
+  it('does not count a later stop passed through on an earlier leg', () => {
+    // Out to 2,0 and back to 1,0: the second stop is crossed on the first leg.
+    const { state } = run(
+      entity(),
+      flatField(4),
+      standing('0,0'),
+      move(['0,0', '1,0', '2,0', '1,0'], ['2,0', '1,0']),
+      1,
+    )
+
+    expect(state.at).toBe('1,0')
+    expect(state.waypoints).toEqual(['2,0', '1,0'])
+  })
+
+  it('ends with no stops left when the last leg is walked', () => {
+    const { state } = run(entity(), flatField(4), standing('0,0'), move(east(2), ['1,0', '2,0']), 2)
+
+    expect(state.waypoints).toEqual([])
+    expect(state.pending).toEqual([])
+  })
+
+  it('forgets the stops when the entity makes camp', () => {
+    const camped = resolveTurn(
+      0,
+      fieldFromTiles(flatField(4)),
+      [entity()],
+      new Map([['party', standing('0,0', { pending: ['1,0'], waypoints: ['1,0'] })]]),
+      new Map<string, Action>([['party', { kind: 'camp' }]]),
+    )
+
+    expect(camped.states.get('party')!.waypoints).toEqual([])
   })
 })

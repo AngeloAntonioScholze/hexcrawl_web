@@ -18,6 +18,10 @@ export interface TokenField {
   place(id: string, hex: Axial | null): void
   /** Leaps one token onto the next hex, the step a played turn is made of. */
   hop(id: string, hex: Axial, seconds?: number): void
+  /** Whether any token stands on the map; one that does is always bobbing. */
+  readonly bobbing: boolean
+  /** Whether any token is in the air between two hexes. */
+  readonly hopping: boolean
   dispose(): void
 }
 
@@ -105,6 +109,16 @@ export function createTokenField(
       tokens.get(id)?.hopTo(hex, seconds)
       heading(id, hex)
       recrowd()
+    },
+
+    get bobbing() {
+      for (const token of tokens.values()) if (token.hex) return true
+      return false
+    },
+
+    get hopping() {
+      for (const token of tokens.values()) if (token.hopping) return true
+      return false
     },
 
     dispose(): void {

@@ -388,3 +388,118 @@ describe('the paths drawn on the map', () => {
     expect(store.paths).toHaveLength(1)
   })
 })
+
+describe('chained orders', () => {
+  /** Puts the party down at the middle and gives it a chain of stops. */
+  const chain = (store: Store, stops: Axial[]): void => {
+    store.select({ q: 0, r: 0 })
+    for (const stop of stops) store.select(stop, true)
+  }
+
+  it('has no legs before any order is given', () => {
+    const store = setup()
+    store.select({ q: 0, r: 0 })
+
+    expect(store.legs).toEqual([])
+    expect(store.route).toBeNull()
+  })
+
+  it('reads a plain click as a chain of one leg', () => {
+    const store = setup()
+    sendEast(store, 3)
+
+    expect(store.legs).toEqual([{ to: '3,0', steps: 3, km: 30, turns: 3 }])
+    expect(store.route?.km).toBe(30)
+  })
+
+  it('appends a stop on shift-click and reports every leg and the total', () => {
+    const store = setup()
+    chain(store, [
+      { q: 2, r: 0 },
+      { q: 2, r: 2 },
+      { q: 0, r: 2 },
+    ])
+
+    expect(store.legs.map((leg) => leg.to)).toEqual(['2,0', '2,2', '0,2'])
+    expect(store.legs.map((leg) => leg.km)).toEqual([20, 20, 20])
+    expect(store.route?.km).toBe(60)
+    expect(store.routeTurns).toBe(6)
+    expect(store.goal).toBe('0,2')
+    expect(store.plannedHexes).toHaveLength(6)
+  })
+
+  it('replaces the whole chain on a plain click', () => {
+    const store = setup()
+    chain(store, [
+      { q: 2, r: 0 },
+      { q: 2, r: 2 },
+    ])
+
+    store.select({ q: 0, r: 1 })
+
+    expect(store.legs.map((leg) => leg.to)).toEqual(['0,1'])
+  })
+
+  it('ignores a stop added on top of the last one', () => {
+    const store = setup()
+    chain(store, [
+      { q: 2, r: 0 },
+      { q: 2, r: 0 },
+    ])
+
+    expect(store.legs).toHaveLength(1)
+  })
+
+  it('removes a stop and re-routes the legs either side of it', () => {
+    const store = setup()
+    chain(store, [
+      { q: 2, r: 0 },
+      { q: 2, r: 2 },
+      { q: 0, r: 2 },
+    ])
+
+    store.removeWaypoint(1)
+
+    expect(store.legs.map((leg) => leg.to)).toEqual(['2,0', '0,2'])
+    expect(store.route?.km).toBe(40)
+  })
+
+  it('calls the order off once the last stop is removed', () => {
+    const store = setup()
+    sendEast(store, 2)
+
+    store.removeWaypoint(0)
+    store.advanceTurn()
+
+    expect(store.start).toBe('0,0')
+    expect(store.legs).toEqual([])
+  })
+
+  it('walks leg after leg and forgets the stops behind it', () => {
+    const store = setup()
+    chain(store, [
+      { q: 1, r: 0 },
+      { q: 1, r: 1 },
+    ])
+
+    store.advanceTurn()
+    expect(store.legs.map((leg) => leg.to)).toEqual(['1,1'])
+
+    store.advanceTurn()
+    expect(store.start).toBe('1,1')
+    expect(store.legs).toEqual([])
+  })
+
+  it('adds a stop onto an order already being walked', () => {
+    const store = setup()
+    chain(store, [
+      { q: 2, r: 0 },
+      { q: 2, r: 2 },
+    ])
+    store.advanceTurn()
+
+    store.select({ q: 0, r: 2 }, true)
+
+    expect(store.legs.map((leg) => leg.to)).toEqual(['2,0', '2,2', '0,2'])
+  })
+})

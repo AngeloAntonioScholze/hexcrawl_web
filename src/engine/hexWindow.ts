@@ -32,18 +32,12 @@ export const sameSpan = (a: ChunkSpan | null, b: ChunkSpan): boolean =>
   a !== null && a.minQ === b.minQ && a.maxQ === b.maxQ && a.minR === b.minR && a.maxR === b.maxR
 
 /**
- * The axial box that covers a world-space rectangle. The two axes are skewed
- * against world space, so every corner is converted and the extremes taken:
- * converting only two of them leaves wedges of the view uncovered.
+ * The axial box that covers a convex patch of ground, given its corners. Axial
+ * coordinates are linear in world space, so the patch's extremes sit on its
+ * corners; the axes are skewed against world space, so every corner is
+ * converted: converting only two of them leaves wedges of the view uncovered.
  */
-export function axialBounds(layout: Layout, rect: ViewRect): ChunkSpan {
-  const corners: WorldPoint[] = [
-    { x: rect.minX, z: rect.minZ },
-    { x: rect.maxX, z: rect.minZ },
-    { x: rect.minX, z: rect.maxZ },
-    { x: rect.maxX, z: rect.maxZ },
-  ]
-
+export function axialBounds(layout: Layout, corners: readonly WorldPoint[]): ChunkSpan {
   const hexes = corners.map((point) => worldToHex(layout, point))
   const qs = hexes.map((hex) => hex.q)
   const rs = hexes.map((hex) => hex.r)
@@ -56,13 +50,21 @@ export function axialBounds(layout: Layout, rect: ViewRect): ChunkSpan {
   }
 }
 
+/** The four corners of a world-space rectangle. */
+export const rectCorners = (rect: ViewRect): WorldPoint[] => [
+  { x: rect.minX, z: rect.minZ },
+  { x: rect.maxX, z: rect.minZ },
+  { x: rect.minX, z: rect.maxZ },
+  { x: rect.maxX, z: rect.maxZ },
+]
+
 /**
- * The chunk span a view sits in, grown by the margin. Rounding out to whole
- * chunks is what makes a drag free: the window only changes when the view
- * leaves the chunks it was already carrying.
+ * The chunk span a patch of ground sits in, grown by the margin. Rounding out
+ * to whole chunks is what makes a drag free: the window only changes when the
+ * view leaves the chunks it was already carrying.
  */
-export function chunkSpanFor(layout: Layout, rect: ViewRect): ChunkSpan {
-  const bounds = axialBounds(layout, rect)
+export function chunkSpanFor(layout: Layout, corners: readonly WorldPoint[]): ChunkSpan {
+  const bounds = axialBounds(layout, corners)
   const low = (value: number): number => Math.floor(value / CHUNK) - MARGIN_CHUNKS
   const high = (value: number): number => Math.floor(value / CHUNK) + MARGIN_CHUNKS
 
@@ -74,12 +76,28 @@ export function chunkSpanFor(layout: Layout, rect: ViewRect): ChunkSpan {
   }
 }
 
-/** Every hex of a chunk span that the world actually has ground for. */
-export function tilesInSpan(field: TerrainField, span: ChunkSpan): HexTile[] {
+/** Whether a hex lies inside a chunk span. */
+export const insideSpan = (span: ChunkSpan, q: number, r: number): boolean =>
+  q >= span.minQ * CHUNK &&
+  q < (span.maxQ + 1) * CHUNK &&
+  r >= span.minR * CHUNK &&
+  r < (span.maxR + 1) * CHUNK
+
+/**
+ * The ground a view needs that it was not already carrying: every hex of the
+ * new span outside the old one, or all of it when there was no old one. A
+ * one-chunk pan is one strip of chunks, however wide the window.
+ */
+export function tilesEntering(
+  field: TerrainField,
+  from: ChunkSpan | null,
+  to: ChunkSpan,
+): HexTile[] {
   const tiles: HexTile[] = []
 
-  for (let r = span.minR * CHUNK; r < (span.maxR + 1) * CHUNK; r++) {
-    for (let q = span.minQ * CHUNK; q < (span.maxQ + 1) * CHUNK; q++) {
+  for (let r = to.minR * CHUNK; r < (to.maxR + 1) * CHUNK; r++) {
+    for (let q = to.minQ * CHUNK; q < (to.maxQ + 1) * CHUNK; q++) {
+      if (from && insideSpan(from, q, r)) continue
       const hex: Axial = { q, r }
       const tile = field.at(hex)
       if (tile) tiles.push({ hex, elevation: tile.elevation, color: tile.color })
@@ -88,6 +106,10 @@ export function tilesInSpan(field: TerrainField, span: ChunkSpan): HexTile[] {
 
   return tiles
 }
+
+/** Every hex of a chunk span that the world actually has ground for. */
+export const tilesInSpan = (field: TerrainField, span: ChunkSpan): HexTile[] =>
+  tilesEntering(field, null, span)
 
 /** How many hexes a span holds at most, which is what the grid must fit. */
 export const spanCapacity = (span: ChunkSpan): number =>

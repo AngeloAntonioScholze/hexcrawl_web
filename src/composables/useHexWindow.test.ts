@@ -1,32 +1,67 @@
 import { describe, expect, it } from 'vitest'
+import { FAR_BETA } from '../engine/camera'
+import { chunkSpanFor, rectCorners, spanCapacity } from '../engine/hexWindow'
 import { createLayout } from '../hex/layout'
 import { WORLD_SIZES } from '../stores/hexMap'
 import {
   budgetFor,
+  FARTHEST_ZOOM,
+  gridCapacity,
   hexCount,
   maxZoomFor,
   MIN_MAX_ZOOM,
-  viewRect,
+  viewFootprint,
+  viewSpan,
   windowCost,
   ZOOM_BUDGET,
+  type View,
 } from './useHexWindow'
 
 const layout = createLayout(2)
 
-describe('viewRect', () => {
-  it('reaches far enough to cover the view at any rotation', () => {
-    const rect = viewRect({ x: 0, z: 0 }, 40, 2)
+/** The camera's closest lean, which it only takes at its closest zooms. */
+const NEAR_BETA = (75 * Math.PI) / 180
 
-    // The corner of the unrotated view is the furthest point the camera can
-    // swing over the ground, so the rectangle has to hold it.
-    expect(rect.maxX).toBeGreaterThanOrEqual(Math.hypot(80, 40))
-    expect(rect.maxZ).toBeGreaterThanOrEqual(Math.hypot(80, 40))
+const MAP_VIEW: View = { x: 0, z: 0, zoom: 40, aspect: 16 / 9, alpha: -Math.PI / 2, beta: FAR_BETA }
+
+const extent = (view: View): { x: number; z: number } => {
+  const corners = viewFootprint(view)
+  return {
+    x: Math.max(...corners.map((corner) => corner.x)) - view.x,
+    z: Math.max(...corners.map((corner) => corner.z)) - view.z,
+  }
+}
+
+describe('viewFootprint', () => {
+  it('lays screen width flat and stretches screen height by the lean', () => {
+    // Turned to alpha 0, screen height runs along x and screen width along z.
+    const reach = extent({ ...MAP_VIEW, aspect: 1.5, alpha: 0, beta: Math.PI / 3 })
+    expect(reach.x).toBeCloseTo(80)
+    expect(reach.z).toBeCloseTo(60)
+  })
+
+  it('turns with the camera', () => {
+    const reach = extent({ ...MAP_VIEW, aspect: 1.5, alpha: Math.PI / 2, beta: Math.PI / 3 })
+    expect(reach.x).toBeCloseTo(60)
+    expect(reach.z).toBeCloseTo(80)
   })
 
   it('sits on the view it was given rather than the middle of the world', () => {
-    const rect = viewRect({ x: 100, z: -40 }, 20, 1)
-    expect((rect.minX + rect.maxX) / 2).toBeCloseTo(100)
-    expect((rect.minZ + rect.maxZ) / 2).toBeCloseTo(-40)
+    const corners = viewFootprint({ ...MAP_VIEW, x: 100, z: -40 })
+    const mean = (values: number[]): number => values.reduce((a, b) => a + b, 0) / values.length
+    expect(mean(corners.map((corner) => corner.x))).toBeCloseTo(100)
+    expect(mean(corners.map((corner) => corner.z))).toBeCloseTo(-40)
+  })
+
+  it('carries fewer chunks than the circle the grid is sized from', () => {
+    const zoom = 130
+    const reach = Math.hypot((zoom * 16) / 9, zoom)
+    const circle = chunkSpanFor(
+      layout,
+      rectCorners({ minX: -reach, maxX: reach, minZ: -reach, maxZ: reach }),
+    )
+
+    expect(spanCapacity(viewSpan(layout, { ...MAP_VIEW, zoom }))).toBeLessThan(spanCapacity(circle))
   })
 })
 
@@ -58,6 +93,14 @@ describe('maxZoomFor', () => {
     expect(windowCost(layout, zoom, WORLD_SIZES.huge)).toBeLessThanOrEqual(ZOOM_BUDGET)
   })
 
+  it('stops a world too big to see whole at the farthest zoom', () => {
+    expect(maxZoomFor(layout, WORLD_SIZES.huge)).toBe(FARTHEST_ZOOM)
+  })
+
+  it('still lets the large world be seen whole', () => {
+    expect(maxZoomFor(layout, WORLD_SIZES.large)).toBeGreaterThan(FARTHEST_ZOOM)
+  })
+
   it('never asks the grid for more than the ceiling, at any size', () => {
     for (const radius of Object.values(WORLD_SIZES)) {
       const zoom = maxZoomFor(layout, radius)
@@ -84,12 +127,54 @@ describe('maxZoomFor', () => {
   })
 })
 
+describe('gridCapacity', () => {
+  it('holds the widest view of any world, not only the named sizes', () => {
+    const capacity = gridCapacity(layout)
+    for (let radius = 10; radius <= 400; radius += 7) {
+      expect(windowCost(layout, maxZoomFor(layout, radius), radius)).toBeLessThanOrEqual(capacity)
+    }
+  })
+
+  // The frozen map: the large world's limit left standing on the huge one.
+  it('cannot hold a view the huge world was never allowed', () => {
+    const stale = maxZoomFor(layout, WORLD_SIZES.large)
+    const span = viewSpan(layout, { ...MAP_VIEW, zoom: stale })
+    expect(spanCapacity(span)).toBeGreaterThan(gridCapacity(layout))
+  })
+})
+
+describe('viewSpan', () => {
+  it('never outgrows the grid, at any turn or lean the camera can take', () => {
+    const capacity = gridCapacity(layout)
+    const widest = maxZoomFor(layout, WORLD_SIZES.huge)
+
+    for (let step = 0; step < 36; step++) {
+      const alpha = (step / 36) * Math.PI
+      for (const aspect of [0.5, 16 / 9, 3.5, 5]) {
+        const far = viewSpan(layout, { ...MAP_VIEW, zoom: widest, aspect, alpha }, capacity)
+        const near = viewSpan(
+          layout,
+          { ...MAP_VIEW, zoom: 20, aspect, alpha, beta: NEAR_BETA },
+          capacity,
+        )
+        expect(spanCapacity(far)).toBeLessThanOrEqual(capacity)
+        expect(spanCapacity(near)).toBeLessThanOrEqual(capacity)
+      }
+    }
+  })
+
+  it('squeezes only a view that would not fit', () => {
+    const view = { ...MAP_VIEW, zoom: 60 }
+    expect(viewSpan(layout, view, gridCapacity(layout))).toEqual(viewSpan(layout, view))
+  })
+})
+
 describe('budgetFor', () => {
   it('asks for the whole world when the world is small enough to hold', () => {
     expect(budgetFor(WORLD_SIZES.large)).toBe(hexCount(WORLD_SIZES.large))
   })
 
   it('stops at the ceiling for a world that is not', () => {
-    expect(budgetFor(WORLD_SIZES.huge)).toBe(ZOOM_BUDGET)
+    expect(budgetFor(400)).toBe(ZOOM_BUDGET)
   })
 })

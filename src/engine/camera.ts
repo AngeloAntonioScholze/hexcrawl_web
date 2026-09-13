@@ -11,7 +11,7 @@ const degrees = (value: number): number => (value * Math.PI) / 180
 // Stated as the angle above the horizon, which is how the view actually reads:
 // 15 degrees is nearly eye-level, 49 is a high map view.
 const NEAR_BETA = degrees(90 - 15)
-const FAR_BETA = degrees(90 - 49)
+export const FAR_BETA = degrees(90 - 49)
 
 // The tilt finishes swinging across this zoom band; outside it the angle holds,
 // so the extremes of the zoom range stay at a settled, predictable view.
@@ -49,12 +49,16 @@ export interface IsoCamera {
   panBy(dxPixels: number, dyPixels: number): void
   /** Slides the view over a point on the ground; a drag calls it off. */
   focusOn(x: number, z: number): void
+  /** Puts the view over a point this frame, inside the pan bounds; calls off a slide. */
+  moveTo(x: number, z: number): void
   /** Moves the fence the view may be dragged inside: a new world, a new rim. */
   setPanBounds(bounds: { minX: number; maxX: number; minZ: number; maxZ: number }): void
   /** How far back the view may be pulled; a bigger world is allowed more. */
   setMaxZoom(limit: number): void
   /** Half the world-space height on screen, which sets how much is in view. */
   readonly zoom: number
+  /** Whether the view is still easing toward where it was sent, and needs frames to get there. */
+  readonly settling: boolean
   updateProjection(aspect: number): void
   dispose(): void
 }
@@ -181,6 +185,13 @@ export function createIsoCamera(
       focus = new Vector3(x, camera.target.y, z)
     },
 
+    moveTo(x: number, z: number): void {
+      focus = null
+      camera.target.x = x
+      camera.target.z = z
+      clampTarget()
+    },
+
     setPanBounds(next): void {
       bounds = next
       clampTarget()
@@ -197,6 +208,14 @@ export function createIsoCamera(
 
     get zoom() {
       return zoom
+    },
+
+    get settling() {
+      return (
+        focus !== null ||
+        Math.abs(targetAlpha - camera.alpha) >= SETTLED ||
+        Math.abs(targetZoom - zoom) >= SETTLED
+      )
     },
 
     updateProjection(nextAspect: number): void {

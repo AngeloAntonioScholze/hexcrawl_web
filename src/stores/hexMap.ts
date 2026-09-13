@@ -16,7 +16,7 @@ import type { MapSnapshot } from '../persistence/mapState'
 import { fieldFromTiles, type TerrainField } from '../terrain/field'
 import { sightFrom, type PartySight } from '../terrain/sight'
 import { TERRAIN_DEFAULTS, type TerrainId, type TerrainTile } from '../terrain/terrain'
-import { findRoute, KM_PER_HEX, type Route } from '../terrain/travel'
+import { chainRoute, joinLegs, KM_PER_HEX, type Route } from '../terrain/travel'
 import { clockAt, isNight, nextPhaseTurn, type Clock } from '../time/clock'
 
 const NOTHING_IN_SIGHT: PartySight = { radius: 0, visible: new Set(), blocked: new Set() }
@@ -53,6 +53,15 @@ export interface JourneyRow {
   entered: number
   /** False for a turn the crawl has been wound back past but still remembers. */
   spent: boolean
+}
+
+/** One stretch of an order, from the last stop (or where the entity stands) to the next. */
+export interface Leg {
+  to: HexKey
+  steps: number
+  km: number
+  /** Turns the leg takes at the entity's pace, ignoring what it carries in. */
+  turns: number
 }
 
 /** The terrain knobs the map panel is allowed to turn. */
@@ -152,7 +161,7 @@ export const useHexMapStore = defineStore('hexMap', () => {
 
   const openingState = (id: string, at: number): EntityState => {
     const origin = origins.value.get(id)
-    return origin && origin.turn <= at ? { at: origin.hex, carry: 0, pending: [] } : idleState()
+    return origin && origin.turn <= at ? { ...idleState(), at: origin.hex } : idleState()
   }
 
   /**
@@ -292,39 +301,67 @@ export const useHexMapStore = defineStore('hexMap', () => {
     origins.value = next
   }
 
-  const routeTo = (from: HexKey, to: HexKey): Route | null =>
-    findRoute(field.value, parseKey(from), parseKey(to), { allowWater: allowWater.value })
+  const legsFrom = (from: HexKey, waypoints: readonly HexKey[]): Route[] | null =>
+    chainRoute(field.value, parseKey(from), waypoints.map(parseKey), {
+      allowWater: allowWater.value,
+    })
+
+  /** The stops an entity is headed through: the queued order's, or the standing one's. */
+  const waypointsFor = (id: string): readonly HexKey[] => {
+    const queued = queue.value.get(id)
+    if (queued) return queued.kind === 'move' ? queued.waypoints : []
+    return stateOf(id).waypoints
+  }
+
+  /**
+   * Orders an entity through a chain of stops from where it stands. No stops at
+   * all is a route of just the hex underneath, which is how an order is called
+   * off without a second kind of action. A chain with a leg nobody can walk is
+   * refused whole and the order already standing is left alone.
+   */
+  const orderChain = (id: string, waypoints: readonly HexKey[]): void => {
+    const at = stateOf(id).at
+    if (!at) return
+    const legs = legsFrom(at, waypoints)
+    if (!legs) return
+    const route = joinLegs(parseKey(at), legs).hexes.map(hexKey)
+    queueAction(id, { kind: 'move', route, waypoints: [...waypoints] })
+  }
 
   /**
    * One click, one order. The first puts the entity on the map; after that a
-   * click plans the route it will walk as the turns pass, and clicking the
-   * ground it stands on calls that order off.
+   * click plans the route it will walk as the turns pass, a shift-click adds a
+   * stop to the end of it, and clicking the ground it stands on calls it off.
    */
-  const select = (hex: Axial | null): void => {
+  const select = (hex: Axial | null, append = false): void => {
     if (!hex || !selectedEntity.value) return
+    const id = selectedId.value
     const key = hexKey(hex)
     const at = selectedState.value.at
 
     if (!at) {
-      place(selectedId.value, key)
+      place(id, key)
       return
     }
 
-    // A route of just the hex underneath is a route with nothing left to walk,
-    // which is how an order is called off without a second kind of action.
-    if (key === at) {
-      queueAction(selectedId.value, { kind: 'move', route: [at] })
+    if (!append) {
+      orderChain(id, key === at ? [] : [key])
       return
     }
 
-    const found = routeTo(at, key)
-    if (found) queueAction(selectedId.value, { kind: 'move', route: found.hexes.map(hexKey) })
+    const stops = waypointsFor(id)
+    if (key !== (stops[stops.length - 1] ?? at)) orderChain(id, [...stops, key])
   }
 
-  const clear = (): void => {
-    const at = selectedState.value.at
-    if (at) queueAction(selectedId.value, { kind: 'move', route: [at] })
+  const removeWaypoint = (index: number): void => {
+    const id = selectedId.value
+    orderChain(
+      id,
+      waypointsFor(id).filter((_, at) => at !== index),
+    )
   }
+
+  const clear = (): void => orderChain(selectedId.value, [])
 
   /** Spends a turn: every entity resolves, ordered or not, and is written down. */
   const advanceTurn = (): void => {
@@ -386,13 +423,41 @@ export const useHexMapStore = defineStore('hexMap', () => {
     return planned.length > 0 ? planned[planned.length - 1] : null
   })
 
-  /** Kept for the panel: how far the planned order still has to go. */
+  /** The selected entity's order, leg by leg, from where it stands now. */
+  const chain = computed<Route[]>(() => {
+    const at = selectedState.value.at
+    return at ? (legsFrom(at, waypointsFor(selectedId.value)) ?? []) : []
+  })
+
+  const turnsFor = (km: number): number => {
+    const pace = selectedEntity.value?.pacePerTurn ?? 1
+    return Math.ceil(km / KM_PER_HEX / pace)
+  }
+
+  const legs = computed<Leg[]>(() => {
+    const stops = waypointsFor(selectedId.value)
+    return chain.value.map((leg, index) => ({
+      to: stops[index],
+      steps: leg.steps,
+      km: leg.km,
+      turns: turnsFor(leg.km),
+    }))
+  })
+
+  /** How far the planned order still has to go, every leg together. */
   const route = computed<Route | null>(() => {
     const at = selectedState.value.at
-    const end = goal.value
-    if (!at || !end) return null
-    return routeTo(at, end)
+    if (!at || chain.value.length === 0) return null
+    return joinLegs(parseKey(at), chain.value)
   })
+
+  const routeTurns = computed(() => (route.value ? turnsFor(route.value.km) : 0))
+
+  /** The selected entity's stops still ahead, marked on the map in its colour. */
+  const stops = computed<{ hexes: Axial[]; color: string }>(() => ({
+    hexes: waypointsFor(selectedId.value).map(parseKey),
+    color: selectedEntity.value?.color ?? '#ffffff',
+  }))
 
   const recordsFor = (id: string, upTo: number): ActionRecord[] => {
     const rows: ActionRecord[] = []
@@ -700,6 +765,10 @@ export const useHexMapStore = defineStore('hexMap', () => {
     partyHex,
     allowWater,
     route,
+    routeTurns,
+    legs,
+    stops,
+    removeWaypoint,
     plannedHexes,
     pathHexes,
     paths,

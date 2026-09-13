@@ -4,7 +4,7 @@ import { Scene } from '@babylonjs/core/scene'
 import { afterEach, beforeEach, describe, expect, it } from 'vitest'
 import { hexKey, spiral, type Axial } from '../hex/coords'
 import { createLayout, hexToWorld } from '../hex/layout'
-import { createHexGrid, type HexGrid, type HexTile } from './hexGrid'
+import { createHexGrid, wantsDetail, type HexGrid, type HexTile } from './hexGrid'
 
 const layout = createLayout(2)
 const BASE = new Color3(0.2, 0.4, 0.6)
@@ -39,7 +39,7 @@ describe('instancing', () => {
   it('draws every tile from a single mesh', () => {
     expect(grid.count).toBe(tiles.length)
     expect(grid.mesh.thinInstanceCount).toBe(tiles.length)
-    expect(scene.meshes).toHaveLength(1)
+    expect(scene.meshes.filter((mesh) => mesh.isVisible)).toHaveLength(1)
   })
 
   it('enables picking so instances resolve back to hexes', () => {
@@ -302,5 +302,136 @@ describe('re-terraining', () => {
     grid.setWindow(tiles.slice(1))
     expect(grid.count).toBe(tiles.length - 1)
     expect(grid.indexOf(hexKey(tiles[0].hex))).toBeUndefined()
+  })
+})
+
+describe('moving the window', () => {
+  const keepEast = (q: number): boolean => q >= 0
+  const staying = (): HexTile[] => tiles.filter((tile) => keepEast(tile.hex.q))
+
+  // Clear of everything kept, which stops at q = 3.
+  const entering: HexTile[] = spiral({ q: 7, r: 0 }, 3).map((hex) => ({
+    hex,
+    elevation: 2,
+    color: new Color3(0.7, 0.6, 0.5),
+  }))
+
+  it('drops what it is told to and takes what enters', () => {
+    grid.moveWindow(keepEast, entering)
+
+    expect(grid.count).toBe(staying().length + entering.length)
+    expect(grid.mesh.thinInstanceCount).toBe(grid.count)
+    for (const tile of tiles.filter((tile) => !keepEast(tile.hex.q))) {
+      expect(grid.indexOf(hexKey(tile.hex))).toBeUndefined()
+    }
+    for (const tile of [...staying(), ...entering]) {
+      expect(grid.hexAt(grid.indexOf(hexKey(tile.hex))!)).toEqual(tile.hex)
+    }
+  })
+
+  it('draws every hex where its own tile says, whatever slot it landed in', () => {
+    grid.moveWindow(keepEast, entering)
+    const matrices = grid.mesh.thinInstanceGetWorldMatrices()
+
+    for (const tile of [...staying(), ...entering]) {
+      const matrix = matrices[grid.indexOf(hexKey(tile.hex))!]
+      const world = hexToWorld(layout, tile.hex)
+      expect(matrix.getTranslation().x).toBeCloseTo(world.x, 4)
+      expect(matrix.getTranslation().z).toBeCloseTo(world.z, 4)
+      expect(matrix.m[5]).toBeCloseTo(tile.elevation, 5)
+    }
+  })
+
+  it('keeps the fog and tint of a hex that stays, even when it changes slot', () => {
+    const kept = staying().map((tile) => hexKey(tile.hex))
+    grid.setFog(new Map(kept.map((key) => [key, 0.5])))
+    grid.setOverlay(new Map([[kept[kept.length - 1], new Color3(1, 1, 1)]]))
+
+    const slots = new Map(kept.map((key) => [key, grid.indexOf(key)]))
+    const colours = new Map(kept.map((key) => [key, grid.colorAt(grid.indexOf(key)!)]))
+
+    grid.moveWindow(keepEast, entering)
+
+    expect(kept.some((key) => grid.indexOf(key) !== slots.get(key))).toBe(true)
+    for (const key of kept) expect(grid.colorAt(grid.indexOf(key)!)).toEqual(colours.get(key))
+  })
+
+  it('fogs a hex arriving under fog it already had', () => {
+    const arriving = hexKey(entering[0].hex)
+    grid.setFog(new Map([[arriving, 0]]))
+
+    grid.moveWindow(keepEast, entering)
+
+    expect(grid.colorAt(grid.indexOf(arriving)!)[0]).toBeCloseTo(0.055, 6)
+  })
+
+  it('lists exactly the hexes it holds, slot by slot', () => {
+    grid.moveWindow(keepEast, entering)
+
+    expect(grid.keys).toHaveLength(grid.count)
+    grid.keys.forEach((key, index) => expect(grid.indexOf(key)).toBe(index))
+  })
+
+  it('grows its bounds over the ground that entered', () => {
+    grid.moveWindow(keepEast, entering)
+    const far = hexToWorld(layout, { q: 10, r: 0 })
+
+    expect(grid.mesh.getBoundingInfo().boundingBox.maximumWorld.x).toBeGreaterThan(far.x)
+  })
+
+  it('refuses a move it has no room for', () => {
+    const tight = createHexGrid(scene, layout, { capacity: tiles.length })
+    tight.setWindow(tiles)
+    expect(() => tight.moveWindow(() => true, entering)).toThrow(RangeError)
+    tight.dispose()
+  })
+})
+
+describe('detail', () => {
+  it('draws the bevelled prism until told otherwise', () => {
+    expect(grid.detailed).toBe(true)
+  })
+
+  it('hands the whole window to the flat prism, and back', () => {
+    const bevelled = grid.mesh
+
+    grid.setDetail(false)
+    expect(grid.mesh).not.toBe(bevelled)
+    expect(grid.mesh.getTotalIndices() / 3).toBe(18)
+    expect(grid.mesh.thinInstanceCount).toBe(grid.count)
+    expect(grid.mesh.isVisible).toBe(true)
+    expect(bevelled.isVisible).toBe(false)
+
+    grid.setDetail(true)
+    expect(grid.mesh).toBe(bevelled)
+    expect(grid.mesh.thinInstanceCount).toBe(grid.count)
+  })
+
+  it('brings back a window that moved while the flat prism was drawing', () => {
+    grid.setDetail(false)
+    grid.setWindow(tiles.slice(3))
+    grid.setDetail(true)
+
+    expect(grid.mesh.thinInstanceCount).toBe(tiles.length - 3)
+    const matrices = grid.mesh.thinInstanceGetWorldMatrices()
+    const world = hexToWorld(layout, tiles[3].hex)
+    expect(matrices[0].getTranslation().x).toBeCloseTo(world.x, 4)
+  })
+})
+
+describe('wantsDetail', () => {
+  it('keeps the bevel while it spans a few pixels', () => {
+    expect(wantsDetail(4, true)).toBe(true)
+    expect(wantsDetail(4, false)).toBe(true)
+  })
+
+  it('drops it once it shrinks to about a pixel', () => {
+    expect(wantsDetail(1, true)).toBe(false)
+    expect(wantsDetail(1, false)).toBe(false)
+  })
+
+  it('holds whichever it has on a zoom resting between the two lines', () => {
+    expect(wantsDetail(2, true)).toBe(true)
+    expect(wantsDetail(2, false)).toBe(false)
   })
 })

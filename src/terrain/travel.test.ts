@@ -3,7 +3,15 @@ import { describe, expect, it } from 'vitest'
 import { hexKey, range, type Axial, type HexKey } from '../hex/coords'
 import { createLayout } from '../hex/layout'
 import { createTerrain, type TerrainTile } from './terrain'
-import { CLIMB_MULTIPLIER, CLIMB_THRESHOLD, KM_PER_HEX, findRoute, stepCostKm } from './travel'
+import {
+  CLIMB_MULTIPLIER,
+  CLIMB_THRESHOLD,
+  KM_PER_HEX,
+  chainRoute,
+  findRoute,
+  joinLegs,
+  stepCostKm,
+} from './travel'
 import { fieldFromTiles } from './field'
 
 // The number is the mechanical level; the rendered height is derived from it so
@@ -244,5 +252,54 @@ describe('water crossings', () => {
       { allowWater: true },
     )!
     expect(route.km).toBe(KM_PER_HEX + KM_PER_HEX * CLIMB_MULTIPLIER)
+  })
+})
+
+describe('chainRoute', () => {
+  const origin = { q: 0, r: 0 }
+
+  it('has no legs for no stops, and joins to a route that goes nowhere', () => {
+    const legs = chainRoute(fieldFromTiles(flatField(3)), origin, [])!
+
+    expect(legs).toEqual([])
+    expect(joinLegs(origin, legs)).toEqual({ hexes: [origin], steps: 0, km: 0 })
+  })
+
+  it('is one ordinary route for a single stop', () => {
+    const field = fieldFromTiles(flatField(3))
+    const legs = chainRoute(field, origin, [{ q: 2, r: 0 }])!
+
+    expect(legs).toEqual([findRoute(field, origin, { q: 2, r: 0 })])
+  })
+
+  it('starts every leg where the last one ended and adds them up', () => {
+    const field = fieldFromTiles(flatField(4))
+    const stops = [
+      { q: 2, r: 0 },
+      { q: 2, r: 2 },
+      { q: 0, r: 2 },
+    ]
+    const legs = chainRoute(field, origin, stops)!
+
+    expect(legs.map((leg) => leg.hexes[0])).toEqual([origin, stops[0], stops[1]])
+    expect(legs.map((leg) => leg.hexes[leg.hexes.length - 1])).toEqual(stops)
+
+    const joined = joinLegs(origin, legs)
+    expect(joined.steps).toBe(6)
+    expect(joined.km).toBe(6 * KM_PER_HEX)
+    expect(joined.hexes).toHaveLength(7)
+    expect(new Set(joined.hexes.map(hexKey)).size).toBe(7)
+  })
+
+  it('refuses the whole chain when one leg cannot be walked', () => {
+    const tiles = flatField(3)
+    tiles.set(hexKey({ q: 3, r: 0 }), water({ q: 3, r: 0 }))
+
+    expect(
+      chainRoute(fieldFromTiles(tiles), origin, [
+        { q: 1, r: 0 },
+        { q: 3, r: 0 },
+      ]),
+    ).toBeNull()
   })
 })

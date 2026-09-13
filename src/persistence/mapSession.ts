@@ -26,11 +26,17 @@ const plain = (snapshot: MapSnapshot): MapSnapshot => ({
   entities: snapshot.entities.map((one) => ({ ...one })),
   origins: snapshot.origins.map((one) => ({ ...one })),
   record: snapshot.record.map((row) => ({ ...row, entered: [...row.entered] })),
-  states: snapshot.states.map((row) => ({ ...row, pending: [...row.pending] })),
+  states: snapshot.states.map((row) => ({
+    ...row,
+    pending: [...row.pending],
+    waypoints: [...row.waypoints],
+  })),
   queue: snapshot.queue.map(({ entityId, action }) => ({
     entityId,
     action:
-      action.kind === 'move' ? { kind: action.kind, route: [...action.route] } : { ...action },
+      action.kind === 'move'
+        ? { kind: action.kind, route: [...action.route], waypoints: [...action.waypoints] }
+        : { ...action },
   })),
 })
 

@@ -63,10 +63,26 @@ const snapshot = (patch: Partial<MapSnapshot> = {}): MapSnapshot => ({
     },
   ],
   states: [
-    { turn: 0, entityId: party.id, at: '1,0' as HexKey, carry: 0, pending: ['1,-1'] as HexKey[] },
-    { turn: 1, entityId: party.id, at: '1,-1' as HexKey, carry: 0, pending: [] },
+    {
+      turn: 0,
+      entityId: party.id,
+      at: '1,0' as HexKey,
+      carry: 0,
+      pending: ['1,-1'] as HexKey[],
+      waypoints: ['1,-1'] as HexKey[],
+    },
+    { turn: 1, entityId: party.id, at: '1,-1' as HexKey, carry: 0, pending: [], waypoints: [] },
   ],
-  queue: [{ entityId: party.id, action: { kind: 'move', route: ['1,-1', '2,-1'] as HexKey[] } }],
+  queue: [
+    {
+      entityId: party.id,
+      action: {
+        kind: 'move',
+        route: ['1,-1', '2,-1', '3,-1'] as HexKey[],
+        waypoints: ['2,-1', '3,-1'] as HexKey[],
+      },
+    },
+  ],
   ...patch,
 })
 

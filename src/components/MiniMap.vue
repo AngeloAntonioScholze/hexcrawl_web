@@ -1,6 +1,15 @@
 <script setup lang="ts">
 import { computed, onBeforeUnmount, ref, watch } from 'vue'
 import { worldBounds } from '../engine/hexWindow'
+import {
+  boxContains,
+  minimapScale,
+  minimapToWorld,
+  viewBox,
+  worldToMinimap,
+  type Pixel,
+  type PixelBox,
+} from '../engine/minimap'
 import type { HexScene } from '../engine/scene'
 import { parseKey } from '../hex/coords'
 import { hexToWorld, worldToHex, type Layout } from '../hex/layout'
@@ -22,24 +31,13 @@ const SIZE = computed(() => props.size ?? 176)
 /** Pixels of dot for an entity, and the thinnest the view box may draw. */
 const DOT = 3
 
-const bounds = computed(() => worldBounds(props.layout, store.worldRadius))
+/** Minimap pixels a press must travel before it is a drag rather than a click. */
+const DRAG_START = 3
 
-/** World units to minimap pixels: the whole world squeezed into the square. */
-const scaleOf = (): number => {
-  const box = bounds.value
-  return SIZE.value / Math.max(box.maxX - box.minX, box.maxZ - box.minZ)
-}
-
-/**
- * The camera sits south of its target and looks north, so the far edge of the
- * world is the top of the screen: z grows away from the viewer while canvas y
- * grows toward them, and the drawing is flipped to match what the map shows.
- */
-const toPixels = (x: number, z: number): { x: number; y: number } => {
-  const box = bounds.value
-  const scale = scaleOf()
-  return { x: (x - box.minX) * scale, y: (box.maxZ - z) * scale }
-}
+const frame = computed(() => ({
+  bounds: worldBounds(props.layout, store.worldRadius),
+  size: SIZE.value,
+}))
 
 /**
  * The terrain, sampled every few hexes into an off-screen canvas. Sampling is
@@ -49,7 +47,7 @@ const toPixels = (x: number, z: number): { x: number; y: number } => {
 let terrain: HTMLCanvasElement | null = null
 
 const sampleWorld = (): void => {
-  const scale = scaleOf()
+  const scale = minimapScale(frame.value)
   const side = Math.ceil(SIZE.value)
 
   const off = document.createElement('canvas')
@@ -69,7 +67,7 @@ const sampleWorld = (): void => {
       if (!tile) continue
 
       const world = hexToWorld(props.layout, { q, r })
-      const point = toPixels(world.x, world.z)
+      const point = worldToMinimap(frame.value, world.x, world.z)
       const { r: red, g, b } = tile.color
       ink.fillStyle = `rgb(${red * 255} ${g * 255} ${b * 255})`
       // Drawn up from the sample rather than down from it, so the flip does not
@@ -81,6 +79,14 @@ const sampleWorld = (): void => {
   terrain = off
 }
 
+/** What the main view is looking at, in minimap pixels. */
+const currentBox = (): PixelBox | null => {
+  const scene = props.hexScene
+  if (!scene) return null
+  const aspect = scene.engine.getAspectRatio(scene.iso.camera)
+  return viewBox(frame.value, scene.iso.camera.target, scene.iso.zoom, aspect, DOT)
+}
+
 const draw = (): void => {
   const ink = canvas.value?.getContext('2d')
   if (!ink || !terrain) return
@@ -89,26 +95,18 @@ const draw = (): void => {
   ink.clearRect(0, 0, side, side)
   ink.drawImage(terrain, 0, 0)
 
-  // What the main view is looking at, so the minimap says where you are as well
-  // as what is out there.
-  const scene = props.hexScene
-  if (scene) {
-    const { x, z } = scene.iso.camera.target
-    const scale = scaleOf()
-    const aspect = scene.engine.getAspectRatio(scene.iso.camera)
-    const width = Math.max(DOT, scene.iso.zoom * aspect * 2 * scale)
-    const height = Math.max(DOT, scene.iso.zoom * 2 * scale)
-    const middle = toPixels(x, z)
-
+  // The minimap says where you are as well as what is out there.
+  const box = currentBox()
+  if (box) {
     ink.strokeStyle = 'rgba(240, 244, 255, 0.85)'
     ink.lineWidth = 1
-    ink.strokeRect(middle.x - width / 2, middle.y - height / 2, width, height)
+    ink.strokeRect(box.x - box.width / 2, box.y - box.height / 2, box.width, box.height)
   }
 
   for (const token of store.tokens) {
     if (!token.hex) continue
     const world = hexToWorld(props.layout, parseKey(token.hex))
-    const point = toPixels(world.x, world.z)
+    const point = worldToMinimap(frame.value, world.x, world.z)
 
     ink.fillStyle = token.color
     ink.beginPath()
@@ -120,11 +118,11 @@ const draw = (): void => {
   }
 }
 
-let frame = 0
+let frameRequest = 0
 
 const loop = (): void => {
   draw()
-  frame = requestAnimationFrame(loop)
+  frameRequest = requestAnimationFrame(loop)
 }
 
 watch(
@@ -140,29 +138,103 @@ watch(
 watch(
   canvas,
   (element) => {
-    cancelAnimationFrame(frame)
-    if (element) frame = requestAnimationFrame(loop)
+    cancelAnimationFrame(frameRequest)
+    if (element) frameRequest = requestAnimationFrame(loop)
   },
   { immediate: true, flush: 'post' },
 )
 
-onBeforeUnmount(() => cancelAnimationFrame(frame))
+onBeforeUnmount(() => cancelAnimationFrame(frameRequest))
 
-/** Clicking the world moves the view there rather than moving anybody. */
-const onClick = (event: MouseEvent): void => {
+const cursor = ref<'crosshair' | 'grab' | 'grabbing'>('crosshair')
+
+interface Grab {
+  pointerId: number
+  start: Pixel
+  /** Where the box was held, from its centre; null when pressed outside it. */
+  offset: Pixel | null
+  dragging: boolean
+}
+
+let grab: Grab | null = null
+
+const toPixel = (event: PointerEvent): Pixel | null => {
   const element = canvas.value
-  const scene = props.hexScene
-  if (!element || !scene) return
-
+  if (!element) return null
   const rect = element.getBoundingClientRect()
-  const box = bounds.value
-  const scale = scaleOf()
-  const x = box.minX + (((event.clientX - rect.left) / rect.width) * SIZE.value) / scale
-  const z = box.maxZ - (((event.clientY - rect.top) / rect.height) * SIZE.value) / scale
+  return {
+    x: ((event.clientX - rect.left) / rect.width) * SIZE.value,
+    y: ((event.clientY - rect.top) / rect.height) * SIZE.value,
+  }
+}
 
-  const hex = worldToHex(props.layout, { x, z })
+const hoverCursor = (pixel: Pixel): void => {
+  const box = currentBox()
+  cursor.value = box && boxContains(box, pixel) ? 'grab' : 'crosshair'
+}
+
+const onPointerDown = (event: PointerEvent): void => {
+  const pixel = toPixel(event)
+  const box = currentBox()
+  if (event.button !== 0 || !pixel || !box) return
+
+  // Captured so a drag that runs off the minimap keeps steering the view.
+  canvas.value?.setPointerCapture(event.pointerId)
+  const inside = boxContains(box, pixel)
+  grab = {
+    pointerId: event.pointerId,
+    start: pixel,
+    offset: inside ? { x: pixel.x - box.x, y: pixel.y - box.y } : null,
+    dragging: false,
+  }
+  if (inside) cursor.value = 'grabbing'
+}
+
+const onPointerMove = (event: PointerEvent): void => {
+  const pixel = toPixel(event)
+  const scene = props.hexScene
+  if (!pixel || !scene) return
+
+  if (!grab || grab.pointerId !== event.pointerId) {
+    hoverCursor(pixel)
+    return
+  }
+
+  if (!grab.dragging) {
+    if (Math.hypot(pixel.x - grab.start.x, pixel.y - grab.start.y) < DRAG_START) return
+    grab.dragging = true
+    cursor.value = 'grabbing'
+  }
+
+  // Pressed outside the box, the box jumps under the pointer and is dragged from its centre.
+  const offset = grab.offset ?? { x: 0, y: 0 }
+  const world = minimapToWorld(frame.value, { x: pixel.x - offset.x, y: pixel.y - offset.y })
+  scene.iso.moveTo(world.x, world.z)
+}
+
+/** A click moves the view to the hex under it rather than moving anybody. */
+const focusAt = (pixel: Pixel): void => {
+  const scene = props.hexScene
+  if (!scene) return
+  const hex = worldToHex(props.layout, minimapToWorld(frame.value, pixel))
   const world = hexToWorld(props.layout, hex)
   scene.iso.focusOn(world.x, world.z)
+}
+
+const onPointerUp = (event: PointerEvent): void => {
+  if (!grab || grab.pointerId !== event.pointerId) return
+  const clicked = !grab.dragging
+  grab = null
+
+  const pixel = toPixel(event)
+  if (!pixel) return
+  if (clicked) focusAt(pixel)
+  hoverCursor(pixel)
+}
+
+const onPointerCancel = (): void => {
+  grab = null
+  cursor.value = 'crosshair'
 }
 </script>
 
@@ -172,9 +244,12 @@ const onClick = (event: MouseEvent): void => {
     class="minimap"
     :width="SIZE"
     :height="SIZE"
-    :style="{ width: `${SIZE}px`, height: `${SIZE}px` }"
-    title="click to look somewhere else"
-    @click="onClick"
+    :style="{ width: `${SIZE}px`, height: `${SIZE}px`, cursor }"
+    title="click to look somewhere else, drag the box to pan"
+    @pointerdown="onPointerDown"
+    @pointermove="onPointerMove"
+    @pointerup="onPointerUp"
+    @pointercancel="onPointerCancel"
   />
 </template>
 
@@ -186,8 +261,8 @@ const onClick = (event: MouseEvent): void => {
   border: 1px solid var(--line);
   border-radius: 0.4rem;
   background: color-mix(in srgb, var(--surface-raised) 88%, transparent);
-  cursor: crosshair;
   pointer-events: auto;
+  touch-action: none;
 }
 
 /* Nothing is worth covering a phone's map with; the minimap sits this one out. */

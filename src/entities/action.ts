@@ -3,10 +3,13 @@ import type { HexKey } from '../hex/coords'
 /**
  * What an entity intends to do on the next turn. A move stands: the entity
  * keeps walking the route on the turns after it, so crossing four hexes is one
- * order rather than four.
+ * order rather than four. The route is every leg chained end to end; the
+ * waypoints are where each leg ends, the last of them the goal.
  */
 export type Action =
-  { kind: 'move'; route: readonly HexKey[] } | { kind: 'wait' } | { kind: 'camp' }
+  | { kind: 'move'; route: readonly HexKey[]; waypoints: readonly HexKey[] }
+  | { kind: 'wait' }
+  | { kind: 'camp' }
 
 export type ActionKind = Action['kind']
 

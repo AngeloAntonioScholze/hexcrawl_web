@@ -29,6 +29,48 @@ afterEach(() => {
   engine.dispose()
 })
 
+describe('settling', () => {
+  it('holds still until sent somewhere', () => {
+    expect(iso.settling).toBe(false)
+  })
+
+  it('eases toward a new zoom, and stops once there', () => {
+    iso.zoomBy(2)
+    expect(iso.settling).toBe(true)
+    settle()
+    expect(iso.settling).toBe(false)
+  })
+
+  it('slides toward a point on the ground, and stops once there', () => {
+    iso.focusOn(20, 20)
+    expect(iso.settling).toBe(true)
+    settle()
+    expect(iso.settling).toBe(false)
+  })
+})
+
+describe('setMaxZoom', () => {
+  // A smaller world arriving under a pulled-back view: the very next window
+  // check reads the zoom, so waiting for the smoothing to catch up is too late.
+  it('pulls a view already wider than the new limit in at once', () => {
+    iso.zoomBy(10)
+    settle()
+    expect(iso.zoom).toBeGreaterThan(100)
+
+    iso.setMaxZoom(60)
+    expect(iso.zoom).toBe(60)
+    expect(iso.camera.orthoTop).toBe(60)
+
+    settle()
+    expect(iso.zoom).toBe(60)
+  })
+
+  it('leaves a view inside the new limit where it is', () => {
+    iso.setMaxZoom(60)
+    expect(iso.zoom).toBe(40)
+  })
+})
+
 describe('projection', () => {
   it('is orthographic', () => {
     expect(iso.camera.mode).toBe(1)
@@ -216,6 +258,30 @@ describe('panning', () => {
     expect(bounded.camera.target.z).toBeLessThanOrEqual(10)
     expect(bounded.camera.target.z).toBeGreaterThanOrEqual(-10)
     bounded.dispose()
+  })
+})
+
+describe('moveTo', () => {
+  it('puts the view over the point on the same frame', () => {
+    iso.moveTo(12, -7)
+    expect(iso.camera.target.x).toBe(12)
+    expect(iso.camera.target.z).toBe(-7)
+  })
+
+  it('keeps the view inside the pan bounds', () => {
+    iso.setPanBounds({ minX: -10, maxX: 10, minZ: -10, maxZ: 10 })
+    iso.moveTo(500, -500)
+    expect(iso.camera.target.x).toBe(10)
+    expect(iso.camera.target.z).toBe(-10)
+  })
+
+  it('calls off a focus slide already under way', () => {
+    iso.focusOn(100, 100)
+    settle(3)
+    iso.moveTo(5, 5)
+    settle()
+    expect(iso.camera.target.x).toBe(5)
+    expect(iso.camera.target.z).toBe(5)
   })
 })
 

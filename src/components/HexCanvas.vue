@@ -1,15 +1,14 @@
 <script setup lang="ts">
 import { Color3 } from '@babylonjs/core/Maths/math.color'
-import { computed, ref, shallowRef, watch } from 'vue'
+import { computed, defineAsyncComponent, ref, shallowRef, triggerRef, watch } from 'vue'
 import { hexKey, parseKey, type HexKey } from '../hex/coords'
 import { createLayout } from '../hex/layout'
 import MiniMap from './MiniMap.vue'
-import { maxZoomFor, useHexWindow, windowCost } from '../composables/useHexWindow'
+import { gridCapacity, maxZoomFor, useHexWindow } from '../composables/useHexWindow'
 import { useTurnPlayback } from '../composables/useTurnPlayback'
 import { useHexScene } from '../engine/useHexScene'
-import { useHexMapStore, WORLD_SIZES } from '../stores/hexMap'
+import { useHexMapStore } from '../stores/hexMap'
 import { createTerrainField } from '../terrain/field'
-import type { HexTile } from '../engine/hexGrid'
 
 const props = withDefaults(
   defineProps<{
@@ -36,6 +35,11 @@ const GOAL_TINT = new Color3(0.86, 0.36, 0.36)
 /** How much of a hex survives once the party has walked on past it. */
 const REMEMBERED = 0.42
 
+// Dev-only; the static DEV check lets the build drop the chunk entirely.
+const RenderStats = import.meta.env.DEV
+  ? defineAsyncComponent(() => import('./RenderStats.vue'))
+  : null
+
 const canvas = ref<HTMLCanvasElement | null>(null)
 const store = useHexMapStore()
 
@@ -59,13 +63,9 @@ makeWorld()
 /** How far back this world may be looked at; a bigger one is allowed more. */
 const maxZoom = (): number => maxZoomFor(layout, store.worldRadius)
 
-// Sized for whichever of the offered worlds asks the most of the grid, so
-// switching size moves the zoom limit without ever reallocating.
-const capacity = Math.max(
-  ...Object.values(WORLD_SIZES).map((radius) =>
-    windowCost(layout, maxZoomFor(layout, radius), radius),
-  ),
-)
+// Sized for any world rather than for today's, so switching size moves the zoom
+// limit without ever reallocating.
+const capacity = gridCapacity(layout)
 
 const { hexScene } = useHexScene(canvas, {
   layout,
@@ -78,15 +78,20 @@ const { hexScene } = useHexScene(canvas, {
   onSelect: store.select,
 })
 
-/** The hexes the grid is holding right now; the fog is drawn over these. */
-const windowed = shallowRef<readonly HexTile[]>([])
+/**
+ * The keys the grid is holding right now; the fog is drawn over these. The grid
+ * hands over its own live array, the same one every time, so the ref is
+ * triggered by hand rather than by a new value.
+ */
+const windowed = shallowRef<readonly HexKey[]>([])
 
 useHexWindow(
   hexScene,
   layout,
   () => store.field,
-  (tiles) => {
-    windowed.value = tiles
+  (keys) => {
+    windowed.value = keys
+    triggerRef(windowed)
   },
 )
 
@@ -123,8 +128,7 @@ const fog = computed(() => {
 
   // Only the window is drawn, so only the window needs fogging: a fog map over
   // a world of a quarter of a million hexes would be rebuilt on every step.
-  for (const tile of windowed.value) {
-    const key = hexKey(tile.hex)
+  for (const key of windowed.value) {
     if (store.visible.has(key)) continue
     result.set(key, store.explored.has(key) ? REMEMBERED : 0)
   }
@@ -155,7 +159,11 @@ watch(
   (paths) => hexScene.value?.arrows.setPaths(paths),
 )
 
-// The entity being given orders is the one whose next hex is worth marking.
+// The entity being given orders is the one whose stops are worth marking.
+watch(
+  () => store.stops,
+  ({ hexes, color }) => hexScene.value?.stops.setStops(hexes, color),
+)
 
 // The sky over the map follows the same clock the dial draws: the sun swings
 // across the four turns of the day and the ground goes cold after dark.
@@ -172,10 +180,14 @@ const tokens = computed(() =>
 // the scene first appears, since state settled before mount reaches no watcher,
 // and after a new world, since every layer is pinned to heights that just moved.
 const pushEverything = (created: NonNullable<typeof hexScene.value>): void => {
+  // First, and before the field watcher rebuilds the window: a view left wider
+  // than the new world allows asks the grid for more than it holds.
+  created.setMaxZoom(maxZoom())
   created.grid.setOverlay(overlay.value)
   created.grid.setFog(fog.value)
   created.arrows.setPaths(store.paths)
   created.tokens.setEntries(tokens.value)
+  created.stops.setStops(store.stops.hexes, store.stops.color)
   created.vision.setField(sightField.value.lit, sightField.value.shadow)
   created.vision.setShown(store.showSight)
   created.setDaylight(store.clock.phase, store.clock.index)
@@ -199,6 +211,7 @@ watch([() => store.terrain, () => store.worldRadius], () => {
 <template>
   <canvas ref="canvas" touch-action="none" />
   <MiniMap :hex-scene="hexScene" :layout="layout" />
+  <component :is="RenderStats" v-if="RenderStats" :hex-scene="hexScene" />
 </template>
 
 <style scoped>

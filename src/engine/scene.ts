@@ -5,8 +5,7 @@ import { HemisphericLight } from '@babylonjs/core/Lights/hemisphericLight'
 import { StandardMaterial } from '@babylonjs/core/Materials/standardMaterial'
 import { Color3, Color4 } from '@babylonjs/core/Maths/math.color'
 import { Vector3 } from '@babylonjs/core/Maths/math.vector'
-import { MeshBuilder } from '@babylonjs/core/Meshes/meshBuilder'
-import '@babylonjs/core/Meshes/Builders/groundBuilder'
+import { CreateGround } from '@babylonjs/core/Meshes/Builders/groundBuilder'
 import type { PickingInfo } from '@babylonjs/core/Collisions/pickingInfo'
 // Without this side-effect import scene.pick is a stub that warns once and
 // returns an empty PickingInfo, so every pick silently misses.
@@ -18,11 +17,13 @@ import type { Layout } from '../hex/layout'
 import { createIsoCamera, type IsoCamera } from './camera'
 import { attachIsoControls } from './controls'
 import type { TerrainField } from '../terrain/field'
-import { createHexGrid, type HexGrid, type HexTile } from './hexGrid'
+import { createHexGrid, wantsDetail, type HexGrid, type HexTile } from './hexGrid'
 import { worldBounds } from './hexWindow'
 import { createTokenField, type TokenField } from './tokenField'
 import { createRouteArrows, type RouteArrows } from './routeArrows'
 import { createVisionOverlay, type VisionOverlay } from './visionOverlay'
+import { createWaypointMarkers, type WaypointMarkers } from './waypointMarkers'
+import { wantsFrame } from './renderPacing'
 
 export interface HexSceneOptions {
   layout: Layout
@@ -34,7 +35,8 @@ export interface HexSceneOptions {
   gap?: number
   bevel?: number
   onHover?(hex: Axial | null): void
-  onSelect?(hex: Axial | null): void
+  /** `append` is a shift-click: add the hex to the order rather than replace it. */
+  onSelect?(hex: Axial | null, append: boolean): void
 }
 
 export interface HexScene {
@@ -45,8 +47,11 @@ export interface HexScene {
   arrows: RouteArrows
   tokens: TokenField
   vision: VisionOverlay
+  stops: WaypointMarkers
   /** Draws a different window of the world; everything else rides along. */
   setWindow(tiles: readonly HexTile[]): void
+  /** Slides the window: what `keep` turns down leaves, `entering` arrives. */
+  moveWindow(keep: (q: number, r: number) => boolean, entering: readonly HexTile[]): void
   /** Hands the scene a new world, which is what a new seed or size is. */
   setField(field: TerrainField): void
   /** How far back the view may be pulled on the world it is now showing. */
@@ -70,7 +75,7 @@ export function hexFromPick(grid: HexGrid, pick: PickingInfo | null): Axial | nu
 // against it, and it keeps the void from showing through at low elevations.
 function addGroundSlab(scene: Scene, bounds: IsoCameraBounds | undefined, margin: number): void {
   if (!bounds) return
-  const ground = MeshBuilder.CreateGround(
+  const ground = CreateGround(
     'slab',
     {
       width: bounds.maxX - bounds.minX + margin * 2,
@@ -80,6 +85,9 @@ function addGroundSlab(scene: Scene, bounds: IsoCameraBounds | undefined, margin
   )
   ground.position.set((bounds.minX + bounds.maxX) / 2, 0, (bounds.minZ + bounds.maxZ) / 2)
   ground.isPickable = false
+  // Laid once for the world and never moved.
+  ground.freezeWorldMatrix()
+  ground.doNotSyncBoundingInfo = true
 
   const material = new StandardMaterial('slab', scene)
   material.diffuseColor = new Color3(0.12, 0.14, 0.18)
@@ -158,6 +166,13 @@ export function createHexScene(canvas: HTMLCanvasElement, options: HexSceneOptio
   const engine = new Engine(canvas, true, { preserveDrawingBuffer: true, stencil: true })
   const scene = new Scene(engine)
   scene.clearColor = DAY.clear
+  // Hover runs its own pick against the grid alone; Babylon's pick of every
+  // mesh on each pointer move would be the same work done twice.
+  scene.skipPointerMovePicking = true
+
+  // Set by anything that changes what is drawn. Between changes the render loop
+  // sits idle instead of redrawing a still map at the display's rate.
+  let dirty = true
 
   const sky = new HemisphericLight('sky', new Vector3(0, 1, 0), scene)
   const sun = new DirectionalLight('sun', new Vector3(-0.6, -1, 0.4), scene)
@@ -170,6 +185,7 @@ export function createHexScene(canvas: HTMLCanvasElement, options: HexSceneOptio
     sky.intensity = light.sky
     sky.groundColor = light.ground
     scene.clearColor = light.clear
+    dirty = true
   }
 
   setDaylight('day', 1)
@@ -196,6 +212,7 @@ export function createHexScene(canvas: HTMLCanvasElement, options: HexSceneOptio
   const arrows = createRouteArrows(scene, options.layout, elevationOf)
   const tokens = createTokenField(scene, options.layout, elevationOf)
   const vision = createVisionOverlay(scene, options.layout, elevationOf, { gap: options.gap })
+  const stops = createWaypointMarkers(scene, options.layout, elevationOf)
   addGroundSlab(scene, bounds, options.layout.size * 2)
 
   // Plain axial coordinates cross this boundary, never Babylon objects, so
@@ -208,14 +225,76 @@ export function createHexScene(canvas: HTMLCanvasElement, options: HexSceneOptio
 
   const pointerObserver = scene.onPointerObservable.add((info) => {
     if (info.type === PointerEventTypes.POINTERMOVE) options.onHover?.(pickHex())
-    else if (info.type === PointerEventTypes.POINTERTAP) options.onSelect?.(pickHex())
+    else if (info.type === PointerEventTypes.POINTERTAP)
+      options.onSelect?.(pickHex(), info.event.shiftKey)
   })
 
-  engine.runRenderLoop(() => scene.render())
+  const redrawOnCall = <T extends object>(target: T, methods: readonly (keyof T)[]): void => {
+    for (const name of methods) {
+      const method = target[name]
+      if (typeof method !== 'function') continue
+      target[name] = ((...args: unknown[]) => {
+        dirty = true
+        return method.apply(target, args)
+      }) as T[keyof T]
+    }
+  }
+
+  redrawOnCall(grid, ['setOverlay', 'setFog', 'setWindow', 'moveWindow'])
+  redrawOnCall(arrows, ['setPath', 'setPaths'])
+  redrawOnCall(tokens, ['setEntries', 'place', 'hop'])
+  redrawOnCall(vision, ['setField', 'setShown'])
+  redrawOnCall(stops, ['setStops'])
+
+  // The rounded edge is dropped once it shrinks to about a pixel on screen,
+  // which at the widest zooms is two thirds of the grid's triangles. Worked out
+  // before each frame is drawn, so the switch lands on the frame that needs it.
+  const detailObserver = scene.onBeforeRenderObservable.add(() => {
+    const pixels = (grid.bevelRadius * engine.getRenderHeight()) / (2 * iso.zoom)
+    grid.setDetail(wantsDetail(pixels, grid.detailed))
+  })
+
+  // A drag or a jump moves the target directly rather than through the easing,
+  // so the loop watches the target itself for those.
+  let seenX = NaN
+  let seenZ = NaN
+  const targetMoved = (): boolean => {
+    const { x, z } = iso.camera.target
+    if (x === seenX && z === seenZ) return false
+    seenX = x
+    seenZ = z
+    return true
+  }
+
+  // A material still compiling draws nothing on its frame and needs another
+  // once it is ready, which nothing else would ask for.
+  let warming = true
+
+  // Driven by hand rather than by runRenderLoop, so a skipped frame is not begun
+  // either: the engine's delta time then spans the frames actually drawn, and a
+  // bob drawn at the ambient rate still moves at its real speed.
+  let frameRequest = 0
+  let lastFrame = -Infinity
+  const tick = (now: number): void => {
+    frameRequest = requestAnimationFrame(tick)
+
+    const changed = targetMoved() || dirty || warming || iso.settling || tokens.hopping
+    const animating = tokens.bobbing || arrows.count > 0 || stops.count > 0
+    if (!wantsFrame({ changed, animating, sinceLastFrame: now - lastFrame })) return
+
+    dirty = false
+    lastFrame = now
+    engine.beginFrame()
+    scene.render()
+    engine.endFrame()
+    warming = !scene.isReady(false)
+  }
+  frameRequest = requestAnimationFrame(tick)
 
   const resize = (): void => {
     engine.resize()
     iso.updateProjection(engine.getAspectRatio(iso.camera))
+    dirty = true
   }
   resize()
 
@@ -227,6 +306,7 @@ export function createHexScene(canvas: HTMLCanvasElement, options: HexSceneOptio
     arrows,
     tokens,
     vision,
+    stops,
 
     setDaylight,
 
@@ -234,20 +314,28 @@ export function createHexScene(canvas: HTMLCanvasElement, options: HexSceneOptio
       grid.setWindow(next)
     },
 
+    moveWindow(keep, entering): void {
+      grid.moveWindow(keep, entering)
+    },
+
     setField(next): void {
       field = next
       iso.setPanBounds(worldBounds(options.layout, next.radius))
+      dirty = true
     },
 
     setMaxZoom(limit): void {
       iso.setMaxZoom(limit)
+      dirty = true
     },
 
     resize,
     dispose(): void {
       scene.onPointerObservable.remove(pointerObserver)
+      scene.onBeforeRenderObservable.remove(detailObserver)
       detachControls()
-      engine.stopRenderLoop()
+      cancelAnimationFrame(frameRequest)
+      stops.dispose()
       vision.dispose()
       tokens.dispose()
       arrows.dispose()

@@ -30,6 +30,8 @@ export interface EntityState {
   carry: number
   /** The route left to walk, standing until it runs out or is replaced. */
   pending: readonly HexKey[]
+  /** The leg ends still ahead on that route, in the order they are reached. */
+  waypoints: readonly HexKey[]
 }
 
 // Enough to tell a handful of entities apart on the map and in the list; it
@@ -50,7 +52,7 @@ export const KIND_DEFAULTS: Readonly<Record<EntityKind, { pacePerTurn: number; s
   npc: { pacePerTurn: 1, sight: 4 },
 }
 
-export const idleState = (): EntityState => ({ at: null, carry: 0, pending: [] })
+export const idleState = (): EntityState => ({ at: null, carry: 0, pending: [], waypoints: [] })
 
 export function newEntity(
   name: string,

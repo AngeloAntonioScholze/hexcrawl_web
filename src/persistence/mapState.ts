@@ -162,22 +162,39 @@ export function saveSnapshot(db: Database, snapshot: MapSnapshot): void {
 
     db.exec('DELETE FROM entity_turn')
     const state = db.prepare(
-      'INSERT INTO entity_turn (turn, entity_id, hex, carry, pending) VALUES (?,?,?,?,?)',
+      'INSERT INTO entity_turn (turn, entity_id, hex, carry, pending, waypoints) VALUES (?,?,?,?,?,?)',
     )
     try {
       for (const row of snapshot.states) {
-        state.bind([row.turn, row.entityId, row.at, row.carry, joinHexes(row.pending)]).stepReset()
+        state
+          .bind([
+            row.turn,
+            row.entityId,
+            row.at,
+            row.carry,
+            joinHexes(row.pending),
+            joinHexes(row.waypoints),
+          ])
+          .stepReset()
       }
     } finally {
       state.finalize()
     }
 
     db.exec('DELETE FROM queued_action')
-    const queued = db.prepare('INSERT INTO queued_action (entity_id, kind, route) VALUES (?, ?, ?)')
+    const queued = db.prepare(
+      'INSERT INTO queued_action (entity_id, kind, route, waypoints) VALUES (?, ?, ?, ?)',
+    )
     try {
       for (const { entityId, action: order } of snapshot.queue) {
+        const move = order.kind === 'move'
         queued
-          .bind([entityId, order.kind, order.kind === 'move' ? joinHexes(order.route) : ''])
+          .bind([
+            entityId,
+            order.kind,
+            move ? joinHexes(order.route) : '',
+            move ? joinHexes(order.waypoints) : '',
+          ])
           .stepReset()
       }
     } finally {
@@ -238,11 +255,14 @@ export function loadSnapshot(db: Database): MapSnapshot | null {
       at: hexOrNull(one.hex),
       carry: Number(one.carry),
       pending: splitHexes(one.pending),
+      waypoints: splitHexes(one.waypoints),
     })),
     queue: db.selectObjects('SELECT * FROM queued_action').map((one) => {
       const kind = String(one.kind) as ActionKind
       const action: Action =
-        kind === 'move' ? { kind, route: splitHexes(one.route) } : { kind: kind as 'wait' | 'camp' }
+        kind === 'move'
+          ? { kind, route: splitHexes(one.route), waypoints: splitHexes(one.waypoints) }
+          : { kind: kind as 'wait' | 'camp' }
       return { entityId: String(one.entity_id), action }
     }),
   }

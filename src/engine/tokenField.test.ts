@@ -39,6 +39,26 @@ afterEach(() => {
   engine.dispose()
 })
 
+describe('motion', () => {
+  it('bobs once any token stands on the map', () => {
+    field.setEntries([entry('a', null)])
+    expect(field.bobbing).toBe(false)
+
+    field.place('a', { q: 0, r: 0 })
+    expect(field.bobbing).toBe(true)
+  })
+
+  it('is hopping until the leap lands', () => {
+    field.setEntries([entry('a', { q: 0, r: 0 })])
+    field.hop('a', { q: 1, r: 0 }, 0.1)
+    expect(field.hopping).toBe(true)
+
+    engine.getDeltaTime = () => 50
+    for (let i = 0; i < 4; i++) scene.onBeforeRenderObservable.notifyObservers(scene)
+    expect(field.hopping).toBe(false)
+  })
+})
+
 describe('createTokenField', () => {
   it('draws every entity at once, each on its own hex', () => {
     field.setEntries([entry('a', { q: 0, r: 0 }), entry('b', { q: 2, r: -1 })])

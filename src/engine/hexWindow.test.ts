@@ -8,9 +8,12 @@ import {
   MARGIN_CHUNKS,
   axialBounds,
   chunkSpanFor,
+  insideSpan,
   insideWorld,
+  rectCorners,
   sameSpan,
   spanCapacity,
+  tilesEntering,
   tilesInSpan,
   worldBounds,
   type ViewRect,
@@ -31,7 +34,7 @@ const rectAround = (x: number, z: number, reach: number): ViewRect => ({
 describe('axialBounds', () => {
   it('covers every hex the rectangle touches', () => {
     const rect = rectAround(0, 0, 20)
-    const bounds = axialBounds(layout, rect)
+    const bounds = axialBounds(layout, rectCorners(rect))
 
     // A hex in the middle of each edge of the rectangle has to be inside it,
     // which is exactly what converting only two corners would get wrong.
@@ -41,7 +44,7 @@ describe('axialBounds', () => {
       { x: 0, z: rect.minZ },
       { x: 0, z: rect.maxZ },
     ]) {
-      const hex = axialBounds(layout, rectAround(point.x, point.z, 0))
+      const hex = axialBounds(layout, rectCorners(rectAround(point.x, point.z, 0)))
       expect(hex.minQ).toBeGreaterThanOrEqual(bounds.minQ)
       expect(hex.maxQ).toBeLessThanOrEqual(bounds.maxQ)
       expect(hex.minR).toBeGreaterThanOrEqual(bounds.minR)
@@ -52,7 +55,7 @@ describe('axialBounds', () => {
 
 describe('chunkSpanFor', () => {
   it('carries two chunks of ground beyond the view on every side', () => {
-    const span = chunkSpanFor(layout, rectAround(0, 0, 1))
+    const span = chunkSpanFor(layout, rectCorners(rectAround(0, 0, 1)))
 
     expect(span.minQ).toBe(-MARGIN_CHUNKS)
     expect(span.maxQ).toBe(MARGIN_CHUNKS)
@@ -61,16 +64,16 @@ describe('chunkSpanFor', () => {
   })
 
   it('does not move while the view stays inside the chunks it holds', () => {
-    const first = chunkSpanFor(layout, rectAround(0, 0, 10))
-    const nudged = chunkSpanFor(layout, rectAround(layout.size, 0, 10))
+    const first = chunkSpanFor(layout, rectCorners(rectAround(0, 0, 10)))
+    const nudged = chunkSpanFor(layout, rectCorners(rectAround(layout.size, 0, 10)))
 
     expect(sameSpan(first, nudged)).toBe(true)
   })
 
   it('moves once the view crosses a chunk boundary', () => {
-    const here = chunkSpanFor(layout, rectAround(0, 0, 10))
+    const here = chunkSpanFor(layout, rectCorners(rectAround(0, 0, 10)))
     const world = hexToWorld(layout, { q: CHUNK * 2, r: 0 })
-    const away = chunkSpanFor(layout, rectAround(world.x, world.z, 10))
+    const away = chunkSpanFor(layout, rectCorners(rectAround(world.x, world.z, 10)))
 
     expect(sameSpan(here, away)).toBe(false)
   })
@@ -96,6 +99,46 @@ describe('tilesInSpan', () => {
   it('never holds more hexes than the span says it can', () => {
     const span = { minQ: -2, maxQ: 2, minR: -2, maxR: 2 }
     expect(tilesInSpan(world(400), span).length).toBeLessThanOrEqual(spanCapacity(span))
+  })
+})
+
+describe('insideSpan', () => {
+  it('holds the last hex of its chunks and not the first one past them', () => {
+    const span = { minQ: 0, maxQ: 0, minR: 0, maxR: 0 }
+
+    expect(insideSpan(span, 0, 0)).toBe(true)
+    expect(insideSpan(span, CHUNK - 1, CHUNK - 1)).toBe(true)
+    expect(insideSpan(span, CHUNK, 0)).toBe(false)
+    expect(insideSpan(span, 0, -1)).toBe(false)
+  })
+})
+
+describe('tilesEntering', () => {
+  const field = world(400)
+  const from = { minQ: -2, maxQ: 2, minR: -2, maxR: 2 }
+  const east = { ...from, minQ: -1, maxQ: 3 }
+
+  it('builds only the strip of chunks the old span was not carrying', () => {
+    const entering = tilesEntering(field, from, east)
+    const rows = east.maxR - east.minR + 1
+
+    expect(entering).toHaveLength(CHUNK * CHUNK * rows)
+    expect(entering.every((tile) => !insideSpan(from, tile.hex.q, tile.hex.r))).toBe(true)
+  })
+
+  it('makes up the new span exactly, together with what stays', () => {
+    const stays = tilesInSpan(field, from).filter((tile) =>
+      insideSpan(east, tile.hex.q, tile.hex.r),
+    )
+    const moved = [...stays, ...tilesEntering(field, from, east)].map((tile) => hexKey(tile.hex))
+    const whole = tilesInSpan(field, east).map((tile) => hexKey(tile.hex))
+
+    expect(moved.sort()).toEqual(whole.sort())
+  })
+
+  it('builds nothing for a view that only pulled in', () => {
+    const inner = { minQ: -1, maxQ: 1, minR: -1, maxR: 1 }
+    expect(tilesEntering(field, from, inner)).toHaveLength(0)
   })
 })
 

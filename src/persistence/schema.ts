@@ -108,6 +108,10 @@ const MIGRATIONS: readonly string[] = [
   `
   ALTER TABLE map ADD COLUMN world_radius INTEGER NOT NULL DEFAULT 150;
   `,
+  `
+  ALTER TABLE entity_turn ADD COLUMN waypoints TEXT NOT NULL DEFAULT '';
+  ALTER TABLE queued_action ADD COLUMN waypoints TEXT NOT NULL DEFAULT '';
+  `,
 ]
 
 export const SCHEMA_VERSION = MIGRATIONS.length

@@ -43,7 +43,7 @@ const worldSizes = Object.keys(WORLD_SIZES) as WorldSize[]
 const hint = computed(() => {
   if (!store.start) return 'click a hex to put the entity there'
   if (!store.goal) return 'click a hex to give it a route'
-  return 'press the arrow on the dial: it walks as the turns pass'
+  return 'shift-click adds a stop · press the arrow on the dial: it walks as the turns pass'
 })
 
 const straightLine = computed(() => (store.route ? `${store.route.steps * KM_PER_HEX} km` : '—'))
@@ -149,9 +149,28 @@ const olderTurns = computed(() => Math.max(0, store.journey.length - TURNS_SHOWN
           <dt>travel</dt>
           <dd>{{ store.route.km }} km</dd>
 
+          <dt>turns</dt>
+          <dd>~{{ store.routeTurns }}</dd>
+
           <dt>flat</dt>
           <dd class="dim">{{ straightLine }}</dd>
         </dl>
+
+        <ol v-if="store.legs.length" class="legs">
+          <li v-for="(leg, index) in store.legs" :key="`${index}:${leg.to}`">
+            <span class="dim">{{ index + 1 }}</span>
+            <span>{{ leg.to }}</span>
+            <span class="value">{{ leg.km }} km · ~{{ leg.turns }}t</span>
+            <button
+              type="button"
+              class="drop"
+              :title="`drop the stop at ${leg.to}`"
+              @click="store.removeWaypoint(index)"
+            >
+              ×
+            </button>
+          </li>
+        </ol>
 
         <label class="control">
           <input v-model="store.allowWater" type="checkbox" />
@@ -386,6 +405,33 @@ aside {
 
 .journey li button:hover {
   background: color-mix(in srgb, var(--line) 45%, transparent);
+}
+
+.legs {
+  margin: 0.4rem 0 0;
+  padding: 0;
+  font-size: 0.78rem;
+  list-style: none;
+}
+
+.legs li {
+  display: grid;
+  grid-template-columns: 1rem 1fr auto 1.4rem;
+  align-items: center;
+  gap: 0.4rem;
+  font-variant-numeric: tabular-nums;
+}
+
+.legs .drop {
+  padding: 0;
+  border: none;
+  background: none;
+  color: var(--ink-dim);
+  line-height: 1.2;
+}
+
+.legs .drop:hover {
+  color: var(--ink);
 }
 
 .entities {

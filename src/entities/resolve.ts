@@ -37,10 +37,12 @@ function intent(
     // The route is given from where the entity stands, so the hex under it is
     // not a hex it has to enter.
     const ahead = action.route[0] === state.at ? action.route.slice(1) : action.route
-    return { ...state, pending: ahead, kind: 'move' }
+    return { ...state, pending: ahead, waypoints: action.waypoints, kind: 'move' }
   }
 
-  if (action.kind === 'camp') return { ...state, carry: 0, pending: [], kind: 'camp' }
+  if (action.kind === 'camp') {
+    return { ...state, carry: 0, pending: [], waypoints: [], kind: 'camp' }
+  }
   return { ...state, kind: 'wait' }
 }
 
@@ -53,17 +55,25 @@ function walk(
   let at = from.at
   let budget = from.carry + entity.pacePerTurn
   let pending = from.pending
+  let waypoints = from.waypoints
+
+  // A leg is only over once its own end is reached: the next leg's end may lie
+  // on this one, and passing through it early does not count.
+  const enter = (hex: HexKey): void => {
+    at = hex
+    pending = pending.slice(1)
+    if (waypoints[0] === hex) waypoints = waypoints.slice(1)
+    entered.push(hex)
+  }
 
   // Nowhere yet: the first hex of a route is where the entity is put down, not
   // ground it has to cross to reach, so it costs nothing to stand on.
   if (at === null) {
-    if (pending.length === 0) return { at, carry: budget, pending, entered }
-    at = pending[0]
-    pending = pending.slice(1)
-    entered.push(at)
+    if (pending.length === 0) return { at, carry: budget, pending, waypoints, entered }
+    enter(pending[0])
   }
 
-  while (pending.length > 0) {
+  while (at !== null && pending.length > 0) {
     const here = field.at(parseKey(at))
     const next = field.at(parseKey(pending[0]))
     if (!here || !next) break
@@ -72,12 +82,10 @@ function walk(
     if (budget < cost) break
 
     budget -= cost
-    at = pending[0]
-    pending = pending.slice(1)
-    entered.push(at)
+    enter(pending[0])
   }
 
-  return { at, carry: Math.min(budget, MAX_CARRY), pending, entered }
+  return { at, carry: Math.min(budget, MAX_CARRY), pending, waypoints, entered }
 }
 
 /**

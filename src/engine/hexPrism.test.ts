@@ -116,3 +116,29 @@ describe('buildHexPrismGeometry', () => {
     }
   })
 })
+
+describe('a prism with no bevel', () => {
+  const flat = buildHexPrismGeometry(SIZE, { bevel: 0 })
+  const vertexCount = flat.positions.length / 3
+
+  it('is a cap and six walls: eighteen triangles', () => {
+    expect(flat.indices.length / 3).toBe(18)
+  })
+
+  it('keeps the full radius and one unit of height', () => {
+    const ys = flat.positions.filter((_, i) => i % 3 === 1)
+    expect(Math.min(...ys)).toBe(0)
+    expect(Math.max(...ys)).toBe(1)
+
+    for (let i = 1; i <= 6; i++) {
+      expect(Math.hypot(flat.positions[i * 3], flat.positions[i * 3 + 2])).toBeCloseTo(SIZE, 10)
+    }
+  })
+
+  it('shades with no degenerate faces', () => {
+    for (let i = 0; i < vertexCount; i++) {
+      const [nx, ny, nz] = [flat.normals[i * 3], flat.normals[i * 3 + 1], flat.normals[i * 3 + 2]]
+      expect(Math.hypot(nx, ny, nz), `vertex ${i}`).toBeCloseTo(1, 6)
+    }
+  })
+})

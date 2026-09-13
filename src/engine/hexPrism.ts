@@ -21,6 +21,10 @@ export interface HexPrismGeometry {
 const DEFAULT_BEVEL = 0.14
 const DEFAULT_BEVEL_SEGMENTS = 3
 
+/** How far the rounded edge reaches in from the rim, in world units. */
+export const bevelRadius = (size: number, bevel = DEFAULT_BEVEL): number =>
+  Math.min(size * bevel, size * 0.4)
+
 // Matches hex/layout corners(): vertex angles at 60i - 30 degrees, giving a
 // pointy-top hexagon on the XZ plane.
 export function hexCornerOffsets(size: number): { x: number; z: number }[] {
@@ -36,8 +40,10 @@ export function buildHexPrismGeometry(
   size: number,
   options: HexPrismOptions = {},
 ): HexPrismGeometry {
-  const bevel = Math.min(size * (options.bevel ?? DEFAULT_BEVEL), size * 0.4)
-  const segments = Math.max(1, options.bevelSegments ?? DEFAULT_BEVEL_SEGMENTS)
+  const bevel = bevelRadius(size, options.bevel)
+  // No bevel is a plain prism: the cap's rim is the top of the wall, with no
+  // rings rolling between them.
+  const segments = bevel > 0 ? Math.max(1, options.bevelSegments ?? DEFAULT_BEVEL_SEGMENTS) : 0
   const unit = hexCornerOffsets(1)
 
   const positions: number[] = []
@@ -56,7 +62,7 @@ export function buildHexPrismGeometry(
   // ending flush with the wall.
   const profile: { radius: number; y: number }[] = []
   for (let step = 0; step <= segments; step++) {
-    const angle = (Math.PI / 2) * (step / segments)
+    const angle = segments > 0 ? (Math.PI / 2) * (step / segments) : 0
     profile.push({
       radius: capRadius + bevel * Math.sin(angle),
       y: HEIGHT - bevel * (1 - Math.cos(angle)),

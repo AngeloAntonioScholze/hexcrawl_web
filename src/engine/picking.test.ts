@@ -104,6 +104,54 @@ describe('screen picking', () => {
   it('returns null off the grid', () => {
     expect(screenPick(2, 2)).toBeNull()
   })
+
+  // The grid's bounds are kept by hand as the window moves; stale ones would
+  // reject the ray before any hex outside the old window was tested.
+  it('resolves hexes the window moved onto, and not the ones it left', () => {
+    grid.moveWindow(
+      () => false,
+      spiral({ q: 7, r: 0 }, 2).map((hex) => ({
+        hex,
+        elevation: 1,
+        color: new Color3(0.3, 0.3, 0.3),
+      })),
+    )
+    scene.render()
+
+    const hex = { q: 8, r: -1 }
+    const screen = screenPositionOf(hex)
+    expect(screenPick(screen.x, screen.y)).toEqual(hex)
+
+    const left = screenPositionOf({ q: 0, r: 0 })
+    expect(screenPick(left.x, left.y)).toBeNull()
+  })
+
+  // The flat prism sits empty until it takes over. The render loop's readiness
+  // check still looks at it while empty, which settles its material's defines
+  // without the per-hex colour, and nothing unsettles them: the map goes white.
+  it('draws the flat prism in the per-hex colours', () => {
+    const colourOn = (): unknown =>
+      (grid.mesh.subMeshes[0].materialDefines as unknown as Record<string, unknown>).INSTANCESCOLOR
+
+    scene.isReady(false)
+    grid.setDetail(false)
+    scene.render()
+    expect(colourOn()).toBe(true)
+
+    scene.isReady(false)
+    grid.setDetail(true)
+    scene.render()
+    expect(colourOn()).toBe(true)
+  })
+
+  it('resolves hexes on the flat prism too', () => {
+    grid.setDetail(false)
+    scene.render()
+
+    const hex = { q: 2, r: -1 }
+    const screen = screenPositionOf(hex)
+    expect(screenPick(screen.x, screen.y)).toEqual(hex)
+  })
 })
 
 describe('hexFromPick', () => {

@@ -4,6 +4,7 @@
   "type": "module",
   "scripts": {
     "bench": "bun run scripts/bench-fog.ts",
+    "bench:window": "bun run scripts/bench-window.ts",
     "build": "vue-tsc --noEmit && vite build",
     "dev": "vite",
     "format": "prettier --write .",
