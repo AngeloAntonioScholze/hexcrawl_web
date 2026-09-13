@@ -83,3 +83,60 @@ describe('createPartyToken', () => {
     bobbing.dispose()
   })
 })
+
+describe('leaping between hexes', () => {
+  it('arcs over both hexes on the way across', () => {
+    const token = createPartyToken(scene, layout, elevationOf, { lift: 0, bob: 0, arc: 2 })
+    token.setHex({ q: 0, r: 0 })
+    const ground = token.mesh.position.y
+
+    token.hopTo({ q: 1, r: 0 }, 1)
+    token.advanceBob(0.5)
+
+    expect(token.hopping).toBe(true)
+    expect(token.mesh.position.y).toBeGreaterThan(ground + 1)
+
+    const midway = hexToWorld(layout, { q: 0, r: 0 }).x + hexToWorld(layout, { q: 1, r: 0 }).x
+    expect(token.mesh.position.x).toBeCloseTo(midway / 2)
+
+    token.dispose()
+  })
+
+  it('lands on the hex it was sent to', () => {
+    const token = createPartyToken(scene, layout, elevationOf, { lift: 0, bob: 0 })
+    token.setHex({ q: 0, r: 0 })
+
+    token.hopTo({ q: 1, r: 0 }, 1)
+    token.advanceBob(1.2)
+
+    expect(token.hopping).toBe(false)
+    expect(token.hex).toEqual({ q: 1, r: 0 })
+    expect(token.mesh.position.x).toBeCloseTo(hexToWorld(layout, { q: 1, r: 0 }).x)
+
+    token.dispose()
+  })
+
+  it('is put straight down when it was nowhere to leap from', () => {
+    const token = createPartyToken(scene, layout, elevationOf, { lift: 0, bob: 0 })
+
+    token.hopTo({ q: 2, r: 0 })
+
+    expect(token.hopping).toBe(false)
+    expect(token.hex).toEqual({ q: 2, r: 0 })
+
+    token.dispose()
+  })
+
+  it('calls a leap off when it is placed somewhere else', () => {
+    const token = createPartyToken(scene, layout, elevationOf, { lift: 0, bob: 0 })
+    token.setHex({ q: 0, r: 0 })
+    token.hopTo({ q: 1, r: 0 }, 1)
+
+    token.setHex({ q: 3, r: 0 })
+
+    expect(token.hopping).toBe(false)
+    expect(token.hex).toEqual({ q: 3, r: 0 })
+
+    token.dispose()
+  })
+})

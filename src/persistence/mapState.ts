@@ -1,37 +1,76 @@
 import type { Database } from '@sqlite.org/sqlite-wasm'
+import type { Action, ActionKind, ActionRecord } from '../entities/action'
+import type { Entity, EntityKind, EntityState, Owner } from '../entities/entity'
 import type { HexKey } from '../hex/coords'
-import type { JourneyStep, TerrainControls } from '../stores/hexMap'
+import type { Origin, TerrainControls } from '../stores/hexMap'
+
+/** An entity's state at the end of one turn, flattened for the save file. */
+export interface SavedState extends EntityState {
+  turn: number
+  entityId: string
+}
+
+export interface SavedOrigin extends Origin {
+  entityId: string
+}
+
+export interface SavedAction {
+  entityId: string
+  action: Action
+}
 
 /**
  * Everything a session needs to come back as it was. The tiles themselves are
  * absent on purpose: terrain is a pure function of the controls, so storing
- * five thousand hexes would only be a slower way of storing the seed.
+ * five thousand hexes would only be a slower way of storing the seed. So is the
+ * explored set, which is read out of the record rather than piled up beside it.
  */
 export interface MapSnapshot {
   terrain: TerrainControls
-  start: HexKey | null
-  goal: HexKey | null
+  /** How far the world runs from the middle, in hexes. */
+  worldRadius: number
   allowWater: boolean
   fog: boolean
   showSight: boolean
   showHistory: boolean
-  sight: number
-  speed: number
-  explored: Iterable<HexKey>
-  journey: readonly JourneyStep[]
-  /** Which log entry the party stands on, or null at the head of it. */
-  standing: number | null
+  dmView: boolean
+  /** The turn the crawl stands on; the clock reads off it. */
+  turn: number
+  selectedId: string
+  entities: readonly Entity[]
+  origins: readonly SavedOrigin[]
+  /** What every entity did on every turn already spent. */
+  record: readonly ActionRecord[]
+  /** Where every entity stood at the end of each of those turns. */
+  states: readonly SavedState[]
+  /** Orders given but not yet spent. */
+  queue: readonly SavedAction[]
 }
 
 const SAVE_MAP = `
   INSERT OR REPLACE INTO map
-    (id, seed, scale, sea_level, relief, start_hex, goal_hex,
-     allow_water, fog, show_sight, show_history, sight, speed, standing)
-  VALUES (1, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+    (id, seed, scale, sea_level, relief, world_radius, allow_water, fog, show_sight,
+     show_history, dm_view, turn, selected_id)
+  VALUES (1, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
 `
 
 const flag = (value: boolean): number => (value ? 1 : 0)
 
+const joinHexes = (hexes: readonly HexKey[]): string => hexes.join(' ')
+
+const splitHexes = (value: unknown): HexKey[] =>
+  String(value ?? '')
+    .split(' ')
+    .filter(Boolean) as HexKey[]
+
+const hexOrNull = (value: unknown): HexKey | null =>
+  typeof value === 'string' ? (value as HexKey) : null
+
+/**
+ * Written wholesale rather than diffed. A rewind can cut the record back, so a
+ * save that only ever appended would hand a crawl back a future it had turned
+ * away from on the next reload.
+ */
 export function saveSnapshot(db: Database, snapshot: MapSnapshot): void {
   db.transaction(() => {
     db.exec({
@@ -41,49 +80,126 @@ export function saveSnapshot(db: Database, snapshot: MapSnapshot): void {
         snapshot.terrain.scale,
         snapshot.terrain.seaLevel,
         snapshot.terrain.relief,
-        snapshot.start,
-        snapshot.goal,
+        snapshot.worldRadius,
         flag(snapshot.allowWater),
         flag(snapshot.fog),
         flag(snapshot.showSight),
         flag(snapshot.showHistory),
-        snapshot.sight,
-        snapshot.speed,
-        snapshot.standing,
+        flag(snapshot.dmView),
+        snapshot.turn,
+        snapshot.selectedId,
       ],
     })
 
-    // Rewritten wholesale rather than diffed: exploration only ever grows, but
-    // forget() can cut it back, and one prepared insert per hex inside the
-    // transaction is already far cheaper than working out which ones moved.
-    db.exec('DELETE FROM explored')
-    const explored = db.prepare('INSERT INTO explored (hex) VALUES (?)')
+    db.exec('DELETE FROM entity')
+    const entity = db.prepare(
+      'INSERT INTO entity (id, ord, name, kind, owner, color, pace, sight, hidden) VALUES (?,?,?,?,?,?,?,?,?)',
+    )
     try {
-      for (const hex of snapshot.explored) explored.bind(hex).stepReset()
-    } finally {
-      explored.finalize()
-    }
-
-    // Rewritten the same way for the same reason: the log only grows while a
-    // world lasts, but a new world starts the party's history over.
-    db.exec('DELETE FROM journey')
-    const journey = db.prepare('INSERT INTO journey (step, hex, km, terrain) VALUES (?, ?, ?, ?)')
-    try {
-      snapshot.journey.forEach((step, index) => {
-        journey.bind([index, step.hex, step.km, step.terrain]).stepReset()
+      snapshot.entities.forEach((one, index) => {
+        entity
+          .bind([
+            one.id,
+            index,
+            one.name,
+            one.kind,
+            one.owner,
+            one.color,
+            one.pacePerTurn,
+            one.sight,
+            flag(one.hidden),
+          ])
+          .stepReset()
       })
     } finally {
-      journey.finalize()
+      entity.finalize()
+    }
+
+    db.exec('DELETE FROM origin')
+    const origin = db.prepare('INSERT INTO origin (entity_id, turn, hex) VALUES (?, ?, ?)')
+    try {
+      for (const one of snapshot.origins) origin.bind([one.entityId, one.turn, one.hex]).stepReset()
+    } finally {
+      origin.finalize()
+    }
+
+    // The turn table is the spine the history hangs off: cutting a turn out of
+    // it takes what happened on that turn along with it.
+    db.exec('DELETE FROM turn')
+    const turns = new Set<number>()
+    for (const row of snapshot.record) turns.add(row.turn)
+    for (const row of snapshot.states) turns.add(row.turn)
+
+    const turn = db.prepare('INSERT INTO turn (n) VALUES (?)')
+    try {
+      for (const n of [...turns].sort((a, b) => a - b)) turn.bind([n]).stepReset()
+    } finally {
+      turn.finalize()
+    }
+
+    db.exec('DELETE FROM action')
+    const action = db.prepare(
+      'INSERT INTO action (turn, entity_id, kind, from_hex, to_hex, entered, spent, carry) VALUES (?,?,?,?,?,?,?,?)',
+    )
+    try {
+      for (const row of snapshot.record) {
+        action
+          .bind([
+            row.turn,
+            row.entityId,
+            row.kind,
+            row.from,
+            row.to,
+            joinHexes(row.entered),
+            row.spent,
+            row.carry,
+          ])
+          .stepReset()
+      }
+    } finally {
+      action.finalize()
+    }
+
+    db.exec('DELETE FROM entity_turn')
+    const state = db.prepare(
+      'INSERT INTO entity_turn (turn, entity_id, hex, carry, pending) VALUES (?,?,?,?,?)',
+    )
+    try {
+      for (const row of snapshot.states) {
+        state.bind([row.turn, row.entityId, row.at, row.carry, joinHexes(row.pending)]).stepReset()
+      }
+    } finally {
+      state.finalize()
+    }
+
+    db.exec('DELETE FROM queued_action')
+    const queued = db.prepare('INSERT INTO queued_action (entity_id, kind, route) VALUES (?, ?, ?)')
+    try {
+      for (const { entityId, action: order } of snapshot.queue) {
+        queued
+          .bind([entityId, order.kind, order.kind === 'move' ? joinHexes(order.route) : ''])
+          .stepReset()
+      }
+    } finally {
+      queued.finalize()
     }
   })
 }
 
-const hexOrNull = (value: unknown): HexKey | null =>
-  typeof value === 'string' ? (value as HexKey) : null
-
 export function loadSnapshot(db: Database): MapSnapshot | null {
   const row = db.selectObject('SELECT * FROM map WHERE id = 1')
   if (!row) return null
+
+  const entities: Entity[] = db.selectObjects('SELECT * FROM entity ORDER BY ord').map((one) => ({
+    id: String(one.id),
+    name: String(one.name),
+    kind: String(one.kind) as EntityKind,
+    owner: String(one.owner) as Owner,
+    color: String(one.color),
+    pacePerTurn: Number(one.pace),
+    sight: Number(one.sight),
+    hidden: Number(one.hidden) === 1,
+  }))
 
   return {
     terrain: {
@@ -92,20 +208,42 @@ export function loadSnapshot(db: Database): MapSnapshot | null {
       seaLevel: Number(row.sea_level),
       relief: Number(row.relief),
     },
-    start: hexOrNull(row.start_hex),
-    goal: hexOrNull(row.goal_hex),
+    worldRadius: Number(row.world_radius),
     allowWater: Number(row.allow_water) === 1,
     fog: Number(row.fog) === 1,
     showSight: Number(row.show_sight) === 1,
     showHistory: Number(row.show_history) === 1,
-    sight: Number(row.sight),
-    speed: Number(row.speed),
-    standing: row.standing === null || row.standing === undefined ? null : Number(row.standing),
-    explored: db.selectValues('SELECT hex FROM explored ORDER BY hex').map(String) as HexKey[],
-    journey: db.selectObjects('SELECT hex, km, terrain FROM journey ORDER BY step').map((step) => ({
-      hex: String(step.hex) as HexKey,
-      km: Number(step.km),
-      terrain: String(step.terrain) as JourneyStep['terrain'],
+    dmView: Number(row.dm_view) === 1,
+    turn: Number(row.turn),
+    selectedId: String(row.selected_id ?? entities[0]?.id ?? ''),
+    entities,
+    origins: db.selectObjects('SELECT * FROM origin').map((one) => ({
+      entityId: String(one.entity_id),
+      turn: Number(one.turn),
+      hex: String(one.hex) as HexKey,
     })),
+    record: db.selectObjects('SELECT * FROM action ORDER BY turn, entity_id').map((one) => ({
+      turn: Number(one.turn),
+      entityId: String(one.entity_id),
+      kind: String(one.kind) as ActionKind,
+      from: hexOrNull(one.from_hex),
+      to: hexOrNull(one.to_hex),
+      entered: splitHexes(one.entered),
+      spent: Number(one.spent),
+      carry: Number(one.carry),
+    })),
+    states: db.selectObjects('SELECT * FROM entity_turn ORDER BY turn, entity_id').map((one) => ({
+      turn: Number(one.turn),
+      entityId: String(one.entity_id),
+      at: hexOrNull(one.hex),
+      carry: Number(one.carry),
+      pending: splitHexes(one.pending),
+    })),
+    queue: db.selectObjects('SELECT * FROM queued_action').map((one) => {
+      const kind = String(one.kind) as ActionKind
+      const action: Action =
+        kind === 'move' ? { kind, route: splitHexes(one.route) } : { kind: kind as 'wait' | 'camp' }
+      return { entityId: String(one.entity_id), action }
+    }),
   }
 }

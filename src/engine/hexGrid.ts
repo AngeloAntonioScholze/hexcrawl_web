@@ -17,6 +17,8 @@ export interface HexTile {
 }
 
 export interface HexGridOptions {
+  /** The most hexes the grid will ever hold at once; its buffers are this big. */
+  capacity: number
   /** Fraction of the hex radius left empty around each tile, drawing the border. */
   gap?: number
   /** Radius of the rounded top edge, as a fraction of the hex size. */
@@ -25,6 +27,7 @@ export interface HexGridOptions {
 
 export interface HexGrid {
   mesh: Mesh
+  /** Hexes drawn right now; never more than the capacity. */
   count: number
   indexOf(key: HexKey): number | undefined
   hexAt(index: number): Axial | undefined
@@ -37,11 +40,12 @@ export interface HexGrid {
    */
   setFog(clarity: ReadonlyMap<HexKey, number>): void
   /**
-   * Re-terrains the grid in place: same hexes in the same order, new heights
-   * and colours. The tint and fog layers ride along untouched, so regenerating
-   * a world does not disturb what the party has been shown.
+   * Puts the grid on a different set of hexes, reusing the same buffers: the
+   * window the camera is looking at, or the same window re-terrained. The tint
+   * and fog layers ride along, so moving the view does not disturb what the
+   * party has been shown.
    */
-  setTiles(tiles: readonly HexTile[]): void
+  setWindow(tiles: readonly HexTile[]): void
   dispose(): void
 }
 
@@ -56,15 +60,18 @@ const FOG_COLOR = new Color3(0.055, 0.065, 0.085)
 // route or the hover highlight should not vanish into unexplored ground.
 const TINT_CLARITY_FLOOR = 0.6
 
-export function createHexGrid(
-  scene: Scene,
-  layout: Layout,
-  tiles: HexTile[],
-  options: HexGridOptions = {},
-): HexGrid {
+/**
+ * The hexes on screen, drawn as thin instances of one prism. The buffers are
+ * allocated once for the widest view the camera allows and then re-keyed as the
+ * window moves, so a world of a quarter of a million hexes costs the same to
+ * draw as a world of five thousand: only what is in front of the camera is in
+ * the grid at all.
+ */
+export function createHexGrid(scene: Scene, layout: Layout, options: HexGridOptions): HexGrid {
   // Tiles are drawn slightly smaller than their layout cell; the sliver of dark
   // ground left between neighbours is the border.
   const gap = options.gap ?? DEFAULT_GAP
+  const capacity = Math.max(1, Math.floor(options.capacity))
   const mesh = createHexPrismMesh(scene, layout.size * (1 - gap), 'hexGrid', {
     bevel: options.bevel,
   })
@@ -73,14 +80,14 @@ export function createHexGrid(
   material.specularColor = Color3.Black()
   mesh.material = material
 
-  const count = tiles.length
-  const matrices = new Float32Array(count * 16)
-  const colors = new Float32Array(count * 4)
-  const baseColors = new Float32Array(count * 4)
+  const matrices = new Float32Array(capacity * 16)
+  const colors = new Float32Array(capacity * 4)
+  const baseColors = new Float32Array(capacity * 4)
+  const clarity = new Float32Array(capacity).fill(1)
   const indexByKey = new Map<HexKey, number>()
-  const hexByIndex: Axial[] = []
-  const keyByIndex: HexKey[] = []
-  const clarity = new Float32Array(count).fill(1)
+  let hexByIndex: Axial[] = []
+  let keyByIndex: HexKey[] = []
+  let count = 0
 
   const scaling = Vector3.One()
   const translation = Vector3.Zero()
@@ -94,23 +101,15 @@ export function createHexGrid(
     baseColors.set([tile.color.r, tile.color.g, tile.color.b, 1], index * 4)
   }
 
-  tiles.forEach((tile, index) => {
-    writeTile(tile, index)
-    colors.set(baseColors.subarray(index * 4, index * 4 + 4), index * 4)
-
-    const key = hexKey(tile.hex)
-    indexByKey.set(key, index)
-    hexByIndex.push(tile.hex)
-    keyByIndex.push(key)
-  })
-
   // Both buffers stay updatable: a static buffer cannot be re-uploaded, so
-  // re-terraining the grid would rewrite the matrices and never reach the GPU.
+  // moving the window would rewrite the matrices and never reach the GPU.
   mesh.thinInstanceSetBuffer('matrix', matrices, 16, false)
   mesh.thinInstanceSetBuffer('color', colors, 4, false)
   mesh.thinInstanceEnablePicking = true
+  mesh.thinInstanceCount = 0
 
   let overlay = new Map<HexKey, Color3>()
+  let fog = new Map<HexKey, number>()
 
   // The rendered colour is the tint over the terrain, faded toward the fog by
   // how much of the hex the party has seen. Both layers are kept apart so the
@@ -138,7 +137,10 @@ export function createHexGrid(
 
   return {
     mesh,
-    count,
+
+    get count() {
+      return count
+    },
 
     indexOf: (key) => indexByKey.get(key),
     hexAt: (index) => hexByIndex[index],
@@ -176,10 +178,11 @@ export function createHexGrid(
     },
 
     setFog(next): void {
+      fog = new Map(next)
       let changed = false
 
       for (let index = 0; index < count; index++) {
-        const fade = next.get(keyByIndex[index]) ?? 1
+        const fade = fog.get(keyByIndex[index]) ?? 1
         if (fade === clarity[index]) continue
         clarity[index] = fade
         composite(index)
@@ -189,16 +192,38 @@ export function createHexGrid(
       if (changed) mesh.thinInstanceBufferUpdated('color')
     },
 
-    setTiles(next): void {
-      if (next.length !== count) {
-        throw new RangeError(`expected ${count} tiles to re-terrain the grid, got ${next.length}`)
+    setWindow(tiles): void {
+      if (tiles.length > capacity) {
+        throw new RangeError(`the grid holds ${capacity} hexes, given ${tiles.length}`)
       }
 
-      next.forEach(writeTile)
-      for (let index = 0; index < count; index++) composite(index)
+      indexByKey.clear()
+      hexByIndex = []
+      keyByIndex = []
+      count = tiles.length
 
+      tiles.forEach((tile, index) => {
+        writeTile(tile, index)
+
+        const key = hexKey(tile.hex)
+        indexByKey.set(key, index)
+        hexByIndex.push(tile.hex)
+        keyByIndex.push(key)
+
+        // The fog and the tint belong to the hex, not to the slot it landed in,
+        // so both are read back for whatever moved into this one.
+        clarity[index] = fog.get(key) ?? 1
+        composite(index)
+      })
+
+      mesh.thinInstanceCount = count
       mesh.thinInstanceBufferUpdated('matrix')
       mesh.thinInstanceBufferUpdated('color')
+
+      // Picking and culling read the mesh's bounds, and those are worked out
+      // from the instance matrices when they are set: a window that moved
+      // without this leaves the grid unpickable outside where it used to be.
+      mesh.thinInstanceRefreshBoundingInfo(true)
     },
 
     dispose(): void {

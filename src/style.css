@@ -23,6 +23,14 @@ body,
   margin: 0;
 }
 
+/* The map is the page: nothing outside a panel's own body ever scrolls, and a
+   phone gets the same window rather than a zoomed-out copy of a desktop one. */
+html,
+body {
+  overflow: hidden;
+  overscroll-behavior: none;
+}
+
 body {
   background: var(--surface);
   color: var(--ink);

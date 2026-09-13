@@ -47,6 +47,14 @@ export interface IsoCamera {
   rotate(steps: number): void
   zoomBy(factor: number): void
   panBy(dxPixels: number, dyPixels: number): void
+  /** Slides the view over a point on the ground; a drag calls it off. */
+  focusOn(x: number, z: number): void
+  /** Moves the fence the view may be dragged inside: a new world, a new rim. */
+  setPanBounds(bounds: { minX: number; maxX: number; minZ: number; maxZ: number }): void
+  /** How far back the view may be pulled; a bigger world is allowed more. */
+  setMaxZoom(limit: number): void
+  /** Half the world-space height on screen, which sets how much is in view. */
+  readonly zoom: number
   updateProjection(aspect: number): void
   dispose(): void
 }
@@ -60,12 +68,12 @@ export function createIsoCamera(
   options: IsoCameraOptions = {},
 ): IsoCamera {
   const minZoom = options.minZoom ?? 10
-  const maxZoom = options.maxZoom ?? 200
+  let maxZoom = options.maxZoom ?? 200
   const betaNear = options.betaNear ?? NEAR_BETA
   const betaFar = options.betaFar ?? FAR_BETA
   const betaNearZoom = options.betaNearZoom ?? NEAR_BETA_ZOOM
   const betaFarZoom = options.betaFarZoom ?? FAR_BETA_ZOOM
-  const bounds = options.panBounds
+  let bounds = options.panBounds
 
   // Zoom steps are multiplicative, so the tilt is interpolated on a log scale
   // or it would swing almost entirely within the last few clicks of the band.
@@ -94,6 +102,8 @@ export function createIsoCamera(
   let zoom = initialZoom
   let targetZoom = zoom
   let targetAlpha = camera.alpha
+  // Where the view is sliding to, or null when it is sitting where it was left.
+  let focus: Vector3 | null = null
   let aspect = canvas.clientWidth / Math.max(1, canvas.clientHeight)
 
   const applyProjection = (): void => {
@@ -111,6 +121,17 @@ export function createIsoCamera(
   }
 
   const settle = (): void => {
+    if (focus) {
+      const gap = focus.subtract(camera.target)
+      if (gap.length() < SETTLED) {
+        camera.target.copyFrom(focus)
+        focus = null
+      } else {
+        camera.target.addInPlace(gap.scale(SMOOTHING))
+        clampTarget()
+      }
+    }
+
     const alphaGap = targetAlpha - camera.alpha
     const zoomGap = targetZoom - zoom
     if (Math.abs(alphaGap) < SETTLED && Math.abs(zoomGap) < SETTLED) {
@@ -141,6 +162,8 @@ export function createIsoCamera(
     // Screen-space drag mapped onto the ground plane, so a dragged hex keeps
     // pace with the pointer regardless of the current rotation.
     panBy(dxPixels: number, dyPixels: number): void {
+      // A hand on the map wins over whatever the turn was showing.
+      focus = null
       const worldPerPixel = (2 * zoom) / Math.max(1, canvas.clientHeight)
       const forward = camera.getDirection(Vector3.Forward())
       forward.y = 0
@@ -152,6 +175,28 @@ export function createIsoCamera(
       camera.target.addInPlace(right.scale(-dxPixels * worldPerPixel))
       camera.target.addInPlace(forward.scale(dyPixels * worldPerPixel))
       clampTarget()
+    },
+
+    focusOn(x: number, z: number): void {
+      focus = new Vector3(x, camera.target.y, z)
+    },
+
+    setPanBounds(next): void {
+      bounds = next
+      clampTarget()
+    },
+
+    // A view already wider than the new limit is pulled back in rather than
+    // left there: shrinking the world must not leave the grid overrun.
+    setMaxZoom(limit): void {
+      maxZoom = Math.max(minZoom, limit)
+      targetZoom = clamp(targetZoom, minZoom, maxZoom)
+      zoom = clamp(zoom, minZoom, maxZoom)
+      applyProjection()
+    },
+
+    get zoom() {
+      return zoom
     },
 
     updateProjection(nextAspect: number): void {

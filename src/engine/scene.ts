@@ -12,18 +12,25 @@ import type { PickingInfo } from '@babylonjs/core/Collisions/pickingInfo'
 // returns an empty PickingInfo, so every pick silently misses.
 import '@babylonjs/core/Culling/ray'
 import { Scene } from '@babylonjs/core/scene'
-import { hexKey, type Axial } from '../hex/coords'
-import { hexToWorld, type Layout } from '../hex/layout'
+import type { Axial } from '../hex/coords'
+import { TURNS_PER_PHASE, type Phase } from '../time/clock'
+import type { Layout } from '../hex/layout'
 import { createIsoCamera, type IsoCamera } from './camera'
 import { attachIsoControls } from './controls'
+import type { TerrainField } from '../terrain/field'
 import { createHexGrid, type HexGrid, type HexTile } from './hexGrid'
-import { createPartyToken, type PartyToken } from './partyToken'
+import { worldBounds } from './hexWindow'
+import { createTokenField, type TokenField } from './tokenField'
 import { createRouteArrows, type RouteArrows } from './routeArrows'
 import { createVisionOverlay, type VisionOverlay } from './visionOverlay'
 
 export interface HexSceneOptions {
   layout: Layout
-  tiles: HexTile[]
+  /** The world the scene reads its ground out of, a window at a time. */
+  field: TerrainField
+  /** The most hexes the grid will hold at once. */
+  capacity: number
+  maxZoom?: number
   gap?: number
   bevel?: number
   onHover?(hex: Axial | null): void
@@ -36,25 +43,18 @@ export interface HexScene {
   iso: IsoCamera
   grid: HexGrid
   arrows: RouteArrows
-  party: PartyToken
+  tokens: TokenField
   vision: VisionOverlay
-  /** Re-terrains the grid under everything already drawn on it. */
-  setTiles(tiles: readonly HexTile[]): void
+  /** Draws a different window of the world; everything else rides along. */
+  setWindow(tiles: readonly HexTile[]): void
+  /** Hands the scene a new world, which is what a new seed or size is. */
+  setField(field: TerrainField): void
+  /** How far back the view may be pulled on the world it is now showing. */
+  setMaxZoom(limit: number): void
+  /** Swings the light to where the clock says the sun is. */
+  setDaylight(phase: Phase, index: number): void
   resize(): void
   dispose(): void
-}
-
-function panBoundsFor(layout: Layout, tiles: HexTile[]): IsoCameraBounds | undefined {
-  if (tiles.length === 0) return undefined
-  const points = tiles.map((tile) => hexToWorld(layout, tile.hex))
-  const xs = points.map((p) => p.x)
-  const zs = points.map((p) => p.z)
-  return {
-    minX: Math.min(...xs),
-    maxX: Math.max(...xs),
-    minZ: Math.min(...zs),
-    maxZ: Math.max(...zs),
-  }
 }
 
 type IsoCameraBounds = { minX: number; maxX: number; minZ: number; maxZ: number }
@@ -82,39 +82,119 @@ function addGroundSlab(scene: Scene, bounds: IsoCameraBounds | undefined, margin
   ground.isPickable = false
 
   const material = new StandardMaterial('slab', scene)
-  material.diffuseColor = new Color3(0.04, 0.05, 0.07)
+  material.diffuseColor = new Color3(0.12, 0.14, 0.18)
   material.specularColor = Color3.Black()
-  material.emissiveColor = new Color3(0.012, 0.014, 0.018)
+  material.emissiveColor = new Color3(0.04, 0.045, 0.06)
   ground.material = material
+}
+
+/**
+ * The light over the map, read off the clock. The sun swings from one horizon
+ * to the other across the turns of a phase: a bright dawn on the near horizon,
+ * white overhead at noon, and a warm twilight on the far one. After dark the
+ * same arc is walked by a moon bright enough to read the terrain by, because a
+ * map nobody can see is not a night, it is a blank screen.
+ */
+interface Daylight {
+  /** Where the light comes from, as a direction to point the light at. */
+  direction: Vector3
+  sun: number
+  sky: number
+  warmth: Color3
+  ground: Color3
+  clear: Color4
+}
+
+const DAY = {
+  /** First light: pale and clean rather than orange, so dawn reads bright. */
+  dawn: new Color3(1, 0.94, 0.85),
+  noon: new Color3(1, 0.99, 0.97),
+  /** The far horizon, where the day is allowed to go amber. */
+  dusk: new Color3(1, 0.82, 0.6),
+  ground: new Color3(0.42, 0.45, 0.52),
+  clear: new Color4(0.16, 0.18, 0.22, 1),
+}
+
+const NIGHT = {
+  moon: new Color3(0.78, 0.84, 1),
+  ground: new Color3(0.24, 0.27, 0.36),
+  clear: new Color4(0.085, 0.095, 0.135, 1),
+}
+
+function daylightFor(phase: Phase, index: number): Daylight {
+  // Zero at the near horizon, one at the far one: the same sweep the dial's
+  // emblem takes, so the shadows agree with the icon over the map.
+  const across = TURNS_PER_PHASE > 1 ? Math.min(1, Math.max(0, index / (TURNS_PER_PHASE - 1))) : 0
+  const angle = Math.PI - across * Math.PI
+  const height = Math.sin(angle)
+  const direction = new Vector3(-Math.cos(angle), -Math.max(0.25, height), 0.4)
+
+  if (phase === 'night') {
+    return {
+      direction,
+      sun: 0.45 + height * 0.25,
+      sky: 0.62,
+      warmth: NIGHT.moon,
+      ground: NIGHT.ground,
+      clear: NIGHT.clear,
+    }
+  }
+
+  // Across the day the light drifts from the pale dawn to the amber dusk, and
+  // the higher the sun stands the more of that tint noon washes out of it.
+  const horizon = Color3.Lerp(DAY.dawn, DAY.dusk, across)
+  const warmth = Color3.Lerp(horizon, DAY.noon, height)
+  return {
+    direction,
+    sun: 0.8 + height * 0.45,
+    sky: 0.75 + height * 0.25,
+    warmth,
+    ground: DAY.ground,
+    clear: DAY.clear,
+  }
 }
 
 export function createHexScene(canvas: HTMLCanvasElement, options: HexSceneOptions): HexScene {
   const engine = new Engine(canvas, true, { preserveDrawingBuffer: true, stencil: true })
   const scene = new Scene(engine)
-  scene.clearColor = new Color4(0.078, 0.086, 0.102, 1)
+  scene.clearColor = DAY.clear
 
   const sky = new HemisphericLight('sky', new Vector3(0, 1, 0), scene)
-  sky.intensity = 0.65
-  sky.groundColor = new Color3(0.22, 0.24, 0.3)
-
   const sun = new DirectionalLight('sun', new Vector3(-0.6, -1, 0.4), scene)
-  sun.intensity = 0.7
 
-  const bounds = panBoundsFor(options.layout, options.tiles)
-  const iso = createIsoCamera(scene, canvas, { zoom: 40, panBounds: bounds })
+  const setDaylight = (phase: Phase, index: number): void => {
+    const light = daylightFor(phase, index)
+    sun.direction = light.direction
+    sun.intensity = light.sun
+    sun.diffuse = light.warmth
+    sky.intensity = light.sky
+    sky.groundColor = light.ground
+    scene.clearColor = light.clear
+  }
+
+  setDaylight('day', 1)
+
+  let field = options.field
+  const bounds = worldBounds(options.layout, field.radius)
+  const iso = createIsoCamera(scene, canvas, {
+    zoom: 40,
+    maxZoom: options.maxZoom,
+    panBounds: bounds,
+  })
   const detachControls = attachIsoControls(canvas, iso)
 
-  const grid = createHexGrid(scene, options.layout, options.tiles, {
+  const grid = createHexGrid(scene, options.layout, {
+    capacity: options.capacity,
     gap: options.gap,
     bevel: options.bevel,
   })
 
-  // Mutable and captured by the lookups below, so re-terraining the map lifts
-  // the arrows, the pawn and the sight plates along with the ground.
-  const elevations = new Map(options.tiles.map((tile) => [hexKey(tile.hex), tile.elevation]))
-  const elevationOf = (hex: Axial): number => elevations.get(hexKey(hex)) ?? 0
+  // Read straight out of the world rather than out of a copy of it, so the
+  // arrows, the pawns and the sight plates cannot drift from the ground: they
+  // ask the same field the grid draws.
+  const elevationOf = (hex: Axial): number => field.at(hex)?.elevation ?? 0
   const arrows = createRouteArrows(scene, options.layout, elevationOf)
-  const party = createPartyToken(scene, options.layout, elevationOf)
+  const tokens = createTokenField(scene, options.layout, elevationOf)
   const vision = createVisionOverlay(scene, options.layout, elevationOf, { gap: options.gap })
   addGroundSlab(scene, bounds, options.layout.size * 2)
 
@@ -145,13 +225,22 @@ export function createHexScene(canvas: HTMLCanvasElement, options: HexSceneOptio
     iso,
     grid,
     arrows,
-    party,
+    tokens,
     vision,
 
-    setTiles(next): void {
-      elevations.clear()
-      for (const tile of next) elevations.set(hexKey(tile.hex), tile.elevation)
-      grid.setTiles(next)
+    setDaylight,
+
+    setWindow(next): void {
+      grid.setWindow(next)
+    },
+
+    setField(next): void {
+      field = next
+      iso.setPanBounds(worldBounds(options.layout, next.radius))
+    },
+
+    setMaxZoom(limit): void {
+      iso.setMaxZoom(limit)
     },
 
     resize,
@@ -160,7 +249,7 @@ export function createHexScene(canvas: HTMLCanvasElement, options: HexSceneOptio
       detachControls()
       engine.stopRenderLoop()
       vision.dispose()
-      party.dispose()
+      tokens.dispose()
       arrows.dispose()
       grid.dispose()
       iso.dispose()

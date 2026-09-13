@@ -1,5 +1,6 @@
-import { distance, hexKey, type Axial, type HexKey } from '../hex/coords'
+import { distance, type Axial } from '../hex/coords'
 import { findPath } from '../hex/pathfind'
+import type { TerrainField } from './field'
 import { isWater, type TerrainTile } from './terrain'
 
 /** Every hex is ten kilometres across. */
@@ -34,13 +35,13 @@ export function stepCostKm(from: TerrainTile, to: TerrainTile): number {
 }
 
 export function findRoute(
-  tiles: ReadonlyMap<HexKey, TerrainTile>,
+  field: TerrainField,
   start: Axial,
   goal: Axial,
   options: RouteOptions = {},
 ): Route | null {
   const allowWater = options.allowWater ?? false
-  const tileAt = (hex: Axial): TerrainTile | undefined => tiles.get(hexKey(hex))
+  const tileAt = (hex: Axial): TerrainTile | undefined => field.at(hex)
 
   const passable = (tile: TerrainTile | undefined): tile is TerrainTile =>
     tile !== undefined && (allowWater || !isWater(tile))

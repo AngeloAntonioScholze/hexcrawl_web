@@ -1,60 +1,59 @@
 import { acceptHMRUpdate, defineStore } from 'pinia'
-import { computed, ref, shallowRef, watch, type WritableComputedRef } from 'vue'
+import { computed, ref, shallowRef, watch } from 'vue'
+import type { Action, ActionRecord } from '../entities/action'
+import {
+  idleState,
+  newEntity,
+  type Entity,
+  type EntityKind,
+  type EntityState,
+  type Owner,
+} from '../entities/entity'
+import { resolveTurn } from '../entities/resolve'
 import { hexKey, parseKey, type Axial, type HexKey } from '../hex/coords'
 import type { VisionOptions } from '../hex/vision'
 import type { MapSnapshot } from '../persistence/mapState'
+import { fieldFromTiles, type TerrainField } from '../terrain/field'
 import { sightFrom, type PartySight } from '../terrain/sight'
 import { TERRAIN_DEFAULTS, type TerrainId, type TerrainTile } from '../terrain/terrain'
-import { findRoute, stepCostKm, type Route } from '../terrain/travel'
-
-/** Zero means show the whole route as soon as it is found. */
-export const AUTO_SPEED = 0
-export const MAX_SPEED = 3
+import { findRoute, KM_PER_HEX, type Route } from '../terrain/travel'
+import { clockAt, isNight, nextPhaseTurn, type Clock } from '../time/clock'
 
 const NOTHING_IN_SIGHT: PartySight = { radius: 0, visible: new Set(), blocked: new Set() }
 
-/** One hex of ground the party has actually stood on, in the order it did. */
-export interface JourneyStep {
+/** What the dark leaves of an entity's sight, and the least it can ever see. */
+export const NIGHT_SIGHT = 0.3
+export const MIN_NIGHT_SIGHT = 1
+
+/** Where an entity was first put on the map, and the turn it appeared on. */
+export interface Origin {
+  turn: number
   hex: HexKey
-  /** What entering this hex cost; zero for the hex the journey started on. */
-  km: number
-  terrain: TerrainId
 }
 
-/**
- * Someone crossing the map. The party used to be implied by a start hex and a
- * goal; now it is one of these, and everything a single party owned — where it
- * stands, where it is headed, where it has been — belongs to one of them.
- */
-export interface Traveler {
+/** One turn already spent: what every entity did, and where it left off. */
+export interface TurnFrame {
+  records: readonly ActionRecord[]
+  states: ReadonlyMap<string, EntityState>
+}
+
+/** One entity's line on the map, in the colour that entity wears. */
+export interface EntityPath {
   id: string
-  name: string
   color: string
-  /** Hex it stands on, or null before it has been put on the map. */
-  at: HexKey | null
-  goal: HexKey | null
-  journey: readonly JourneyStep[]
-  /**
-   * Which entry of the log it is standing on after being recalled back down it,
-   * or null when it stands at the head. An index rather than a hex, because a
-   * crawl can cross the same hex twice and only one of those rows is the one
-   * the party went back to.
-   */
-  standing: number | null
-  /** The leg it last walked, kept drawn behind it after it arrives. */
-  walkedLeg: Axial[]
+  hexes: Axial[]
 }
 
-// Enough to tell a handful of parties apart on the map and in the list; it
-// wraps rather than running out.
-const TRAVELER_COLORS: readonly string[] = [
-  '#e0b25a',
-  '#6fa8dc',
-  '#8fbc6a',
-  '#c17f9e',
-  '#d98b5f',
-  '#7fc4bd',
-]
+/** One row of the record as the adventure log reads it. */
+export interface JourneyRow {
+  turn: number
+  hex: HexKey
+  terrain: TerrainId
+  kind: Action['kind']
+  entered: number
+  /** False for a turn the crawl has been wound back past but still remembers. */
+  spent: boolean
+}
 
 /** The terrain knobs the map panel is allowed to turn. */
 export interface TerrainControls {
@@ -70,88 +69,69 @@ export const TERRAIN_LIMITS = {
   relief: { min: 2, max: 14, step: 0.5 },
 } as const
 
-const MAX_SEED = 1_000_000
+export const PACE_LIMITS = { min: 0.5, max: 3, step: 0.5 } as const
 
-const newTraveler = (name: string, index: number): Traveler => ({
-  id: crypto.randomUUID(),
-  name,
-  color: TRAVELER_COLORS[index % TRAVELER_COLORS.length],
-  at: null,
-  goal: null,
-  journey: [],
-  standing: null,
-  walkedLeg: [],
-})
+/**
+ * How far the world runs from the middle, in hexes. Only the window is ever
+ * built, so the cost of a bigger one is the ground it hides, not the frame.
+ */
+export const WORLD_SIZES = { small: 60, large: 150, huge: 300 } as const
+
+export type WorldSize = keyof typeof WORLD_SIZES
+
+const MAX_SEED = 1_000_000
 
 export const MIN_SIGHT = 1
 export const MAX_SIGHT = 10
+
+/** What the sight slider reads with nobody on the map to ask. */
 export const DEFAULT_SIGHT = 5
 
 export const useHexMapStore = defineStore('hexMap', () => {
-  const tiles = shallowRef<ReadonlyMap<HexKey, TerrainTile>>(new Map())
+  // The world is a function, not a stored map: only the ground near the view is
+  // ever worked out, and everything that reads terrain asks the field for it.
+  const field = shallowRef<TerrainField>(fieldFromTiles(new Map()))
   const hovered = ref<HexKey | null>(null)
   const allowWater = ref(false)
 
-  // Travelers are held as whole records and replaced rather than mutated, so a
-  // journey thousands of steps long never becomes thousands of reactive proxies.
-  const travelers = shallowRef<readonly Traveler[]>([newTraveler('the party', 0)])
-  const selectedId = ref<string>(travelers.value[0].id)
+  // Entities are held as whole records and replaced rather than mutated, so a
+  // crawl hundreds of turns long never becomes hundreds of reactive proxies.
+  const entities = shallowRef<readonly Entity[]>([newEntity('the party', 0)])
+
+  /** Empty when the map has been cleared of everybody; there is no stand-in. */
+  const selectedId = ref<string>(entities.value[0].id)
+
+  /** The turn the crawl stands at; nothing moves except by one passing. */
+  const turn = ref(0)
+
+  /** Where each entity was put down, and when. */
+  const origins = shallowRef<ReadonlyMap<string, Origin>>(new Map())
+
+  /** Frame i is the world at the end of turn i: append-only, the record. */
+  const frames = shallowRef<readonly TurnFrame[]>([])
 
   /**
-   * Whoever the map is currently listening to. The list is never allowed to run
-   * empty, so there is always one, and callers never have to test for it.
+   * Bumped whenever the record is rewritten. Its length is not enough to tell
+   * two records apart: a rewind followed by a different order can leave exactly
+   * as many turns as it found, holding different ground.
    */
-  const selectedTraveler = computed<Traveler>(
-    () => travelers.value.find((one) => one.id === selectedId.value) ?? travelers.value[0],
-  )
+  const recordVersion = ref(0)
 
-  const patch = (id: string, change: Partial<Traveler>): void => {
-    travelers.value = travelers.value.map((one) => (one.id === id ? { ...one, ...change } : one))
+  const setFrames = (next: readonly TurnFrame[]): void => {
+    frames.value = next
+    recordVersion.value += 1
   }
 
-  const patchSelected = (change: Partial<Traveler>): void => patch(selectedId.value, change)
+  /** What each entity intends to do on the next turn; spent by advancing. */
+  const queue = shallowRef<ReadonlyMap<string, Action>>(new Map())
 
-  const field = <K extends keyof Traveler>(key: K): WritableComputedRef<Traveler[K]> =>
-    computed({
-      get: () => selectedTraveler.value[key],
-      set: (value) => patchSelected({ [key]: value } as Partial<Traveler>),
-    })
+  const fog = ref(true)
+  const showSight = ref(false)
+  const showHistory = ref(false)
+  const showAllPaths = ref(false)
+  const dmView = ref(true)
 
-  // The map, the scene and the save file all still speak of one party. They are
-  // reading the selected traveler through these.
-  const start = field('at')
-  const goal = field('goal')
-  const journey = field('journey')
-  const walkedLeg = field('walkedLeg')
-
-  const selectTraveler = (id: string): void => {
-    if (travelers.value.some((one) => one.id === id)) selectedId.value = id
-  }
-
-  const addTraveler = (name?: string): Traveler => {
-    const made = newTraveler(name ?? `party ${travelers.value.length + 1}`, travelers.value.length)
-    travelers.value = [...travelers.value, made]
-    return made
-  }
-
-  /** The map always has somebody on it, so the last traveler cannot be removed. */
-  const removeTraveler = (id: string): void => {
-    if (travelers.value.length === 1) return
-    const remaining = travelers.value.filter((one) => one.id !== id)
-    if (remaining.length === travelers.value.length) return
-
-    travelers.value = remaining
-    if (selectedId.value === id) selectedId.value = remaining[0].id
-  }
-
-  const renameTraveler = (id: string, name: string): void => {
-    const trimmed = name.trim()
-    if (trimmed) patch(id, { name: trimmed })
-  }
-
-  const speed = ref(AUTO_SPEED)
-  const playing = ref(false)
-  const revealed = ref(0)
+  const worldRadius = ref<number>(WORLD_SIZES.large)
 
   const terrain = ref<TerrainControls>({
     seed: TERRAIN_DEFAULTS.seed,
@@ -160,257 +140,318 @@ export const useHexMapStore = defineStore('hexMap', () => {
     relief: TERRAIN_DEFAULTS.relief,
   })
 
-  const fog = ref(true)
-  const showSight = ref(false)
-  const showHistory = ref(false)
-  const sight = ref(DEFAULT_SIGHT)
-  const explored = shallowRef<ReadonlySet<HexKey>>(new Set())
+  const clock = computed<Clock>(() => clockAt(turn.value))
 
-  const setTiles = (next: ReadonlyMap<HexKey, TerrainTile>): void => {
-    tiles.value = next
+  /**
+   * Whoever the map is currently listening to, or nobody at all: a map can be
+   * emptied of entities, and an empty map has no orders to give.
+   */
+  const selectedEntity = computed<Entity | null>(
+    () => entities.value.find((one) => one.id === selectedId.value) ?? entities.value[0] ?? null,
+  )
+
+  const openingState = (id: string, at: number): EntityState => {
+    const origin = origins.value.get(id)
+    return origin && origin.turn <= at ? { at: origin.hex, carry: 0, pending: [] } : idleState()
   }
+
+  /**
+   * The world at the opening of a turn: what the frame before it left behind,
+   * or where an entity was put down if it has yet to spend a turn. Reading the
+   * past out of the record is what makes a rewind exact rather than a guess.
+   */
+  const statesAt = (at: number): ReadonlyMap<string, EntityState> => {
+    const frame = at > 0 ? frames.value[at - 1] : undefined
+    const states = new Map<string, EntityState>()
+    for (const entity of entities.value) {
+      states.set(entity.id, frame?.states.get(entity.id) ?? openingState(entity.id, at))
+    }
+    return states
+  }
+
+  const states = computed<ReadonlyMap<string, EntityState>>(() => statesAt(turn.value))
+
+  const stateOf = (id: string): EntityState => states.value.get(id) ?? idleState()
+
+  const selectedState = computed<EntityState>(() => stateOf(selectedId.value))
+
+  /** Where the selected entity stands: what the map calls the party's hex. */
+  const start = computed<HexKey | null>(() => selectedState.value.at)
+  const partyHex = start
+
+  const patch = (id: string, change: Partial<Entity>): void => {
+    entities.value = entities.value.map((one) => (one.id === id ? { ...one, ...change } : one))
+  }
+
+  const selectEntity = (id: string): void => {
+    if (entities.value.some((one) => one.id === id)) selectedId.value = id
+  }
+
+  const addEntity = (
+    name?: string,
+    kind: EntityKind = 'party',
+    owner: Owner = 'player',
+  ): Entity => {
+    const made = newEntity(
+      name ?? `party ${entities.value.length + 1}`,
+      entities.value.length,
+      kind,
+      owner,
+    )
+    entities.value = [...entities.value, made]
+    return made
+  }
+
+  /**
+   * Takes an entity off the map for good, the last one included: a DM clearing
+   * the board is not an error state, it is an empty board.
+   */
+  const removeEntity = (id: string): void => {
+    const remaining = entities.value.filter((one) => one.id !== id)
+    if (remaining.length === entities.value.length) return
+
+    entities.value = remaining
+    if (selectedId.value === id) selectedId.value = remaining[0]?.id ?? ''
+
+    const origin = new Map(origins.value)
+    origin.delete(id)
+    origins.value = origin
+
+    const orders = new Map(queue.value)
+    orders.delete(id)
+    queue.value = orders
+  }
+
+  const renameEntity = (id: string, name: string): void => {
+    const trimmed = name.trim()
+    if (trimmed) patch(id, { name: trimmed })
+  }
+
+  const clamp = (value: number, { min, max }: { min: number; max: number }): number =>
+    Math.min(max, Math.max(min, value))
+
+  const setPace = (id: string, pace: number): void => {
+    patch(id, { pacePerTurn: clamp(pace, PACE_LIMITS) })
+  }
+
+  const setEntitySight = (id: string, sight: number): void => {
+    patch(id, { sight: clamp(Math.round(sight), { min: MIN_SIGHT, max: MAX_SIGHT }) })
+  }
+
+  /** The selected entity's daylight sight, which the panel's slider turns. */
+  const sight = computed(() => selectedEntity.value?.sight ?? DEFAULT_SIGHT)
+  const setSight = (next: number): void => setEntitySight(selectedId.value, next)
+
+  /**
+   * Dark does not slow anybody down, it blinds them: an entity keeps its pace
+   * after nightfall and loses most of its horizon.
+   */
+  const sightAt = (entity: Entity, at: number): number =>
+    isNight(at) ? Math.max(MIN_NIGHT_SIGHT, Math.round(entity.sight * NIGHT_SIGHT)) : entity.sight
+
+  const vision = computed<VisionOptions>(() => {
+    const one = selectedEntity.value
+    return { radius: one ? sightAt(one, turn.value) : DEFAULT_SIGHT }
+  })
+
+  const setField = (next: TerrainField): void => {
+    field.value = next
+  }
+
+  /** Fixtures and tests still speak in whole maps; the field wraps one. */
+  const setTiles = (next: ReadonlyMap<HexKey, TerrainTile>): void => {
+    field.value = fieldFromTiles(next)
+  }
+
+  const tileAt = (hex: HexKey): TerrainTile | undefined => field.value.at(parseKey(hex))
 
   const setHovered = (hex: Axial | null): void => {
     hovered.value = hex ? hexKey(hex) : null
   }
 
-  // One click, one leg. The first puts the party on the map; after that a click
-  // is the journey itself, so the party sets off for it and arrives under its
-  // own steam: at once on auto, and at the end of the walk on any other speed.
+  /**
+   * A recorded future the entities turned away from never happened: giving an
+   * order or putting somebody down after a rewind cuts the record off here.
+   */
+  const truncate = (): void => {
+    if (frames.value.length > turn.value) setFrames(frames.value.slice(0, turn.value))
+  }
+
+  const queueAction = (id: string, action: Action): void => {
+    truncate()
+    const next = new Map(queue.value)
+    next.set(id, action)
+    queue.value = next
+  }
+
+  /** Puts an entity on the map at the turn the crawl stands on. */
+  const place = (id: string, hex: HexKey): void => {
+    truncate()
+    const next = new Map(origins.value)
+    next.set(id, { turn: turn.value, hex })
+    origins.value = next
+  }
+
+  const routeTo = (from: HexKey, to: HexKey): Route | null =>
+    findRoute(field.value, parseKey(from), parseKey(to), { allowWater: allowWater.value })
+
+  /**
+   * One click, one order. The first puts the entity on the map; after that a
+   * click plans the route it will walk as the turns pass, and clicking the
+   * ground it stands on calls that order off.
+   */
   const select = (hex: Axial | null): void => {
-    if (!hex) return
+    if (!hex || !selectedEntity.value) return
     const key = hexKey(hex)
+    const at = selectedState.value.at
 
-    if (!start.value) {
-      start.value = key
+    if (!at) {
+      place(selectedId.value, key)
       return
     }
 
-    // Clicking the ground the party stands on calls off the leg it was about to
-    // walk rather than taking the party off the map.
-    if (key === start.value) {
-      goal.value = null
+    // A route of just the hex underneath is a route with nothing left to walk,
+    // which is how an order is called off without a second kind of action.
+    if (key === at) {
+      queueAction(selectedId.value, { kind: 'move', route: [at] })
       return
     }
 
-    goal.value = key
-    if (isAuto.value) arrive()
+    const found = routeTo(at, key)
+    if (found) queueAction(selectedId.value, { kind: 'move', route: found.hexes.map(hexKey) })
   }
 
   const clear = (): void => {
-    start.value = null
-    goal.value = null
+    const at = selectedState.value.at
+    if (at) queueAction(selectedId.value, { kind: 'move', route: [at] })
   }
 
-  const route = computed<Route | null>(() => {
-    if (!start.value || !goal.value) return null
-    return findRoute(tiles.value, parseKey(start.value), parseKey(goal.value), {
-      allowWater: allowWater.value,
-    })
+  /** Spends a turn: every entity resolves, ordered or not, and is written down. */
+  const advanceTurn = (): void => {
+    truncate()
+    const outcome = resolveTurn(turn.value, field.value, entities.value, states.value, queue.value)
+    setFrames([...frames.value, { records: outcome.records, states: outcome.states }])
+    queue.value = new Map()
+    turn.value += 1
+  }
+
+  /** Winds the world back a turn; the record it is read out of is left alone. */
+  const rewindTurn = (): void => {
+    if (turn.value === 0) return
+    turn.value -= 1
+    queue.value = new Map()
+  }
+
+  const goToTurn = (at: number): void => {
+    turn.value = Math.max(0, Math.min(frames.value.length, Math.floor(at)))
+    queue.value = new Map()
+  }
+
+  /** Camps out the rest of the phase: standing orders keep being walked. */
+  const skipPhase = (): void => {
+    const until = nextPhaseTurn(turn.value)
+    while (turn.value < until) advanceTurn()
+  }
+
+  const canRewind = computed(() => turn.value > 0)
+
+  /**
+   * Wipes the crawl: every record, every order and everybody's place on the map
+   * go, and the clock starts again at the first turn of the first day. The
+   * world under it is left standing.
+   */
+  const clearHistory = (): void => {
+    turn.value = 0
+    setFrames([])
+    origins.value = new Map()
+    queue.value = new Map()
+  }
+
+  /** The order an entity is about to walk: the queued one, or the standing one. */
+  const orderFor = (id: string): readonly HexKey[] => {
+    const queued = queue.value.get(id)
+    if (queued?.kind === 'move') {
+      const at = stateOf(id).at
+      return queued.route[0] === at ? queued.route.slice(1) : queued.route
+    }
+    if (queued) return []
+    return stateOf(id).pending
+  }
+
+  /** What the selected entity has left to walk, drawn ahead of it as arrows. */
+  const plannedHexes = computed<Axial[]>(() => orderFor(selectedId.value).map(parseKey))
+
+  const goal = computed<HexKey | null>(() => {
+    const planned = orderFor(selectedId.value)
+    return planned.length > 0 ? planned[planned.length - 1] : null
   })
+
+  /** Kept for the panel: how far the planned order still has to go. */
+  const route = computed<Route | null>(() => {
+    const at = selectedState.value.at
+    const end = goal.value
+    if (!at || !end) return null
+    return routeTo(at, end)
+  })
+
+  const recordsFor = (id: string, upTo: number): ActionRecord[] => {
+    const rows: ActionRecord[] = []
+    for (let at = 0; at < Math.min(upTo, frames.value.length); at++) {
+      for (const record of frames.value[at].records) if (record.entityId === id) rows.push(record)
+    }
+    return rows
+  }
+
+  /**
+   * The selected entity's whole record, including turns the crawl has been
+   * wound back past: the log is what happened, not what has happened yet, and
+   * a row past the current turn is the way back to it.
+   */
+  const journey = computed<JourneyRow[]>(() =>
+    recordsFor(selectedId.value, frames.value.length).map((record) => ({
+      turn: record.turn,
+      hex: record.to ?? record.from ?? ('0,0' as HexKey),
+      terrain: tileAt(record.to ?? ('0,0' as HexKey))?.terrain ?? 'grass',
+      kind: record.kind,
+      entered: record.entered.length,
+      spent: record.turn < turn.value,
+    })),
+  )
+
+  const hexesWalked = computed(() =>
+    recordsFor(selectedId.value, turn.value).reduce((total, row) => total + row.entered.length, 0),
+  )
+
+  const travelledKm = computed(() => hexesWalked.value * KM_PER_HEX)
+
+  /** Everyone the current view is allowed to see drawn on the map. */
+  const shownEntities = computed<readonly Entity[]>(() =>
+    entities.value.filter((one) => dmView.value || !one.hidden),
+  )
+
+  /** Where each of them stands right now: one token apiece, all at once. */
+  const tokens = computed(() =>
+    shownEntities.value.map((one) => ({
+      id: one.id,
+      hex: stateOf(one.id).at,
+      color: one.color,
+    })),
+  )
+
+  /** Where everybody stood at the opening of a turn, for replaying one. */
+  const positionsAt = (at: number): ReadonlyMap<string, HexKey | null> =>
+    new Map([...statesAt(at)].map(([id, state]) => [id, state.at]))
+
+  /** What every entity did on a turn already spent. */
+  const recordsOn = (at: number): readonly ActionRecord[] => frames.value[at]?.records ?? []
 
   const hoveredTile = computed<TerrainTile | null>(() =>
-    hovered.value ? (tiles.value.get(hovered.value) ?? null) : null,
+    hovered.value ? (tileAt(hovered.value) ?? null) : null,
   )
 
-  const isAuto = computed(() => speed.value === AUTO_SPEED)
-
-  /**
-   * The stretch of the route drawn right now: all of it unless animating, and
-   * the leg just walked once the party has arrived and the route behind it is
-   * gone, so the path it took does not blink off the map on arrival.
-   */
-  const visibleHexes = computed<Axial[]>(() => {
-    const hexes = route.value?.hexes
-    if (!hexes) return walkedLeg.value
-    return isAuto.value ? hexes : hexes.slice(0, revealed.value)
-  })
-
-  /**
-   * What the arrows trace. Off, that is the leg being walked or the one just
-   * finished. On, it is the whole record up to the row the party stands on,
-   * continuing into a route still being walked — one unbroken line ending at
-   * the party, rather than a trail that jumps wherever it was recalled from.
-   */
-  const pathHexes = computed<Axial[]>(() => {
-    if (!showHistory.value) return visibleHexes.value
-
-    const log = journey.value
-    const last = selectedTraveler.value.standing ?? log.length - 1
-    const behind = log.slice(0, last + 1).map((step) => parseKey(step.hex))
-    if (behind.length === 0) return visibleHexes.value
-
-    // Only a route still under way is missing from the record; the leg drawn
-    // after arrival is already in it and would be laid on top of itself.
-    const ahead = route.value ? visibleHexes.value.slice(1) : []
-    return [...behind, ...ahead]
-  })
-
-  const revealedKm = computed(() => {
-    const hexes = visibleHexes.value
-    let km = 0
-    for (let i = 1; i < hexes.length; i++) {
-      const from = tiles.value.get(hexKey(hexes[i - 1]))
-      const to = tiles.value.get(hexKey(hexes[i]))
-      if (from && to) km += stepCostKm(from, to)
-    }
-    return km
-  })
-
-  const finished = computed(
-    () => !isAuto.value && route.value !== null && revealed.value >= route.value.hexes.length,
-  )
-
-  // The pawn rides the head of the walked stretch while the route animates and
-  // otherwise stands on the start hex, so the party is never a second source of
-  // truth that can drift away from the route.
-  const partyHex = computed<HexKey | null>(() => {
-    const walked = visibleHexes.value
-
-    // Only while a route is actually being walked: once it is committed the
-    // drawn path is a record of where the party went, and the party is at the
-    // hex it stands on — which a recall back down the log can move.
-    const walking = route.value !== null && !isAuto.value
-    if (walking && walked.length > 0) return hexKey(walked[walked.length - 1])
-    return start.value
-  })
-
-  const canArrive = computed(() => route.value !== null && (isAuto.value || finished.value))
-
-  // Only committed travel is history: a route half walked and then abandoned
-  // never happened, and auto mode logs the same hexes as a walked animation.
-  const stepsFor = (hexes: readonly Axial[]): JourneyStep[] => {
-    const steps: JourneyStep[] = []
-    for (let i = 1; i < hexes.length; i++) {
-      const from = tiles.value.get(hexKey(hexes[i - 1]))
-      const to = tiles.value.get(hexKey(hexes[i]))
-      if (from && to) {
-        steps.push({ hex: hexKey(hexes[i]), km: stepCostKm(from, to), terrain: to.terrain })
-      }
-    }
-    return steps
-  }
-
-  /** Where a record begins: standing somewhere cost nothing to do. */
-  const originStep = (hex: HexKey): JourneyStep[] => {
-    const tile = tiles.value.get(hex)
-    return tile ? [{ hex, km: 0, terrain: tile.terrain }] : []
-  }
-
-  type LogState = Pick<Traveler, 'journey' | 'standing'>
-
-  /**
-   * What a walked leg does to the record. From the head of the log it simply
-   * adds to it. From a hex the party was recalled back to, the leg either
-   * retraces what the log already says — which changes nothing, the party just
-   * moves along it — or contradicts it, and a recorded future the party turned
-   * away from never happened, so the record starts again at the turn.
-   */
-  const logAfter = (walked: Route): LogState => {
-    const log = journey.value
-    const from = selectedTraveler.value.standing
-    const entered = walked.hexes.length - 1
-
-    if (from === null || from >= log.length - 1) {
-      const opening = log.length === 0 ? originStep(hexKey(walked.hexes[0])) : []
-      return { journey: [...log, ...opening, ...stepsFor(walked.hexes)], standing: null }
-    }
-
-    const ahead = log.length - 1 - from
-    const shared = Math.min(ahead, entered)
-    const retraced = log
-      .slice(from + 1, from + 1 + shared)
-      .every((step, i) => step.hex === hexKey(walked.hexes[i + 1]))
-
-    if (!retraced) {
-      return {
-        journey: [...originStep(log[from].hex), ...stepsFor(walked.hexes)],
-        standing: null,
-      }
-    }
-
-    // Retraced as far as the record went. Anything past its end is new ground,
-    // and the party is only still on the record if the leg ended inside it.
-    return {
-      journey: [...log, ...stepsFor(walked.hexes.slice(ahead))],
-      standing: entered < ahead ? from + entered : null,
-    }
-  }
-
-  /**
-   * Ground the party saw on its way through, rather than only from where it
-   * ended up. An animated walk reveals this hex by hex as it goes; auto travel
-   * is never anywhere in between, so without this the same leg would leave a
-   * different map depending on the speed it was walked at.
-   */
-  const revealAlong = (hexes: readonly Axial[]): void => {
-    const seen = new Set(explored.value)
-    for (const hex of hexes) {
-      for (const key of sightFrom(tiles.value, hex, vision.value).visible) seen.add(key)
-    }
-    explored.value = seen
-  }
-
-  /** Commits the journey: the party takes up the destination as its new start. */
-  const arrive = (): void => {
-    const walked = route.value
-    if (!canArrive.value || !goal.value || !walked) return
-
-    patchSelected({ ...logAfter(walked), walkedLeg: walked.hexes, at: goal.value, goal: null })
-    revealAlong(walked.hexes)
-  }
-
-  /**
-   * Puts the party back on ground it has already crossed. The log is a record
-   * of where it has been, not of where it is, so stepping back down it leaves
-   * the history it was read off intact.
-   */
-  const recall = (step: number): void => {
-    const log = journey.value
-    if (step < 0 || step >= log.length) return
-
-    patchSelected({ at: log[step].hex, goal: null, standing: step, walkedLeg: [] })
-    explored.value = exploredSoFar()
-  }
-
-  /**
-   * Everything the parties can account for having seen: what each could see
-   * from every step of its own log up to the one it is standing on. Winding a
-   * party back down its log takes the map back with it, so recalling does not
-   * leave it looking at ground it has not reached yet.
-   *
-   * Read with the sight the parties have now rather than whatever the slider
-   * said at the time; the record is of where they stood, not of how far they
-   * could see while standing there.
-   */
-  const exploredSoFar = (): Set<HexKey> => {
-    const seen = new Set<HexKey>()
-    for (const one of travelers.value) {
-      const last = one.standing ?? one.journey.length - 1
-      for (let i = 0; i <= last; i++) {
-        const field = sightFrom(tiles.value, parseKey(one.journey[i].hex), vision.value)
-        for (const key of field.visible) seen.add(key)
-      }
-    }
-    return seen
-  }
-
-  /** Starts the record again from wherever the party is standing now. */
-  const clearLog = (): void => {
-    const at = start.value
-    patchSelected({ journey: at ? originStep(at) : [], standing: null, walkedLeg: [] })
-  }
-
-  /** Everything the party has walked so far, over every leg it has committed. */
-  const travelledKm = computed(() => journey.value.reduce((total, step) => total + step.km, 0))
-
-  const vision = computed<VisionOptions>(() => ({ radius: sight.value }))
-
-  /** Everything within reach of the party, split by what the terrain hides. */
+  /** Everything within reach of the selected entity, split by what hides it. */
   const sightField = computed<PartySight>(() =>
-    partyHex.value
-      ? sightFrom(tiles.value, parseKey(partyHex.value), vision.value)
-      : NOTHING_IN_SIGHT,
+    start.value ? sightFrom(field.value, parseKey(start.value), vision.value) : NOTHING_IN_SIGHT,
   )
 
   const visible = computed<ReadonlySet<HexKey>>(() => sightField.value.visible)
@@ -420,14 +461,123 @@ export const useHexMapStore = defineStore('hexMap', () => {
 
   const reach = computed(() => sightField.value.radius)
 
-  const clamp = (value: number, { min, max }: { min: number; max: number }): number =>
-    Math.min(max, Math.max(min, value))
+  /**
+   * Ground the crawl can account for having seen, read out of the record rather
+   * than piled up as it goes: every hex every entity stood on up to this turn,
+   * seen with the sight it had at the time. Winding the clock back therefore
+   * takes the map back with it, and the fog closes behind the party.
+   */
+  // What can be seen from a hex at a radius never changes while the world does
+  // not, and a crawl looks out from the same few hundred hexes over and over.
+  const sightMemo = new Map<string, readonly HexKey[]>()
+  let memoField: TerrainField | null = null
+
+  const seenFrom = (hex: HexKey, radius: number): readonly HexKey[] => {
+    if (memoField !== field.value) {
+      sightMemo.clear()
+      memoField = field.value
+    }
+
+    const key = `${hex}:${radius}`
+    const known = sightMemo.get(key)
+    if (known) return known
+
+    const made = [...sightFrom(field.value, parseKey(hex), { radius }).visible]
+    sightMemo.set(key, made)
+    return made
+  }
+
+  /** Everything the crawl laid eyes on during one turn already spent. */
+  const seenOn = (at: number, into: Set<HexKey>): void => {
+    for (const entity of entities.value) {
+      if (entity.hidden && !dmView.value) continue
+
+      const state = statesAt(at).get(entity.id)
+      if (!state?.at) continue
+
+      const radius = sightAt(entity, at)
+      for (const key of seenFrom(state.at, radius)) into.add(key)
+
+      // The hexes crossed on the way through, so an entity that walked three
+      // hexes in one turn does not leave two of them unseen behind it.
+      const record = frames.value[at]?.records.find((row) => row.entityId === entity.id)
+      for (const crossed of record?.entered ?? []) {
+        for (const key of seenFrom(crossed, radius)) into.add(key)
+      }
+    }
+  }
+
+  /**
+   * The last answer, kept so the common move — one more turn — only has to look
+   * at the turn that was just spent. Anything else about the crawl changing
+   * invalidates it through the signature, and the set is built again.
+   */
+  let rolling: { signature: string; turn: number; seen: Set<HexKey> } | null = null
+
+  const explored = computed<ReadonlySet<HexKey>>(() => {
+    const signature = [
+      recordVersion.value,
+      dmView.value,
+      field.value.radius,
+      entities.value.map((one) => `${one.id}:${one.sight}:${one.hidden}`).join(','),
+    ].join('|')
+
+    const carried = rolling && rolling.signature === signature ? rolling : null
+    if (carried && carried.turn === turn.value) return carried.seen
+
+    // Turns only ever arrive one at a time going forward, so the usual case is
+    // adding the turn just spent to what was already worked out.
+    const seen = carried && carried.turn < turn.value ? new Set(carried.seen) : new Set<HexKey>()
+    const from = carried && carried.turn < turn.value ? carried.turn + 1 : 0
+
+    for (let at = from; at <= turn.value; at++) seenOn(at, seen)
+
+    rolling = { signature, turn: turn.value, seen }
+    return seen
+  })
+
+  /** Where one entity has been up to this turn, in the order it went. */
+  const trailOf = (id: string): Axial[] => {
+    const walked: Axial[] = []
+    const origin = origins.value.get(id)
+    if (origin && origin.turn <= turn.value) walked.push(parseKey(origin.hex))
+
+    for (const record of recordsFor(id, turn.value)) {
+      for (const crossed of record.entered) walked.push(parseKey(crossed))
+    }
+    return walked
+  }
+
+  /** One entity's line on the map: its history or its hex, then its orders. */
+  const pathFor = (id: string): Axial[] => {
+    const ahead = orderFor(id).map(parseKey)
+    if (showHistory.value) return [...trailOf(id), ...ahead]
+
+    const at = stateOf(id).at
+    return at ? [parseKey(at), ...ahead] : ahead
+  }
+
+  /** What the map draws as the party's trail: where it has been, in order. */
+  const pathHexes = computed<Axial[]>(() => pathFor(selectedId.value))
+
+  /**
+   * Every line the map draws. On its own the selected entity's, so the arrows
+   * say where the orders being given will take it; with all paths shown, one
+   * line per entity, so a caravan two days behind is still a line on the map.
+   */
+  const paths = computed<EntityPath[]>(() => {
+    const drawn = showAllPaths.value
+      ? shownEntities.value
+      : shownEntities.value.filter((one) => one.id === selectedId.value)
+
+    return drawn.map((one) => ({ id: one.id, color: one.color, hexes: pathFor(one.id) }))
+  })
 
   const sameTerrain = (a: TerrainControls, b: TerrainControls): boolean =>
     a.seed === b.seed && a.scale === b.scale && a.seaLevel === b.seaLevel && a.relief === b.relief
 
-  const setTerrain = (patch: Partial<TerrainControls>): void => {
-    const merged = { ...terrain.value, ...patch }
+  const setTerrain = (change: Partial<TerrainControls>): void => {
+    const merged = { ...terrain.value, ...change }
     const next: TerrainControls = {
       seed: Math.round(merged.seed),
       scale: clamp(merged.scale, TERRAIN_LIMITS.scale),
@@ -441,185 +591,166 @@ export const useHexMapStore = defineStore('hexMap', () => {
     terrain.value = next
   }
 
+  const setWorldRadius = (next: number): void => {
+    const radius = Math.max(10, Math.round(next))
+    if (radius === worldRadius.value) return
+    worldRadius.value = radius
+  }
+
+  const setWorldSize = (size: WorldSize): void => setWorldRadius(WORLD_SIZES[size])
+
+  /** Which of the named sizes the world is at, if it is at one of them. */
+  const worldSize = computed<WorldSize | null>(() => {
+    const found = Object.entries(WORLD_SIZES).find(([, radius]) => radius === worldRadius.value)
+    return found ? (found[0] as WorldSize) : null
+  })
+
   const reseed = (): void => {
     setTerrain({ seed: Math.floor(Math.random() * MAX_SEED) })
-  }
-
-  const setSight = (next: number): void => {
-    sight.value = Math.min(MAX_SIGHT, Math.max(MIN_SIGHT, Math.round(next)))
-  }
-
-  /** Wipes the map back to what the party can see from where it stands. */
-  const forget = (): void => {
-    explored.value = new Set(visible.value)
   }
 
   /** Everything a saved session is made of, ready for the persistence layer. */
   const snapshot = computed<MapSnapshot>(() => ({
     terrain: terrain.value,
-    start: start.value,
-    goal: goal.value,
+    worldRadius: worldRadius.value,
     allowWater: allowWater.value,
     fog: fog.value,
     showSight: showSight.value,
     showHistory: showHistory.value,
-    sight: sight.value,
-    speed: speed.value,
-    explored: [...explored.value],
-    journey: journey.value,
-    standing: selectedTraveler.value.standing,
+    dmView: dmView.value,
+    turn: turn.value,
+    selectedId: selectedId.value,
+    entities: entities.value,
+    origins: [...origins.value].map(([entityId, origin]) => ({ entityId, ...origin })),
+    record: frames.value.flatMap((frame) => frame.records),
+    states: frames.value.flatMap((frame, at) =>
+      [...frame.states].map(([entityId, state]) => ({ turn: at, entityId, ...state })),
+    ),
+    queue: [...queue.value].map(([entityId, action]) => ({ entityId, action })),
   }))
 
   // Terrain goes in first: laying down a new world is what wipes the map, so
-  // the remembered ground has to be handed back after it, not before.
+  // the remembered crawl has to be handed back after it, not before.
   const restore = (saved: MapSnapshot): void => {
+    setWorldRadius(saved.worldRadius)
     setTerrain(saved.terrain)
     allowWater.value = saved.allowWater
     fog.value = saved.fog
     showSight.value = saved.showSight
     showHistory.value = saved.showHistory
-    setSight(saved.sight)
-    setSpeed(saved.speed)
-    start.value = saved.start
-    goal.value = saved.goal
-    explored.value = new Set(saved.explored)
-    patchSelected({ journey: saved.journey, standing: saved.standing })
+    dmView.value = saved.dmView
+    // A save file written before entities existed has none of them, and the map
+    // always has somebody on it, so the party it opened with stays.
+    if (saved.entities.length > 0) entities.value = saved.entities.map((one) => ({ ...one }))
+    selectedId.value =
+      entities.value.find((one) => one.id === saved.selectedId)?.id ?? entities.value[0].id
+    origins.value = new Map(
+      saved.origins.map(({ entityId, turn: at, hex }) => [entityId, { turn: at, hex }]),
+    )
+
+    const byTurn = new Map<number, TurnFrame>()
+    const frameAt = (at: number): TurnFrame => {
+      const found = byTurn.get(at) ?? { records: [], states: new Map<string, EntityState>() }
+      byTurn.set(at, found)
+      return found
+    }
+
+    for (const record of saved.record) {
+      ;(frameAt(record.turn).records as ActionRecord[]).push(record)
+    }
+    for (const { turn: at, entityId, ...state } of saved.states) {
+      ;(frameAt(at).states as Map<string, EntityState>).set(entityId, state)
+    }
+
+    setFrames(Array.from({ length: byTurn.size }, (_, at) => frameAt(at)))
+    turn.value = Math.max(0, Math.min(frames.value.length, saved.turn))
+    queue.value = new Map(saved.queue.map(({ entityId, action }) => [entityId, action]))
   }
 
-  const play = (): void => {
-    if (!route.value || isAuto.value) return
-    revealed.value = 1
-    playing.value = true
-  }
-
-  const stop = (): void => {
-    playing.value = false
-  }
-
-  const advanceReveal = (steps: number): void => {
-    const total = route.value?.hexes.length ?? 0
-    revealed.value = Math.min(total, revealed.value + steps)
-    if (revealed.value >= total) playing.value = false
-  }
-
-  const setSpeed = (next: number): void => {
-    speed.value = Math.min(MAX_SPEED, Math.max(AUTO_SPEED, Math.round(next)))
-    playing.value = false
-    revealed.value = 0
-  }
-
-  // A new world is a different place, so nothing the party learned about the
-  // last one still describes the ground under it. Flushed synchronously so a
+  // A new world is a different place, so nothing the entities learned about the
+  // last one still describes the ground under them. Flushed synchronously so a
   // restore can hand a remembered map back on the line after it sets the seed.
   watch(
-    terrain,
+    [terrain, worldRadius],
     () => {
-      explored.value = new Set()
-      travelers.value = travelers.value.map((one) => ({
-        ...one,
-        journey: [],
-        standing: null,
-        walkedLeg: [],
-      }))
-    },
-    { flush: 'sync' },
-  )
-
-  // Sight is momentary but exploration is not: every hex the party has ever
-  // laid eyes on stays on the map, so travelling carves a corridor of known
-  // ground behind it. Flushed synchronously because a party stepping along a
-  // route is gone from each hex before a queued watcher would ever run.
-  watch(
-    visible,
-    (seen) => {
-      if (seen.size === 0) return
-      const next = new Set(explored.value)
-      for (const key of seen) next.add(key)
-      if (next.size !== explored.value.size) explored.value = next
-    },
-    { flush: 'sync', immediate: true },
-  )
-
-  // The party walks itself in: an animated leg is committed the moment the
-  // reveal reaches the far end, which is what the arrival button used to do by
-  // hand. Auto has no walk to wait on and commits in select.
-  watch(
-    finished,
-    (arrived) => {
-      if (arrived) arrive()
-    },
-    { flush: 'sync' },
-  )
-
-  // A new route is never half-played: picking new endpoints or toggling water
-  // rewinds the animation. Flushed synchronously so no frame can draw a stale
-  // reveal against a route that has already changed.
-  watch(
-    route,
-    () => {
-      playing.value = false
-      revealed.value = 0
+      turn.value = 0
+      setFrames([])
+      origins.value = new Map()
+      queue.value = new Map()
     },
     { flush: 'sync' },
   )
 
   return {
-    tiles,
+    field,
+    setField,
+    tileAt,
     hovered,
+    entities,
+    selectedId,
+    selectedEntity,
+    selectEntity,
+    addEntity,
+    removeEntity,
+    renameEntity,
+    setPace,
+    setEntitySight,
     start,
     goal,
-    allowWater,
-    speed,
-    playing,
-    revealed,
-    route,
-    hoveredTile,
-    isAuto,
-    visibleHexes,
-    revealedKm,
-    finished,
     partyHex,
-    canArrive,
-    arrive,
+    allowWater,
+    route,
+    plannedHexes,
+    pathHexes,
+    paths,
+    showAllPaths,
+    clearHistory,
+    hoveredTile,
+    turn,
+    clock,
+    states,
+    frames,
+    queue,
+    queueAction,
+    advanceTurn,
+    rewindTurn,
+    goToTurn,
+    skipPhase,
+    canRewind,
     journey,
+    shownEntities,
+    tokens,
+    positionsAt,
+    recordsOn,
+    hexesWalked,
     travelledKm,
-    recall,
-    clearLog,
-    travelers,
-    selectedTraveler,
-    selectTraveler,
-    addTraveler,
-    removeTraveler,
-    renameTraveler,
     terrain,
     setTerrain,
     reseed,
+    worldRadius,
+    worldSize,
+    setWorldRadius,
+    setWorldSize,
     fog,
     showSight,
     showHistory,
-    pathHexes,
+    dmView,
     sight,
+    setSight,
+    sightAt,
     reach,
-    explored,
     visible,
     blocked,
-    setSight,
-    forget,
+    explored,
     setTiles,
     setHovered,
     select,
     clear,
-    play,
-    stop,
-    advanceReveal,
-    setSpeed,
     snapshot,
     restore,
   }
 })
 
-// Without this the store instance outlives every hot update, so a component
-// reloading against a store that has since grown a new field crashes on it.
 if (import.meta.hot) {
   import.meta.hot.accept(acceptHMRUpdate(useHexMapStore, import.meta.hot))
 }

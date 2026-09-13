@@ -15,17 +15,23 @@ const LOAD_TIMEOUT_MS = 4000
 // posted to a worker, so the snapshot is flattened on the way out.
 const plain = (snapshot: MapSnapshot): MapSnapshot => ({
   terrain: { ...snapshot.terrain },
-  start: snapshot.start,
-  goal: snapshot.goal,
+  worldRadius: snapshot.worldRadius,
   allowWater: snapshot.allowWater,
   fog: snapshot.fog,
   showSight: snapshot.showSight,
   showHistory: snapshot.showHistory,
-  sight: snapshot.sight,
-  speed: snapshot.speed,
-  explored: [...snapshot.explored],
-  journey: snapshot.journey.map((step) => ({ ...step })),
-  standing: snapshot.standing,
+  dmView: snapshot.dmView,
+  turn: snapshot.turn,
+  selectedId: snapshot.selectedId,
+  entities: snapshot.entities.map((one) => ({ ...one })),
+  origins: snapshot.origins.map((one) => ({ ...one })),
+  record: snapshot.record.map((row) => ({ ...row, entered: [...row.entered] })),
+  states: snapshot.states.map((row) => ({ ...row, pending: [...row.pending] })),
+  queue: snapshot.queue.map(({ entityId, action }) => ({
+    entityId,
+    action:
+      action.kind === 'move' ? { kind: action.kind, route: [...action.route] } : { ...action },
+  })),
 })
 
 interface Pending {

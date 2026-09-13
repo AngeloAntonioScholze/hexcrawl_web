@@ -4,6 +4,7 @@ import { hexKey, range, type Axial, type HexKey } from '../hex/coords'
 import { createLayout } from '../hex/layout'
 import { createTerrain, type TerrainTile } from './terrain'
 import { CLIMB_MULTIPLIER, CLIMB_THRESHOLD, KM_PER_HEX, findRoute, stepCostKm } from './travel'
+import { fieldFromTiles } from './field'
 
 // The number is the mechanical level; the rendered height is derived from it so
 // nothing here can lean on the rendered number by accident.
@@ -68,19 +69,19 @@ describe('stepCostKm', () => {
 
 describe('findRoute', () => {
   it('costs ten kilometres per hex across flat ground', () => {
-    const route = findRoute(flatField(6), { q: 0, r: 0 }, { q: 4, r: 0 })!
+    const route = findRoute(fieldFromTiles(flatField(6)), { q: 0, r: 0 }, { q: 4, r: 0 })!
     expect(route.steps).toBe(4)
     expect(route.km).toBe(40)
     expect(route.hexes).toHaveLength(5)
   })
 
   it('counts hexes entered, not hexes occupied', () => {
-    const route = findRoute(flatField(4), { q: 0, r: 0 }, { q: 2, r: 0 })!
+    const route = findRoute(fieldFromTiles(flatField(4)), { q: 0, r: 0 }, { q: 2, r: 0 })!
     expect(route.hexes).toHaveLength(route.steps + 1)
   })
 
   it('costs nothing to stand still', () => {
-    const route = findRoute(flatField(3), { q: 0, r: 0 }, { q: 0, r: 0 })!
+    const route = findRoute(fieldFromTiles(flatField(3)), { q: 0, r: 0 }, { q: 0, r: 0 })!
     expect(route.km).toBe(0)
     expect(route.steps).toBe(0)
   })
@@ -90,10 +91,10 @@ describe('findRoute', () => {
     const tiles = mapOf(
       range({ q: 0, r: 0 }, 6).map((hex) => [hex, 1 + hex.q * CLIMB_THRESHOLD] as [Axial, number]),
     )
-    const uphill = findRoute(tiles, { q: 0, r: 0 }, { q: 3, r: 0 })!
+    const uphill = findRoute(fieldFromTiles(tiles), { q: 0, r: 0 }, { q: 3, r: 0 })!
     expect(uphill.km).toBe(3 * KM_PER_HEX * CLIMB_MULTIPLIER)
 
-    const downhill = findRoute(tiles, { q: 3, r: 0 }, { q: 0, r: 0 })!
+    const downhill = findRoute(fieldFromTiles(tiles), { q: 3, r: 0 }, { q: 0, r: 0 })!
     expect(downhill.km).toBe(3 * KM_PER_HEX)
   })
 
@@ -109,7 +110,7 @@ describe('findRoute', () => {
       tiles.set(hexKey({ q, r: 0 }), tile({ q, r: 0 }, elevation))
     }
 
-    const route = findRoute(tiles, { q: 0, r: 0 }, { q: 4, r: 0 })!
+    const route = findRoute(fieldFromTiles(tiles), { q: 0, r: 0 }, { q: 4, r: 0 })!
     expect(route.hexes.some((h) => h.r === 0 && h.q >= 1 && h.q <= 3)).toBe(false)
     // Five level hexes at 10km beats four hexes with three climbs at 70km.
     expect(route.km).toBe(50)
@@ -121,7 +122,7 @@ describe('findRoute', () => {
     for (const hex of [...tiles.values()].map((t) => t.hex).filter((h) => h.q === 2)) {
       tiles.set(hexKey(hex), tile(hex, 9))
     }
-    const route = findRoute(tiles, { q: 0, r: 0 }, { q: 4, r: 0 })!
+    const route = findRoute(fieldFromTiles(tiles), { q: 0, r: 0 }, { q: 4, r: 0 })!
     expect(route.steps).toBe(4)
     expect(route.km).toBe(50)
   })
@@ -131,7 +132,7 @@ describe('findRoute', () => {
     const tiles = mapOf(
       range({ q: 0, r: 0 }, 8).map((hex) => [hex, hex.q === 2 ? 9 : 1] as [Axial, number]),
     )
-    const route = findRoute(tiles, { q: 0, r: 0 }, { q: 4, r: 0 })!
+    const route = findRoute(fieldFromTiles(tiles), { q: 0, r: 0 }, { q: 4, r: 0 })!
     expect(route.hexes.some((h) => h.q === 2)).toBe(true)
   })
 
@@ -147,7 +148,7 @@ describe('findRoute', () => {
       { q: -6, r: 2 },
       { q: 3, r: 7 },
     ]) {
-      const route = findRoute(tiles, { q: 0, r: 0 }, goal, { allowWater: true })!
+      const route = findRoute(fieldFromTiles(tiles), { q: 0, r: 0 }, goal, { allowWater: true })!
       expect(route.km).toBeGreaterThanOrEqual(route.steps * KM_PER_HEX)
       expect(route.km).toBeLessThanOrEqual(route.steps * KM_PER_HEX * CLIMB_MULTIPLIER)
     }
@@ -155,13 +156,13 @@ describe('findRoute', () => {
 
   it('returns null when an endpoint is off the map', () => {
     const tiles = flatField(3)
-    expect(findRoute(tiles, { q: 0, r: 0 }, { q: 40, r: 0 })).toBeNull()
-    expect(findRoute(tiles, { q: 40, r: 0 }, { q: 0, r: 0 })).toBeNull()
+    expect(findRoute(fieldFromTiles(tiles), { q: 0, r: 0 }, { q: 40, r: 0 })).toBeNull()
+    expect(findRoute(fieldFromTiles(tiles), { q: 40, r: 0 }, { q: 0, r: 0 })).toBeNull()
   })
 
   it('stays inside the mapped area', () => {
     const tiles = flatField(5)
-    const route = findRoute(tiles, { q: -4, r: 0 }, { q: 4, r: 0 })!
+    const route = findRoute(fieldFromTiles(tiles), { q: -4, r: 0 }, { q: 4, r: 0 })!
     for (const hex of route.hexes) expect(tiles.has(hexKey(hex))).toBe(true)
   })
 })
@@ -177,24 +178,31 @@ describe('water crossings', () => {
   }
 
   it('refuses to cross water by default', () => {
-    expect(findRoute(channel(), { q: 0, r: 0 }, { q: 4, r: 0 })).toBeNull()
+    expect(findRoute(fieldFromTiles(channel()), { q: 0, r: 0 }, { q: 4, r: 0 })).toBeNull()
   })
 
   it('crosses when water is allowed', () => {
-    const route = findRoute(channel(), { q: 0, r: 0 }, { q: 4, r: 0 }, { allowWater: true })!
+    const route = findRoute(
+      fieldFromTiles(channel()),
+      { q: 0, r: 0 },
+      { q: 4, r: 0 },
+      { allowWater: true },
+    )!
     expect(route.hexes.some((h) => h.q === 2)).toBe(true)
     expect(route.steps).toBe(4)
   })
 
   it('refuses a route that starts or ends in water', () => {
     const tiles = channel()
-    expect(findRoute(tiles, { q: 2, r: 0 }, { q: 0, r: 0 })).toBeNull()
-    expect(findRoute(tiles, { q: 0, r: 0 }, { q: 2, r: 0 })).toBeNull()
+    expect(findRoute(fieldFromTiles(tiles), { q: 2, r: 0 }, { q: 0, r: 0 })).toBeNull()
+    expect(findRoute(fieldFromTiles(tiles), { q: 0, r: 0 }, { q: 2, r: 0 })).toBeNull()
   })
 
   it('allows a route that starts or ends in water when water is allowed', () => {
     const tiles = channel()
-    expect(findRoute(tiles, { q: 2, r: 0 }, { q: 0, r: 0 }, { allowWater: true })).not.toBeNull()
+    expect(
+      findRoute(fieldFromTiles(tiles), { q: 2, r: 0 }, { q: 0, r: 0 }, { allowWater: true }),
+    ).not.toBeNull()
   })
 
   it('walks around a lake rather than through it', () => {
@@ -202,7 +210,7 @@ describe('water crossings', () => {
     const tiles = flatField(6)
     tiles.set(hexKey({ q: 1, r: 0 }), water({ q: 1, r: 0 }))
 
-    const route = findRoute(tiles, { q: 0, r: 0 }, { q: 2, r: 0 })!
+    const route = findRoute(fieldFromTiles(tiles), { q: 0, r: 0 }, { q: 2, r: 0 })!
     expect(route.hexes.some((h) => h.q === 1 && h.r === 0)).toBe(false)
     expect(route.steps).toBe(3)
   })
@@ -213,8 +221,13 @@ describe('water crossings', () => {
     const tiles = flatField(6, 0.3)
     tiles.set(hexKey({ q: 1, r: 0 }), water({ q: 1, r: 0 }))
 
-    const dry = findRoute(tiles, { q: 0, r: 0 }, { q: 2, r: 0 })!
-    const wet = findRoute(tiles, { q: 0, r: 0 }, { q: 2, r: 0 }, { allowWater: true })!
+    const dry = findRoute(fieldFromTiles(tiles), { q: 0, r: 0 }, { q: 2, r: 0 })!
+    const wet = findRoute(
+      fieldFromTiles(tiles),
+      { q: 0, r: 0 },
+      { q: 2, r: 0 },
+      { allowWater: true },
+    )!
     expect(wet.km).toBeLessThan(dry.km)
     expect(wet.steps).toBe(2)
   })
@@ -224,7 +237,12 @@ describe('water crossings', () => {
     tiles.set(hexKey({ q: 1, r: 0 }), water({ q: 1, r: 0 }))
 
     // Into the water is a descent, back out is a climb.
-    const route = findRoute(tiles, { q: 0, r: 0 }, { q: 2, r: 0 }, { allowWater: true })!
+    const route = findRoute(
+      fieldFromTiles(tiles),
+      { q: 0, r: 0 },
+      { q: 2, r: 0 },
+      { allowWater: true },
+    )!
     expect(route.km).toBe(KM_PER_HEX + KM_PER_HEX * CLIMB_MULTIPLIER)
   })
 })

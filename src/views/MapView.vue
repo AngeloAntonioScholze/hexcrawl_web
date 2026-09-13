@@ -1,71 +1,69 @@
 <script setup lang="ts">
 import { computed, ref } from 'vue'
+import DayNightDial from '../components/DayNightDial.vue'
 import HexCanvas from '../components/HexCanvas.vue'
-import { MAX_SIGHT, MIN_SIGHT, TERRAIN_LIMITS, useHexMapStore } from '../stores/hexMap'
+import type { EntityKind } from '../entities/entity'
+import {
+  MAX_SIGHT,
+  MIN_SIGHT,
+  PACE_LIMITS,
+  TERRAIN_LIMITS,
+  WORLD_SIZES,
+  useHexMapStore,
+  type WorldSize,
+} from '../stores/hexMap'
 import { KM_PER_HEX } from '../terrain/travel'
 
 const store = useHexMapStore()
 
+/** Narrower than this and the panel would be most of the window. */
+const NARROW = 720
+
 // View state, not map state: collapsing the panel hands the map back the room
 // and the pointer, which a scroll container has to hold on to while it is open.
-const collapsed = ref(false)
-
-const speedLabel = computed(() => (store.isAuto ? 'auto' : `${store.speed}x`))
-
-const playLabel = computed(() => {
-  if (store.playing) return 'stop'
-  return store.finished ? 'replay' : 'start'
-})
-
-const onSpeed = (event: Event): void => {
-  store.setSpeed(Number((event.target as HTMLInputElement).value))
-}
-
-const onPlay = (): void => {
-  if (store.playing) store.stop()
-  else store.play()
-}
+// A small window opens collapsed, so a phone gets the map first.
+const collapsed = ref(window.innerWidth < NARROW)
 
 const onSight = (event: Event): void => {
   store.setSight(Number((event.target as HTMLInputElement).value))
+}
+
+const onPace = (event: Event): void => {
+  store.setPace(store.selectedId, Number((event.target as HTMLInputElement).value))
 }
 
 const onTerrain = (key: 'scale' | 'seaLevel' | 'relief', event: Event): void => {
   store.setTerrain({ [key]: Number((event.target as HTMLInputElement).value) })
 }
 
+const addKind = ref<EntityKind>('caravan')
+
+const worldSizes = Object.keys(WORLD_SIZES) as WorldSize[]
+
 const hint = computed(() => {
-  if (!store.start) return 'click a hex to put the party there'
-  if (!store.goal) {
-    return store.isAuto ? 'click a hex to send the party there' : 'click a hex to plan the next leg'
-  }
-  if (store.route) return 'press start: the party arrives at the end of the walk'
-  return store.allowWater ? 'no route found' : 'no land route — try allowing water'
+  if (!store.start) return 'click a hex to put the entity there'
+  if (!store.goal) return 'click a hex to give it a route'
+  return 'press the arrow on the dial: it walks as the turns pass'
 })
 
 const straightLine = computed(() => (store.route ? `${store.route.steps * KM_PER_HEX} km` : '—'))
 
-/** A long crawl would otherwise hang thousands of rows off the panel. */
-const JOURNEY_SHOWN = 40
+/** A long crawl would otherwise hang hundreds of rows off the panel. */
+const TURNS_SHOWN = 40
 
-// Newest first: the party's last step is the one anybody is looking for.
-const recentJourney = computed(() => {
-  const from = Math.max(0, store.journey.length - JOURNEY_SHOWN)
-  return store.journey
-    .slice(from)
-    .map((step, index) => ({ ...step, at: from + index }))
-    .reverse()
+// Newest first: the last turn is the one anybody is looking for.
+const recentTurns = computed(() => {
+  const from = Math.max(0, store.journey.length - TURNS_SHOWN)
+  return store.journey.slice(from).reverse()
 })
 
-const olderSteps = computed(() => Math.max(0, store.journey.length - JOURNEY_SHOWN))
-
-// A party that has not been recalled back down the log stands at its head.
-const standingAt = computed(() => store.selectedTraveler.standing ?? store.journey.length - 1)
+const olderTurns = computed(() => Math.max(0, store.journey.length - TURNS_SHOWN))
 </script>
 
 <template>
   <main>
     <HexCanvas />
+    <DayNightDial />
     <aside :class="{ collapsed }">
       <header>
         <h1>hexcrawl</h1>
@@ -82,6 +80,12 @@ const standingAt = computed(() => store.selectedTraveler.standing ?? store.journ
 
       <div v-show="!collapsed" class="body">
         <dl>
+          <dt>turn</dt>
+          <dd>
+            {{ store.turn }}
+            <span class="dim">{{ store.clock.phase }} {{ store.clock.index + 1 }}/4</span>
+          </dd>
+
           <dt>hover</dt>
           <dd>
             {{ store.hovered ?? '—' }}
@@ -90,27 +94,60 @@ const standingAt = computed(() => store.selectedTraveler.standing ?? store.journ
             </span>
           </dd>
 
-          <dt>start</dt>
+          <dt>standing</dt>
           <dd>{{ store.start ?? '—' }}</dd>
 
-          <dt>end</dt>
+          <dt>headed</dt>
           <dd>{{ store.goal ?? '—' }}</dd>
         </dl>
 
+        <div class="control stack">
+          <div class="row">
+            <span>entities</span>
+            <span class="value">{{ store.entities.length }}</span>
+          </div>
+
+          <ul class="entities">
+            <li v-for="one in store.entities" :key="one.id">
+              <button
+                type="button"
+                :class="{ here: one.id === store.selectedId }"
+                :title="`give ${one.name} the orders`"
+                @click="store.selectEntity(one.id)"
+              >
+                <span class="pip" :style="{ background: one.color }" />
+                <span>{{ one.name }}</span>
+                <span class="dim">{{ one.kind }}</span>
+                <span class="value">{{ one.pacePerTurn }}/turn</span>
+              </button>
+            </li>
+          </ul>
+
+          <div class="row">
+            <select v-model="addKind">
+              <option value="party">party</option>
+              <option value="caravan">caravan</option>
+              <option value="npc">npc</option>
+            </select>
+            <button type="button" @click="store.addEntity(undefined, addKind, 'player')">
+              add
+            </button>
+          </div>
+          <button
+            type="button"
+            :disabled="!store.selectedEntity"
+            @click="store.removeEntity(store.selectedId)"
+          >
+            {{ store.selectedEntity ? `remove ${store.selectedEntity.name}` : 'nobody on the map' }}
+          </button>
+        </div>
+
         <dl v-if="store.route" class="route">
-          <dt>hexes</dt>
-          <dd>
-            <template v-if="store.isAuto">{{ store.route.steps }}</template>
-            <template v-else
-              >{{ Math.max(0, store.visibleHexes.length - 1) }} / {{ store.route.steps }}</template
-            >
-          </dd>
+          <dt>hexes left</dt>
+          <dd>{{ store.plannedHexes.length }}</dd>
 
           <dt>travel</dt>
-          <dd>
-            <template v-if="store.isAuto">{{ store.route.km }} km</template>
-            <template v-else>{{ store.revealedKm }} / {{ store.route.km }} km</template>
-          </dd>
+          <dd>{{ store.route.km }} km</dd>
 
           <dt>flat</dt>
           <dd class="dim">{{ straightLine }}</dd>
@@ -121,14 +158,28 @@ const standingAt = computed(() => store.selectedTraveler.standing ?? store.journ
           <span>allow water crossings</span>
         </label>
 
-        <div class="control stack">
+        <div v-if="store.selectedEntity" class="control stack">
           <div class="row">
-            <span>travel speed</span>
-            <span class="value">{{ speedLabel }}</span>
+            <span>pace</span>
+            <span class="value">{{ store.selectedEntity.pacePerTurn }} hex a turn</span>
           </div>
-          <input :value="store.speed" type="range" min="0" max="3" step="1" @input="onSpeed" />
-          <button type="button" :disabled="store.isAuto || !store.route" @click="onPlay">
-            {{ playLabel }}
+          <input
+            :value="store.selectedEntity.pacePerTurn"
+            type="range"
+            :min="PACE_LIMITS.min"
+            :max="PACE_LIMITS.max"
+            :step="PACE_LIMITS.step"
+            @input="onPace"
+          />
+          <button type="button" :disabled="!store.goal" @click="store.clear">
+            call off the order
+          </button>
+          <button
+            type="button"
+            :disabled="!store.start"
+            @click="store.queueAction(store.selectedId, { kind: 'camp' })"
+          >
+            make camp this turn
           </button>
         </div>
 
@@ -142,9 +193,24 @@ const standingAt = computed(() => store.selectedTraveler.standing ?? store.journ
           <span>show the sight field</span>
         </label>
 
+        <label class="control">
+          <input v-model="store.showHistory" type="checkbox" />
+          <span>show full path history</span>
+        </label>
+
+        <label class="control">
+          <input v-model="store.showAllPaths" type="checkbox" />
+          <span>show all entities paths</span>
+        </label>
+
+        <label class="control">
+          <input v-model="store.dmView" type="checkbox" />
+          <span>see what the DM sees</span>
+        </label>
+
         <div v-if="store.fog || store.showSight" class="control stack">
           <div class="row">
-            <span>sight on the flat</span>
+            <span>sight by daylight</span>
             <span class="value">{{ store.sight }}</span>
           </div>
           <input
@@ -159,15 +225,10 @@ const standingAt = computed(() => store.selectedTraveler.standing ?? store.journ
             <span>seeing</span>
             <span class="value">{{ store.reach }} hex</span>
           </div>
-          <template v-if="store.fog">
-            <div class="row">
-              <span>explored</span>
-              <span class="value">{{ store.explored.size }}</span>
-            </div>
-            <button type="button" :disabled="store.explored.size === 0" @click="store.forget">
-              forget the map
-            </button>
-          </template>
+          <div v-if="store.fog" class="row">
+            <span>explored</span>
+            <span class="value">{{ store.explored.size }}</span>
+          </div>
         </div>
 
         <div class="control stack">
@@ -176,6 +237,22 @@ const standingAt = computed(() => store.selectedTraveler.standing ?? store.journ
             <span class="value">{{ store.terrain.seed }}</span>
           </div>
           <button type="button" @click="store.reseed">roll a new world</button>
+
+          <div class="row">
+            <span>world size</span>
+            <span class="value">{{ store.worldRadius }} hex</span>
+          </div>
+          <div class="sizes">
+            <button
+              v-for="size in worldSizes"
+              :key="size"
+              type="button"
+              :class="{ here: store.worldSize === size }"
+              @click="store.setWorldSize(size)"
+            >
+              {{ size }}
+            </button>
+          </div>
 
           <div class="row">
             <span>landmass size</span>
@@ -219,37 +296,32 @@ const standingAt = computed(() => store.selectedTraveler.standing ?? store.journ
 
         <div v-if="store.journey.length" class="control stack">
           <div class="row">
-            <span>travelled</span>
+            <span>adventure log</span>
             <span class="value">{{ store.travelledKm }} km</span>
           </div>
           <div class="row">
             <span>hexes walked</span>
-            <span class="value">{{ store.journey.length - 1 }}</span>
+            <span class="value">{{ store.hexesWalked }}</span>
           </div>
 
           <ol class="journey">
-            <li v-for="step in recentJourney" :key="step.at">
+            <li v-for="row in recentTurns" :key="row.turn">
               <button
                 type="button"
-                :class="{ here: step.at === standingAt }"
-                :title="`stand the party back on ${step.hex}`"
-                @click="store.recall(step.at)"
+                :class="{ here: row.turn === store.turn - 1, ahead: !row.spent }"
+                :title="`put the crawl back as it stood at the end of turn ${row.turn}`"
+                @click="store.goToTurn(row.turn + 1)"
               >
-                <span class="dim">{{ step.at }}</span>
-                <span>{{ step.hex }}</span>
-                <span class="dim">{{ step.terrain }}</span>
-                <span class="value">{{ step.km === 0 ? 'set out' : `${step.km} km` }}</span>
+                <span class="dim">{{ row.turn }}</span>
+                <span>{{ row.hex }}</span>
+                <span class="dim">{{ row.terrain }}</span>
+                <span class="value">{{ row.entered === 0 ? row.kind : `${row.entered} hex` }}</span>
               </button>
             </li>
           </ol>
-          <p v-if="olderSteps" class="dim">and {{ olderSteps }} earlier</p>
+          <p v-if="olderTurns" class="dim">and {{ olderTurns }} earlier</p>
 
-          <label class="control">
-            <input v-model="store.showHistory" type="checkbox" />
-            <span>show the whole path history</span>
-          </label>
-
-          <button type="button" @click="store.clearLog">clear the log</button>
+          <button type="button" @click="store.clearHistory">clear the history</button>
         </div>
 
         <p>{{ hint }}</p>
@@ -264,6 +336,7 @@ main {
   position: relative;
   height: 100%;
   overflow: hidden;
+  touch-action: none;
 }
 
 /* The panel outgrew the viewport once the terrain knobs landed. It scrolls
@@ -275,7 +348,7 @@ aside {
   left: 1rem;
   max-height: calc(100% - 2rem);
   min-width: 13rem;
-  max-width: 17rem;
+  max-width: min(17rem, calc(100vw - 2rem));
   padding: 0.75rem 1rem;
   border: 1px solid var(--line);
   border-radius: 0.5rem;
@@ -315,9 +388,71 @@ aside {
   background: color-mix(in srgb, var(--line) 45%, transparent);
 }
 
-/* Where the party stands right now, so a rewound journey still reads. */
+.entities {
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.entities li button {
+  display: grid;
+  width: 100%;
+  grid-template-columns: 0.6rem 1fr auto auto;
+  align-items: center;
+  gap: 0.4rem;
+  padding: 0.1rem 0.25rem;
+  border: none;
+  border-radius: 0.2rem;
+  background: none;
+  color: inherit;
+  font: inherit;
+  text-align: left;
+  cursor: pointer;
+}
+
+.entities li button:hover {
+  background: color-mix(in srgb, var(--line) 45%, transparent);
+}
+
+.entities li button.here {
+  background: color-mix(in srgb, var(--line) 70%, transparent);
+}
+
+.sizes {
+  display: flex;
+  gap: 0.3rem;
+}
+
+.sizes button.here {
+  border-color: #7aa2c8;
+  color: var(--ink);
+}
+
+.pip {
+  width: 0.55rem;
+  height: 0.55rem;
+  border-radius: 50%;
+}
+
+select {
+  flex: 1;
+  padding: 0.3rem;
+  border: 1px solid var(--line);
+  border-radius: 0.35rem;
+  background: var(--surface);
+  color: var(--ink);
+  font: inherit;
+  font-size: 0.78rem;
+}
+
+/* The turn the crawl stands on, so a rewound record still reads. */
 .journey li button.here {
   background: color-mix(in srgb, var(--line) 70%, transparent);
+}
+
+/* Turns the crawl has been wound back past: still recorded, not yet lived. */
+.journey li button.ahead {
+  color: var(--ink-dim);
 }
 
 header {
@@ -465,5 +600,15 @@ button:hover:not(:disabled) {
 button:disabled {
   color: var(--ink-dim);
   cursor: default;
+}
+
+/* Room is the scarce thing on a phone: the panel gives the map its corner back
+   and the dial shrinks rather than straddling the whole width. */
+@media (max-width: 720px) {
+  aside {
+    top: 0.5rem;
+    left: 0.5rem;
+    max-height: calc(100% - 7rem);
+  }
 }
 </style>

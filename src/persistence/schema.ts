@@ -38,6 +38,76 @@ const MIGRATIONS: readonly string[] = [
   `
   ALTER TABLE map ADD COLUMN show_history INTEGER NOT NULL DEFAULT 0;
   `,
+  `
+  ALTER TABLE map ADD COLUMN elapsed_hours INTEGER NOT NULL DEFAULT 0;
+  `,
+  `
+  ALTER TABLE map ADD COLUMN turn INTEGER NOT NULL DEFAULT 0;
+  ALTER TABLE map ADD COLUMN dm_view INTEGER NOT NULL DEFAULT 1;
+  ALTER TABLE map ADD COLUMN selected_id TEXT;
+
+  DROP TABLE journey;
+  DROP TABLE explored;
+
+  ALTER TABLE map DROP COLUMN start_hex;
+  ALTER TABLE map DROP COLUMN goal_hex;
+  ALTER TABLE map DROP COLUMN sight;
+  ALTER TABLE map DROP COLUMN speed;
+  ALTER TABLE map DROP COLUMN standing;
+  ALTER TABLE map DROP COLUMN elapsed_hours;
+
+  CREATE TABLE entity (
+    id TEXT PRIMARY KEY,
+    ord INTEGER NOT NULL,
+    name TEXT NOT NULL,
+    kind TEXT NOT NULL,
+    owner TEXT NOT NULL,
+    color TEXT NOT NULL,
+    pace REAL NOT NULL,
+    sight INTEGER NOT NULL,
+    hidden INTEGER NOT NULL
+  );
+
+  CREATE TABLE origin (
+    entity_id TEXT PRIMARY KEY,
+    turn INTEGER NOT NULL,
+    hex TEXT NOT NULL
+  );
+
+  CREATE TABLE turn (
+    n INTEGER PRIMARY KEY
+  );
+
+  CREATE TABLE action (
+    turn INTEGER NOT NULL REFERENCES turn(n) ON DELETE CASCADE,
+    entity_id TEXT NOT NULL,
+    kind TEXT NOT NULL,
+    from_hex TEXT,
+    to_hex TEXT,
+    entered TEXT NOT NULL,
+    spent REAL NOT NULL,
+    carry REAL NOT NULL,
+    PRIMARY KEY (turn, entity_id)
+  );
+
+  CREATE TABLE entity_turn (
+    turn INTEGER NOT NULL REFERENCES turn(n) ON DELETE CASCADE,
+    entity_id TEXT NOT NULL,
+    hex TEXT,
+    carry REAL NOT NULL,
+    pending TEXT NOT NULL,
+    PRIMARY KEY (turn, entity_id)
+  );
+
+  CREATE TABLE queued_action (
+    entity_id TEXT PRIMARY KEY,
+    kind TEXT NOT NULL,
+    route TEXT NOT NULL
+  );
+  `,
+  `
+  ALTER TABLE map ADD COLUMN world_radius INTEGER NOT NULL DEFAULT 150;
+  `,
 ]
 
 export const SCHEMA_VERSION = MIGRATIONS.length

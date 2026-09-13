@@ -53,9 +53,8 @@ beforeEach(() => {
   scene = new Scene(engine)
   iso = createIsoCamera(scene, fakeCanvas(), { zoom: 20 })
   iso.updateProjection(WIDTH / HEIGHT)
-  grid = createHexGrid(
-    scene,
-    layout,
+  grid = createHexGrid(scene, layout, { capacity: 200 })
+  grid.setWindow(
     spiral({ q: 0, r: 0 }, 4).map((hex) => ({
       hex,
       elevation: 1,

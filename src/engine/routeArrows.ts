@@ -8,10 +8,20 @@ import type { Scene } from '@babylonjs/core/scene'
 import type { Axial } from '../hex/coords'
 import { hexToWorld, type Layout } from '../hex/layout'
 
+/** One trail to draw, in the colour of whoever is walking it. */
+export interface ArrowPath {
+  hexes: readonly Axial[]
+  /** CSS hex colour; the default arrow colour when left out. */
+  color?: string
+}
+
 export interface RouteArrows {
+  /** The mesh carrying the default colour; other colours get their own. */
   mesh: Mesh
   count: number
   setPath(hexes: readonly Axial[]): void
+  /** Several trails at once, each drawn on its own rather than joined up. */
+  setPaths(paths: readonly ArrowPath[]): void
   /** Advances the hover cycle; driven by the render loop. */
   advanceBob(seconds: number): void
   dispose(): void
@@ -179,17 +189,36 @@ export function createRouteArrows(
   const bobPeriod = options.bobPeriod ?? DEFAULTS.bobPeriod
   const color = options.color ?? ARROW_COLOR
 
-  const mesh = new Mesh('routeArrows', scene)
-  buildArrowGeometry(length, width, thickness, bevel, bevelSegments).applyToMesh(mesh)
-  mesh.isPickable = false
+  const geometry = buildArrowGeometry(length, width, thickness, bevel, bevelSegments)
 
-  // Lit like the terrain so the solid shape reads, with a floor of emissive so
-  // an arrow in shadow is still obvious.
-  const material = new StandardMaterial('routeArrows', scene)
-  material.diffuseColor = color
-  material.emissiveColor = color.scale(0.35)
-  material.specularColor = Color3.Black()
-  mesh.material = material
+  /**
+   * One mesh per colour. Thin instances of a mesh all wear its material, so a
+   * trail in the party's colour and a trail in the caravan's cannot share one,
+   * and the alternative — a material per arrow — is a draw call per arrow.
+   */
+  const meshes = new Map<string, Mesh>()
+
+  const meshFor = (key: string, tint: Color3): Mesh => {
+    const known = meshes.get(key)
+    if (known) return known
+
+    const made = new Mesh(key ? `routeArrows:${key}` : 'routeArrows', scene)
+    geometry.applyToMesh(made)
+    made.isPickable = false
+
+    // Lit like the terrain so the solid shape reads, with a floor of emissive
+    // so an arrow in shadow is still obvious.
+    const material = new StandardMaterial(made.name, scene)
+    material.diffuseColor = tint
+    material.emissiveColor = tint.scale(0.35)
+    material.specularColor = Color3.Black()
+    made.material = material
+
+    meshes.set(key, made)
+    return made
+  }
+
+  const mesh = meshFor('', color)
 
   const scaling = Vector3.One()
   const translation = Vector3.Zero()
@@ -203,46 +232,71 @@ export function createRouteArrows(
     },
 
     setPath(hexes): void {
-      count = Math.max(0, hexes.length - 1)
-      const matrices = new Float32Array(count * 16)
+      arrows.setPaths([{ hexes }])
+    },
 
-      for (let i = 0; i < count; i++) {
-        const from = hexes[i]
-        const to = hexes[i + 1]
-        const a = hexToWorld(layout, from)
-        const b = hexToWorld(layout, to)
+    // Grouped by colour, one instance buffer per group: every trail an entity
+    // walks is drawn in the colour its token and its row in the panel wear.
+    setPaths(paths): void {
+      const byColor = new Map<string, number[]>()
 
-        // Sitting on the seam between the two hexes, clearing the taller one so
-        // it never sinks into a climb.
-        translation.set(
-          (a.x + b.x) / 2,
-          Math.max(elevationOf(from), elevationOf(to)) + lift,
-          (a.z + b.z) / 2,
-        )
+      for (const path of paths) {
+        const key = path.color ?? ''
+        const matrices = byColor.get(key) ?? []
+        byColor.set(key, matrices)
 
-        const yaw = Math.atan2(b.x - a.x, b.z - a.z)
-        Matrix.Compose(
-          scaling,
-          Quaternion.RotationAxis(Vector3.Up(), yaw),
-          translation,
-        ).copyToArray(matrices, i * 16)
+        for (let i = 0; i < path.hexes.length - 1; i++) {
+          const from = path.hexes[i]
+          const to = path.hexes[i + 1]
+          const a = hexToWorld(layout, from)
+          const b = hexToWorld(layout, to)
+
+          // Sitting on the seam between the two hexes, clearing the taller one
+          // so it never sinks into a climb.
+          translation.set(
+            (a.x + b.x) / 2,
+            Math.max(elevationOf(from), elevationOf(to)) + lift,
+            (a.z + b.z) / 2,
+          )
+
+          const yaw = Math.atan2(b.x - a.x, b.z - a.z)
+          const slot = matrices.length
+          matrices.length = slot + 16
+          Matrix.Compose(
+            scaling,
+            Quaternion.RotationAxis(Vector3.Up(), yaw),
+            translation,
+          ).copyToArray(matrices, slot)
+        }
       }
 
-      mesh.thinInstanceSetBuffer('matrix', matrices, 16, false)
-      mesh.isVisible = count > 0
+      count = 0
+      // Colours nobody is walking this frame are emptied rather than disposed:
+      // the same few entities keep taking their trails back.
+      for (const key of new Set([...meshes.keys(), ...byColor.keys()])) {
+        const drawn = byColor.get(key) ?? []
+        const target = key === '' ? mesh : meshFor(key, Color3.FromHexString(key))
+        target.thinInstanceSetBuffer('matrix', new Float32Array(drawn), 16, false)
+        target.isVisible = drawn.length > 0
+        count += drawn.length / 16
+      }
     },
 
     // Thin instance matrices are multiplied by the mesh's own world matrix, so
     // moving the node bobs every arrow at once with no buffer upload.
     advanceBob(seconds): void {
       phase = (phase + seconds / bobPeriod) % 1
-      mesh.position.y = count > 0 ? Math.sin(phase * Math.PI * 2) * bobHeight : 0
+      const height = count > 0 ? Math.sin(phase * Math.PI * 2) * bobHeight : 0
+      for (const one of meshes.values()) one.position.y = height
     },
 
     dispose(): void {
       scene.onBeforeRenderObservable.remove(observer)
-      material.dispose()
-      mesh.dispose()
+      for (const one of meshes.values()) {
+        one.material?.dispose()
+        one.dispose()
+      }
+      meshes.clear()
     },
   }
 

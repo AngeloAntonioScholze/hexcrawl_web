@@ -1,6 +1,6 @@
 import { hexKey, type Axial, type HexKey } from '../hex/coords'
 import { fieldOfView, type VisionOptions } from '../hex/vision'
-import type { TerrainTile } from './terrain'
+import type { TerrainField } from './field'
 
 export interface PartySight {
   radius: number
@@ -15,16 +15,16 @@ export interface PartySight {
  * to have nudged it up a fraction.
  */
 export function sightFrom(
-  tiles: ReadonlyMap<HexKey, TerrainTile>,
+  field: TerrainField,
   origin: Axial,
   options: VisionOptions = {},
 ): PartySight {
-  const elevationOf = (hex: Axial): number | undefined => tiles.get(hexKey(hex))?.level
-  const field = fieldOfView(origin, elevationOf, options)
+  const elevationOf = (hex: Axial): number | undefined => field.at(hex)?.level
+  const seen = fieldOfView(origin, elevationOf, options)
 
   return {
-    radius: field.radius,
-    visible: new Set(field.visible.map(hexKey)),
-    blocked: new Set(field.blocked.map(hexKey)),
+    radius: seen.radius,
+    visible: new Set(seen.visible.map(hexKey)),
+    blocked: new Set(seen.blocked.map(hexKey)),
   }
 }

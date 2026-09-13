@@ -25,7 +25,8 @@ beforeEach(() => {
   engine = new NullEngine()
   scene = new Scene(engine)
   tiles = makeTiles(3)
-  grid = createHexGrid(scene, layout, tiles)
+  grid = createHexGrid(scene, layout, { capacity: 8000 })
+  grid.setWindow(tiles)
 })
 
 afterEach(() => {
@@ -65,10 +66,39 @@ describe('instancing', () => {
   })
 
   it('holds 5000+ hexes in one mesh', () => {
-    const big = createHexGrid(scene, layout, makeTiles(41))
+    const big = createHexGrid(scene, layout, { capacity: 8000 })
+    big.setWindow(makeTiles(41))
     expect(big.count).toBeGreaterThan(5000)
     expect(big.mesh.thinInstanceCount).toBe(big.count)
     big.dispose()
+  })
+
+  it('draws only the hexes the window holds, not the whole capacity', () => {
+    const roomy = createHexGrid(scene, layout, { capacity: 8000 })
+
+    roomy.setWindow(makeTiles(3))
+    const wide = roomy.count
+
+    roomy.setWindow(makeTiles(1))
+    expect(roomy.count).toBeLessThan(wide)
+    expect(roomy.mesh.thinInstanceCount).toBe(roomy.count)
+    roomy.dispose()
+  })
+
+  it('refuses a window it has no room for', () => {
+    const tight = createHexGrid(scene, layout, { capacity: 4 })
+    expect(() => tight.setWindow(makeTiles(3))).toThrow(RangeError)
+    tight.dispose()
+  })
+
+  it('keeps the fog on a hex when the window moves under it', () => {
+    grid.setFog(new Map([['1,0', 0]]))
+    const dark = grid.colorAt(grid.indexOf('1,0')!)
+
+    // The same hex, landing in a different slot of the buffer.
+    grid.setWindow([...tiles].reverse())
+
+    expect(grid.colorAt(grid.indexOf('1,0')!)).toEqual(dark)
   })
 })
 
@@ -227,7 +257,7 @@ describe('re-terraining', () => {
     tiles.map((tile) => ({ ...tile, elevation: tile.elevation + 5, color: OTHER }))
 
   it('takes the new colours', () => {
-    grid.setTiles(reshaped())
+    grid.setWindow(reshaped())
 
     const [r, g, b] = grid.colorAt(0)
     expect(r).toBeCloseTo(OTHER.r, 6)
@@ -243,7 +273,7 @@ describe('re-terraining', () => {
   })
 
   it('takes the new heights', () => {
-    grid.setTiles(reshaped())
+    grid.setWindow(reshaped())
 
     const matrices = grid.mesh.thinInstanceGetWorldMatrices()
     tiles.forEach((tile, index) => {
@@ -254,7 +284,7 @@ describe('re-terraining', () => {
   it('keeps the tint on top of the new ground', () => {
     const key = hexKey(tiles[0].hex)
     grid.setOverlay(new Map([[key, new Color3(0, 1, 0)]]))
-    grid.setTiles(reshaped())
+    grid.setWindow(reshaped())
 
     const [r, g, b] = grid.colorAt(0)
     expect([r, g, b]).toEqual([0, 1, 0])
@@ -263,12 +293,14 @@ describe('re-terraining', () => {
   it('keeps the fog over the new ground', () => {
     const key = hexKey(tiles[0].hex)
     grid.setFog(new Map([[key, 0]]))
-    grid.setTiles(reshaped())
+    grid.setWindow(reshaped())
 
     expect(grid.colorAt(0)[0]).toBeCloseTo(0.055, 6)
   })
 
-  it('refuses a tile list that does not match the grid', () => {
-    expect(() => grid.setTiles(tiles.slice(1))).toThrow(RangeError)
+  it('takes a shorter window than the one it was holding', () => {
+    grid.setWindow(tiles.slice(1))
+    expect(grid.count).toBe(tiles.length - 1)
+    expect(grid.indexOf(hexKey(tiles[0].hex))).toBeUndefined()
   })
 })

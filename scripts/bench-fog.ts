@@ -9,6 +9,7 @@ import { createLayout } from '../src/hex/layout'
 import { createHexGrid, type HexTile } from '../src/engine/hexGrid'
 import { sightFrom } from '../src/terrain/sight'
 import { createTerrain } from '../src/terrain/terrain'
+import { fieldFromTiles } from '../src/terrain/field'
 
 // The board MapView ships with: a 40-hex radius is 4921 tiles. Sight runs from
 // the default 5 up to the 14 a party standing on a peak reaches.
@@ -23,9 +24,8 @@ const tiles = new Map(terrainTiles.map((tile) => [hexKey(tile.hex), tile]))
 
 const engine = new NullEngine()
 const scene = new Scene(engine)
-const grid = createHexGrid(
-  scene,
-  layout,
+const grid = createHexGrid(scene, layout, { capacity: terrainTiles.length })
+grid.setWindow(
   terrainTiles.map((tile): HexTile => ({
     hex: tile.hex,
     elevation: tile.elevation,
@@ -45,7 +45,8 @@ const time = (label: string, iterations: number, run: () => void): void => {
   )
 }
 
-const sightAt = (hex: Axial, radius: number) => sightFrom(tiles, hex, { radius, maxRadius: radius })
+const sightAt = (hex: Axial, radius: number) =>
+  sightFrom(fieldFromTiles(tiles), hex, { radius, maxRadius: radius })
 
 const fogMapFrom = (visible: ReadonlySet<HexKey>, explored: ReadonlySet<HexKey>) => {
   const result = new Map<HexKey, number>()
