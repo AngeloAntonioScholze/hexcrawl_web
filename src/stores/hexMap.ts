@@ -30,6 +30,7 @@ import { sightFrom, type PartySight } from '../terrain/sight'
 import { isWater, TERRAIN_DEFAULTS, type TerrainId, type TerrainTile } from '../terrain/terrain'
 import { canEnter, chainRoute, joinLegs, KM_PER_HEX, type Route } from '../terrain/travel'
 import { clockAt, isNight, nextPhaseTurn, type Clock } from '../time/clock'
+import { createHistory, slotOf } from './history'
 
 const NOTHING_IN_SIGHT: PartySight = { radius: 0, visible: new Set(), blocked: new Set() }
 
@@ -199,6 +200,27 @@ export const useHexMapStore = defineStore('hexMap', () => {
   })
 
   const clock = computed<Clock>(() => clockAt(turn.value))
+
+  /**
+   * What undo can take back: the DM's edits and the orders being given. An
+   * action opts in by being wrapped in history.track where the store hands it
+   * out; state it writes that is not listed here is left where it is. The turn
+   * is not in it, and moving the clock forgets every step.
+   */
+  const history = createHistory({
+    entities: slotOf(entities),
+    selectedId: slotOf(selectedId),
+    origins: slotOf(origins),
+    frames: { get: () => frames.value, set: setFrames },
+    queue: slotOf(queue),
+    notes: slotOf(notes),
+    events: slotOf(events),
+    locations: slotOf(locations),
+    merchants: slotOf(merchants),
+    resources: slotOf(resources),
+    resourceChances: slotOf(resourceChances),
+    resourceSpacing: slotOf(resourceSpacing),
+  })
 
   /**
    * Whoever the map is currently listening to, or nobody at all: a map can be
@@ -611,6 +633,7 @@ export const useHexMapStore = defineStore('hexMap', () => {
     setFrames([...frames.value, { records: outcome.records, states: outcome.states }])
     queue.value = new Map()
     turn.value += 1
+    history.clear()
   }
 
   /** Winds the world back a turn; the record it is read out of is left alone. */
@@ -618,11 +641,13 @@ export const useHexMapStore = defineStore('hexMap', () => {
     if (turn.value === 0) return
     turn.value -= 1
     queue.value = new Map()
+    history.clear()
   }
 
   const goToTurn = (at: number): void => {
     turn.value = Math.max(0, Math.min(frames.value.length, Math.floor(at)))
     queue.value = new Map()
+    history.clear()
   }
 
   /** Camps out the rest of the phase: standing orders keep being walked. */
@@ -643,6 +668,7 @@ export const useHexMapStore = defineStore('hexMap', () => {
     setFrames([])
     origins.value = new Map()
     queue.value = new Map()
+    history.clear()
   }
 
   /** The order an entity is about to walk: the queued one, or the standing one. */
@@ -1034,6 +1060,7 @@ export const useHexMapStore = defineStore('hexMap', () => {
     resources.value = saved.resources.map((one) => ({ ...one }))
     resourceChances.value = { ...saved.resourceChances }
     resourceSpacing.value = saved.resourceSpacing
+    history.clear()
   }
 
   // A new world is a different place, so nothing the entities learned about the
@@ -1051,6 +1078,7 @@ export const useHexMapStore = defineStore('hexMap', () => {
       events.value = new Map()
       locations.value = new Map()
       resources.value = []
+      history.clear()
     },
     { flush: 'sync' },
   )
@@ -1072,11 +1100,11 @@ export const useHexMapStore = defineStore('hexMap', () => {
     selectedId,
     selectedEntity,
     selectEntity,
-    addEntity,
-    removeEntity,
-    renameEntity,
-    setPace,
-    setEntitySight,
+    addEntity: history.track(addEntity),
+    removeEntity: history.track(removeEntity),
+    renameEntity: history.track(renameEntity),
+    setPace: history.track(setPace, (id) => `pace:${id}`),
+    setEntitySight: history.track(setEntitySight, (id) => `sight:${id}`),
     start,
     goal,
     partyHex,
@@ -1085,7 +1113,7 @@ export const useHexMapStore = defineStore('hexMap', () => {
     routeBySea,
     legs,
     stops,
-    removeWaypoint,
+    removeWaypoint: history.track(removeWaypoint),
     plannedHexes,
     pathHexes,
     paths,
@@ -1097,7 +1125,7 @@ export const useHexMapStore = defineStore('hexMap', () => {
     states,
     frames,
     queue,
-    queueAction,
+    queueAction: history.track(queueAction),
     advanceTurn,
     rewindTurn,
     goToTurn,
@@ -1122,7 +1150,7 @@ export const useHexMapStore = defineStore('hexMap', () => {
     showHistory,
     dmView,
     sight,
-    setSight,
+    setSight: history.track(setSight, () => `sight:${selectedId.value}`),
     sightAt,
     reach,
     visible,
@@ -1139,33 +1167,37 @@ export const useHexMapStore = defineStore('hexMap', () => {
     selectHex,
     panelsOpen,
     setPanelOpen,
-    select,
-    click,
-    clear,
+    select: history.track(select),
+    click: history.track(click),
+    clear: history.track(clear),
     snapshot,
     restore,
     notes,
-    setNote,
+    setNote: history.track(setNote, (hex) => `note:${hex}`),
     events,
-    addEvent,
-    removeEvent,
+    addEvent: history.track(addEvent),
+    removeEvent: history.track(removeEvent),
     locations,
-    addLocation,
-    removeLocation,
+    addLocation: history.track(addLocation),
+    removeLocation: history.track(removeLocation),
     merchants,
     merchantsOf,
-    addMerchant,
-    removeMerchant,
-    renameMerchant,
-    setMerchantLevel,
+    addMerchant: history.track(addMerchant),
+    removeMerchant: history.track(removeMerchant),
+    renameMerchant: history.track(renameMerchant, (id) => `merchant-name:${id}`),
+    setMerchantLevel: history.track(setMerchantLevel, (id) => `merchant-level:${id}`),
     resources,
     resourcesOn,
-    addResource,
-    removeResource,
+    addResource: history.track(addResource),
+    removeResource: history.track(removeResource),
     resourceChances,
-    setResourceChance,
+    setResourceChance: history.track(setResourceChance, (terrainId) => `chance:${terrainId}`),
     resourceSpacing,
-    setResourceSpacing,
+    setResourceSpacing: history.track(setResourceSpacing, () => 'spacing'),
+    undo: history.undo,
+    redo: history.redo,
+    canUndo: history.canUndo,
+    canRedo: history.canRedo,
   }
 })
 

@@ -4,6 +4,7 @@ import DayNightDial from '../components/DayNightDial.vue'
 import HexCanvas from '../components/HexCanvas.vue'
 import HexDetails from '../components/HexDetails.vue'
 import ViewToggle from '../components/ViewToggle.vue'
+import { useUndoKeys } from '../composables/useUndoKeys'
 import type { EntityKind } from '../entities/entity'
 import { MAP_FILE_EXTENSION, parseMapFile, serialiseMap } from '../persistence/mapFile'
 import {
@@ -18,6 +19,7 @@ import {
 import { KM_PER_HEX } from '../terrain/travel'
 
 const store = useHexMapStore()
+useUndoKeys()
 
 /** Narrower than this and a panel would be most of the window. */
 const NARROW = 720

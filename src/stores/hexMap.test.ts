@@ -1081,3 +1081,183 @@ describe('the side panels', () => {
     expect(store.panelsOpen).toEqual({ world: true, entities: false, details: true })
   })
 })
+
+describe('undo and redo', () => {
+  const here = '1,0' as HexKey
+
+  it('takes back merchant and resource edits', () => {
+    const store = setup()
+    const caravan = store.addEntity('the caravan', 'caravan').id
+    const smith = store.addMerchant(caravan, 'smith')!.id
+    store.setMerchantLevel(smith, 5)
+    store.addResource(here, 'timber')
+    store.setResourceChance('forest', 0.5)
+
+    store.undo()
+    expect(store.resourceChances.forest).toBe(defaultResourceChances().forest)
+    store.undo()
+    expect(store.resources).toEqual([])
+    store.undo()
+    expect(store.merchants[0].level).toBe(1)
+
+    store.removeEntity(caravan)
+    expect(store.merchants).toEqual([])
+    store.undo()
+    expect(store.merchantsOf(caravan).map((one) => one.id)).toEqual([smith])
+  })
+
+  it('takes back a placement and an order, then gives them again', () => {
+    const store = setup()
+    sendEast(store)
+
+    store.undo()
+    expect(store.goal).toBeNull()
+    expect(store.start).toBe('0,0')
+
+    store.undo()
+    expect(store.start).toBeNull()
+    expect(store.canUndo).toBe(false)
+
+    store.redo()
+    store.redo()
+    expect(store.start).toBe('0,0')
+    expect(store.goal).toBe('4,0')
+  })
+
+  it('brings back the order a new one replaced, or one called off', () => {
+    const store = setup()
+    sendEast(store, 4)
+    store.select({ q: 2, r: 0 })
+    store.undo()
+    expect(store.goal).toBe('4,0')
+
+    store.clear()
+    expect(store.goal).toBeNull()
+    store.undo()
+    expect(store.goal).toBe('4,0')
+
+    store.queueAction(store.selectedId, { kind: 'camp' })
+    store.undo()
+    expect(store.queue.get(store.selectedId)?.kind).toBe('move')
+  })
+
+  it('brings back the record an order given after a rewind cut off', () => {
+    const store = setup()
+    sendEast(store, 4)
+    store.advanceTurn()
+    store.advanceTurn()
+    store.rewindTurn()
+
+    store.select({ q: -2, r: 0 })
+    expect(store.frames).toHaveLength(1)
+
+    store.undo()
+    expect(store.frames).toHaveLength(2)
+    store.goToTurn(2)
+    expect(store.turn).toBe(2)
+  })
+
+  it('leaves no step for a click that changed nothing it keeps', () => {
+    const store = setup()
+    store.click({ q: 1, r: 0 })
+    expect(store.selectedHex).toBe('1,0')
+    expect(store.canUndo).toBe(false)
+  })
+
+  it('takes back adding, removing and renaming an entity', () => {
+    const store = setup()
+    const added = store.addEntity('the caravan', 'caravan')
+    store.undo()
+    expect(store.entities.some((one) => one.id === added.id)).toBe(false)
+
+    sendEast(store)
+    const party = store.selectedId
+    store.removeEntity(party)
+    expect(store.entities).toHaveLength(0)
+
+    store.undo()
+    expect(store.selectedId).toBe(party)
+    expect(store.start).toBe('0,0')
+    expect(store.goal).toBe('4,0')
+
+    store.renameEntity(party, 'the company')
+    store.undo()
+    expect(store.selectedEntity?.name).toBe('the party')
+  })
+
+  it('takes back a slider dragged through many values as one step', () => {
+    const store = setup()
+    const before = store.selectedEntity?.pacePerTurn
+    store.setPace(store.selectedId, 1.5)
+    store.setPace(store.selectedId, 2)
+    store.setPace(store.selectedId, 2.5)
+
+    store.undo()
+    expect(store.selectedEntity?.pacePerTurn).toBe(before)
+    expect(store.canUndo).toBe(false)
+  })
+
+  it('takes back a note typed a letter at a time as one step', () => {
+    const store = setup()
+    for (const text of ['a', 'an', 'an o', 'an old shrine']) store.setNote(here, text)
+
+    store.undo()
+    expect(store.notes.has(here)).toBe(false)
+    store.redo()
+    expect(store.notes.get(here)).toBe('an old shrine')
+  })
+
+  it('takes back events and locations added or removed', () => {
+    const store = setup()
+    const event = store.addEvent(here, { title: 'ambush', description: '' })
+    const location = store.addLocation(here, { name: 'Oakvale', kind: 'village', description: '' })
+    store.removeEvent(here, event)
+
+    store.undo()
+    expect(store.events.get(here)?.map((one) => one.id)).toEqual([event])
+    store.undo()
+    expect(store.locations.has(here)).toBe(false)
+    store.redo()
+    expect(store.locations.get(here)?.map((one) => one.id)).toEqual([location])
+  })
+
+  it('hands the save what the undo left behind', () => {
+    const store = setup()
+    sendEast(store)
+    store.setNote(here, 'an old shrine')
+
+    store.undo()
+    store.undo()
+    expect(store.snapshot.notes).toEqual([])
+    expect(store.snapshot.queue).toEqual([])
+  })
+
+  it('forgets every step when the clock moves either way', () => {
+    const store = setup()
+    sendEast(store)
+    store.advanceTurn()
+    expect(store.canUndo).toBe(false)
+
+    store.setNote(here, 'tracks')
+    store.rewindTurn()
+    expect(store.canUndo).toBe(false)
+
+    store.setNote(here, 'more tracks')
+    store.goToTurn(1)
+    expect(store.canUndo).toBe(false)
+  })
+
+  it('forgets every step when a new world is laid down or a map is loaded', () => {
+    const store = setup()
+    store.setNote(here, 'an old shrine')
+    const saved = store.snapshot
+
+    store.setTerrain({ seed: TERRAIN_DEFAULTS.seed + 1 })
+    expect(store.canUndo).toBe(false)
+
+    store.addEvent(here, { title: 'ambush', description: '' })
+    store.restore(saved)
+    expect(store.canUndo).toBe(false)
+    expect(store.canRedo).toBe(false)
+  })
+})
