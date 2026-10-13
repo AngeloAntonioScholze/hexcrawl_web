@@ -156,6 +156,10 @@ const snapshot = (patch: Partial<MapSnapshot> = {}): MapSnapshot => ({
     { a: '0,0' as HexKey, b: '1,0' as HexKey },
     { a: '1,0' as HexKey, b: '2,-1' as HexKey },
   ],
+  terrainOverrides: [
+    { hex: '-2,1' as HexKey, terrain: 'peaks' },
+    { hex: '3,0' as HexKey, terrain: 'water' },
+  ],
   ...patch,
 })
 
@@ -205,6 +209,7 @@ describe('schema', () => {
     expect(loaded.fogEdits).toEqual([])
     expect(loaded.encounterOverrides).toEqual([])
     expect(loaded.roads).toEqual([])
+    expect(loaded.terrainOverrides).toEqual([])
 
     saveSnapshot(old, snapshot())
     expect(loadSnapshot(old)!.turn).toBe(2)
@@ -397,6 +402,16 @@ describe('map state', () => {
 
     saveSnapshot(db, snapshot({ catalogOverrides: [] }))
     expect(loadSnapshot(db)!.catalogOverrides).toEqual([])
+  })
+
+  it('round-trips the painted ground, and lets it be wiped', () => {
+    const saved = snapshot()
+    saveSnapshot(db, saved)
+
+    expect(loadSnapshot(db)!.terrainOverrides).toEqual(saved.terrainOverrides)
+
+    saveSnapshot(db, snapshot({ terrainOverrides: [] }))
+    expect(loadSnapshot(db)!.terrainOverrides).toEqual([])
   })
 
   it('keeps the record in the order the turns were spent', () => {

@@ -127,6 +127,7 @@ const snapshot = (): MapSnapshot => ({
     { a: '0,0' as HexKey, b: '1,0' as HexKey },
     { a: '1,0' as HexKey, b: '1,1' as HexKey },
   ],
+  terrainOverrides: [{ hex: '1,0' as HexKey, terrain: 'mountains' }],
 })
 
 // Breaking the file in every way it can be broken is the point, so the edits
@@ -276,6 +277,17 @@ describe('parseMapFile', () => {
     ['a road end that is not a hex', (map) => (map.roads[0].b = 'east'), 'roads'],
     ['a road between hexes apart', (map) => (map.roads[0].b = '2,0'), 'roads'],
     ['a road from a hex to itself', (map) => (map.roads[0].b = '0,0'), 'roads'],
+    [
+      'an unknown painted terrain',
+      (map) => (map.terrainOverrides[0].terrain = 'lava'),
+      'terrainOverrides',
+    ],
+    [
+      'a painted hex that is not a hex',
+      (map) => (map.terrainOverrides[0].hex = 'here'),
+      'terrainOverrides',
+    ],
+    ['no painted ground at all', (map) => delete map.terrainOverrides, 'terrainOverrides'],
   ])('turns away %s, naming the field', (_, edit, field) => {
     expect(rejected(tampered((file) => edit(file.map)))).toContain(`"${field}"`)
   })
@@ -322,6 +334,10 @@ describe('a map carried out and back in', () => {
     store.editCatalogEntry('smith.sharpen', { price: '12 gp', level: 5 })
     store.removeCatalogEntry('smith.armour')
     store.addCatalogEntry('cook', { name: 'Pickled eel', materials: ['fish'] })
+    store.setDmTool('paint')
+    store.setPaintTerrain('forest')
+    store.click({ q: 2, r: -1 })
+    expect(store.snapshot.terrainOverrides.length).toBeGreaterThan(0)
     store.fog = true
     store.dmView = true
     expect(store.snapshot.fogEdits.length).toBeGreaterThan(0)

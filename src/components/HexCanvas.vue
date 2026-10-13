@@ -12,7 +12,7 @@ import { resourceMarks } from '../engine/resourceMarkers'
 import { roadSpans } from '../engine/roadSegments'
 import { useHexScene } from '../engine/useHexScene'
 import { useHexMapStore } from '../stores/hexMap'
-import { createTerrainField } from '../terrain/field'
+import { createTerrainField, repainted } from '../terrain/field'
 
 const props = withDefaults(
   defineProps<{
@@ -89,7 +89,7 @@ const { hexScene } = useHexScene(canvas, {
 let windowKeys: readonly HexKey[] = []
 const windowTick = ref(0)
 
-useHexWindow(
+const { repaint } = useHexWindow(
   hexScene,
   layout,
   () => store.field,
@@ -97,6 +97,7 @@ useHexWindow(
     windowKeys = keys
     windowTick.value += 1
   },
+  () => store.ground,
 )
 
 useTurnPlayback(hexScene, layout)
@@ -200,6 +201,16 @@ const tokens = computed(() =>
   store.tokens.map((token) => ({ ...token, hex: token.hex ? parseKey(token.hex) : null })),
 )
 
+// Everything standing on the ground, set down again on the heights as they are now.
+const pushHeights = (created: NonNullable<typeof hexScene.value>): void => {
+  created.arrows.setPaths(store.paths)
+  created.tokens.setEntries(tokens.value)
+  created.stops.setStops(store.stops.hexes, store.stops.color)
+  created.resources.setMarks(marks.value)
+  created.roads.setSpans(spans.value)
+  created.vision.setField(sightField.value.lit, sightField.value.shadow)
+}
+
 // Everything the store knows, pushed at the scene in one go. Needed both when
 // the scene first appears, since state settled before mount reaches no watcher,
 // and after a new world, since every layer is pinned to heights that just moved.
@@ -212,12 +223,7 @@ const pushEverything = (created: NonNullable<typeof hexScene.value>): void => {
   // it goes down whole rather than as a step off the last painting.
   fogStepper.reset()
   paintFog(created.grid)
-  created.arrows.setPaths(store.paths)
-  created.tokens.setEntries(tokens.value)
-  created.stops.setStops(store.stops.hexes, store.stops.color)
-  created.resources.setMarks(marks.value)
-  created.roads.setSpans(spans.value)
-  created.vision.setField(sightField.value.lit, sightField.value.shadow)
+  pushHeights(created)
   created.vision.setShown(store.showSight)
   created.setDaylight(store.clock.phase, store.clock.index)
 }
@@ -235,6 +241,19 @@ watch([() => store.terrain, () => store.worldRadius], () => {
   created.setField(store.field)
   pushEverything(created)
 })
+
+// Paint is the same world with a few hexes changed: only those are built
+// again, and whatever stands on the ground is set back down on it.
+watch(
+  () => store.terrainOverrides,
+  (next, previous) => {
+    const created = hexScene.value
+    if (!created) return
+    created.setField(store.field)
+    repaint(repainted(previous, next).map(parseKey))
+    pushHeights(created)
+  },
+)
 </script>
 
 <template>

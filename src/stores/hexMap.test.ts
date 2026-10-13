@@ -9,7 +9,7 @@ import {
   RESOURCE_SPACING_LIMITS,
 } from '../terrain/resources'
 import { roadHexes } from '../terrain/roads'
-import { TERRAIN_DEFAULTS, type TerrainTile } from '../terrain/terrain'
+import { TERRAIN_DEFAULTS, type TerrainId, type TerrainTile } from '../terrain/terrain'
 import { TURNS_PER_PHASE } from '../time/clock'
 import { BRUSH_LIMITS, MAX_SIGHT, MIN_SIGHT, TERRAIN_LIMITS, useHexMapStore } from './hexMap'
 
@@ -124,6 +124,7 @@ describe('DM tools', () => {
   it('works the ground instead of selecting while a tool is in hand', () => {
     const store = setup()
     store.setDmTool('paint')
+    store.setPaintTerrain('grass')
 
     store.click({ q: 2, r: 0 })
     expect(store.selectedHex).toBeNull()
@@ -350,6 +351,80 @@ describe('roads', () => {
 
     fresh.setTerrain({ seed: TERRAIN_DEFAULTS.seed + 1 })
     expect(fresh.roads.size).toBe(0)
+  })
+})
+
+describe('painting terrain', () => {
+  const paint = (store: Store, hex: Axial, terrain: TerrainId, brush = 0): void => {
+    store.setDmTool('paint')
+    store.setPaintTerrain(terrain)
+    store.setBrushSize(brush)
+    store.click(hex)
+  }
+
+  it('lays the terrain over every hex under the brush', () => {
+    const store = setup()
+    paint(store, { q: 2, r: 0 }, 'peaks', 1)
+
+    const painted = range({ q: 2, r: 0 }, 1).map(hexKey)
+    expect([...store.terrainOverrides.keys()].sort()).toEqual([...painted].sort())
+    for (const hex of painted) {
+      expect(store.tileAt(hex)).toMatchObject({ terrain: 'peaks', level: 4 })
+    }
+    expect(store.tileAt('0,0')?.terrain).toBe('grass')
+  })
+
+  it('takes a whole brush stroke back in one undo', () => {
+    const store = setup()
+    paint(store, { q: 0, r: 0 }, 'forest', 2)
+    expect(store.terrainOverrides.size).toBe(19)
+
+    store.undo()
+    expect(store.terrainOverrides.size).toBe(0)
+    expect(store.tileAt('1,0')?.terrain).toBe('grass')
+
+    store.redo()
+    expect(store.tileAt('1,0')?.terrain).toBe('forest')
+  })
+
+  it('forgets the paint where the ground is painted back to what the seed made', () => {
+    const store = setup()
+    paint(store, { q: 0, r: 0 }, 'water', 1)
+    paint(store, { q: 0, r: 0 }, 'grass')
+
+    expect(store.terrainOverrides.size).toBe(6)
+    expect(store.terrainOverrides.has('0,0')).toBe(false)
+  })
+
+  it('leaves no step behind for a stroke that changes nothing', () => {
+    const store = setup()
+    paint(store, { q: 0, r: 0 }, 'sand')
+    const before = store.terrainOverrides
+    store.click({ q: 0, r: 0 })
+    expect(store.terrainOverrides).toBe(before)
+
+    store.undo()
+    expect(store.canUndo).toBe(false)
+  })
+
+  it('routes around painted water and loses sight behind painted peaks', () => {
+    const store = setup()
+    paint(store, { q: 1, r: 0 }, 'deepWater')
+    paint(store, { q: 0, r: 1 }, 'peaks')
+    store.setDmTool('select')
+    store.dmView = false
+
+    sendEast(store, 2)
+    expect(store.route?.hexes.map(hexKey)).not.toContain('1,0')
+    expect(store.blocked.has('0,2')).toBe(true)
+  })
+
+  it('clears the paint with a new world', () => {
+    const store = setup()
+    paint(store, { q: 0, r: 0 }, 'peaks', 1)
+
+    store.setTerrain({ seed: 99 })
+    expect(store.terrainOverrides.size).toBe(0)
   })
 })
 

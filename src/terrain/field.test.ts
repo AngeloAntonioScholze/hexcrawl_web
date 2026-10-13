@@ -2,8 +2,15 @@ import { Color3 } from '@babylonjs/core/Maths/math.color'
 import { describe, expect, it } from 'vitest'
 import { hexKey, range, type Axial, type HexKey } from '../hex/coords'
 import { createLayout } from '../hex/layout'
-import { createTerrainField, fieldFromTiles } from './field'
-import { TERRAIN_DEFAULTS, type TerrainTile } from './terrain'
+import { createTerrainField, fieldFromTiles, repainted, withOverrides } from './field'
+import {
+  bandFor,
+  createPainter,
+  TERRAIN_DEFAULTS,
+  TERRAIN_IDS,
+  type TerrainId,
+  type TerrainTile,
+} from './terrain'
 
 const layout = createLayout(2)
 
@@ -72,5 +79,72 @@ describe('fieldFromTiles', () => {
 
     expect(world.radius).toBe(0)
     expect(world.at({ q: 0, r: 0 })).toBeUndefined()
+  })
+})
+
+describe('repainted', () => {
+  it('names every hex painted, painted differently or wiped', () => {
+    const before = new Map<HexKey, TerrainId>([
+      ['0,0', 'peaks'],
+      ['1,0', 'water'],
+      ['2,0', 'sand'],
+    ])
+    const after = new Map<HexKey, TerrainId>([
+      ['0,0', 'peaks'],
+      ['1,0', 'forest'],
+      ['3,0', 'grass'],
+    ])
+
+    expect(repainted(before, after).sort()).toEqual(['1,0', '2,0', '3,0'])
+    expect(repainted(after, after)).toEqual([])
+  })
+})
+
+describe('withOverrides', () => {
+  const paint = createPainter(TERRAIN_DEFAULTS)
+  const painted = (overrides: Record<string, TerrainId>) =>
+    withOverrides(field(10), new Map(Object.entries(overrides) as [HexKey, TerrainId][]), paint)
+
+  it('hands back the world itself when nothing is painted', () => {
+    const world = field(10)
+    expect(withOverrides(world, new Map(), paint)).toBe(world)
+  })
+
+  it('lays the painted terrain over the hexes named and nowhere else', () => {
+    const world = painted({ '1,0': 'peaks' })
+
+    expect(world.at({ q: 1, r: 0 })?.terrain).toBe('peaks')
+    expect(world.at({ q: 0, r: 1 })).toEqual(field(10).at({ q: 0, r: 1 }))
+  })
+
+  it('stands painted ground where its band stands', () => {
+    for (const terrain of TERRAIN_IDS) {
+      const tile = painted({ '0,0': terrain }).at({ q: 0, r: 0 })!
+      const band = bandFor(tile.height)
+
+      expect(band.id).toBe(terrain)
+      expect(tile.level).toBe(band.level)
+      expect(tile.color).toBe(band.color)
+    }
+  })
+
+  it('draws higher bands taller', () => {
+    const heights = TERRAIN_IDS.map(
+      (terrain) => painted({ '0,0': terrain }).at({ q: 0, r: 0 })!.elevation,
+    )
+    for (let index = 2; index < heights.length; index++) {
+      expect(heights[index]).toBeGreaterThan(heights[index - 1])
+    }
+    expect(heights[0]).toBe(TERRAIN_DEFAULTS.seaFloor)
+    expect(heights[1]).toBe(TERRAIN_DEFAULTS.seaFloor)
+  })
+
+  it('paints nothing past the rim', () => {
+    expect(painted({ '20,0': 'peaks' }).at({ q: 20, r: 0 })).toBeUndefined()
+  })
+
+  it('works a painted hex out once', () => {
+    const world = painted({ '1,0': 'forest' })
+    expect(world.at({ q: 1, r: 0 })).toBe(world.at({ q: 1, r: 0 }))
   })
 })

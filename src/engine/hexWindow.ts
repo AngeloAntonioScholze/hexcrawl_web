@@ -107,6 +107,21 @@ export function tilesEntering(
   return tiles
 }
 
+/** The ground at a few hexes, those of them the span holds and the world has. */
+export function tilesAmong(
+  field: TerrainField,
+  span: ChunkSpan,
+  hexes: readonly Axial[],
+): HexTile[] {
+  const tiles: HexTile[] = []
+  for (const hex of hexes) {
+    if (!insideSpan(span, hex.q, hex.r)) continue
+    const tile = field.at(hex)
+    if (tile) tiles.push({ hex, elevation: tile.elevation, color: tile.color })
+  }
+  return tiles
+}
+
 /** Every hex of a chunk span that the world actually has ground for. */
 export const tilesInSpan = (field: TerrainField, span: ChunkSpan): HexTile[] =>
   tilesEntering(field, null, span)

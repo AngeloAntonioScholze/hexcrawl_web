@@ -2,6 +2,7 @@
 import type { FogMode } from '../hex/fogEdits'
 import { BRUSH_LIMITS, BRUSH_TOOLS, DM_TOOLS, useHexMapStore, type DmTool } from '../stores/hexMap'
 import RoadOptions from './RoadOptions.vue'
+import { TERRAIN_COLORS, TERRAIN_IDS, TERRAIN_LABELS, type TerrainId } from '../terrain/terrain'
 
 const store = useHexMapStore()
 
@@ -17,6 +18,10 @@ const FOG_MODES: readonly FogMode[] = ['reveal', 'hide']
 const onBrush = (event: Event): void => {
   store.setBrushSize(Number((event.target as HTMLInputElement).value))
 }
+
+const SWATCHES = Object.fromEntries(
+  TERRAIN_IDS.map((id) => [id, TERRAIN_COLORS[id].toHexString()]),
+) as Readonly<Record<TerrainId, string>>
 </script>
 
 <template>
@@ -60,6 +65,22 @@ const onBrush = (event: Event): void => {
       </button>
     </div>
     <RoadOptions v-if="store.dmTool === 'road'" />
+    <div v-if="store.dmTool === 'paint'" class="paint" role="radiogroup" aria-label="terrain">
+      <button
+        v-for="id in TERRAIN_IDS"
+        :key="id"
+        type="button"
+        role="radio"
+        class="swatch"
+        :class="{ here: store.paintTerrain === id }"
+        :aria-checked="store.paintTerrain === id"
+        :title="TERRAIN_LABELS[id]"
+        @click="store.setPaintTerrain(id)"
+      >
+        <span class="chip" :style="{ background: SWATCHES[id] }" />
+        {{ TERRAIN_LABELS[id] }}
+      </button>
+    </div>
   </div>
 </template>
 
@@ -120,5 +141,27 @@ button.here {
 .value {
   min-width: 1ch;
   font-variant-numeric: tabular-nums;
+}
+
+.paint {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px;
+  justify-content: center;
+  max-width: min(92vw, 640px);
+}
+
+.swatch {
+  display: flex;
+  gap: 6px;
+  align-items: center;
+  padding: 3px 8px;
+}
+
+.chip {
+  width: 10px;
+  height: 10px;
+  border: 1px solid var(--line);
+  border-radius: 2px;
 }
 </style>

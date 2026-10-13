@@ -13,9 +13,10 @@ import {
 import { RESOURCE_MARKER_COLOR, resourceMarks } from '../engine/resourceMarkers'
 import { ROAD_COLOR, roadSpans } from '../engine/roadSegments'
 import type { HexScene } from '../engine/scene'
-import { parseKey, type HexKey } from '../hex/coords'
+import { parseKey, type Axial, type HexKey } from '../hex/coords'
 import { hexToWorld, worldToHex, type Layout } from '../hex/layout'
 import { useHexMapStore } from '../stores/hexMap'
+import { repainted } from '../terrain/field'
 
 const props = defineProps<{
   /** The live scene; a template binding hands this over already unwrapped. */
@@ -76,6 +77,21 @@ const roadLines = computed<readonly [Pixel, Pixel][]>(() =>
  * new size, so it is done once and then only copied.
  */
 let terrain: HTMLCanvasElement | null = null
+/** Hexes between samples in the drawing as it stands. */
+let sampleStep = 1
+
+const dab = (ink: CanvasRenderingContext2D, hex: Axial, step: number): void => {
+  const tile = store.field.at(hex)
+  if (!tile) return
+
+  const world = hexToWorld(props.layout, hex)
+  const point = worldToMinimap(frame.value, world.x, world.z)
+  const { r: red, g, b } = tile.color
+  ink.fillStyle = `rgb(${red * 255} ${g * 255} ${b * 255})`
+  // Drawn up from the sample rather than down from it, so the flip does not
+  // leave a gap along the top edge of each patch.
+  ink.fillRect(point.x, point.y - step * 2, step * 2, step * 2)
+}
 
 const sampleWorld = (): void => {
   const scale = minimapScale(frame.value)
@@ -93,21 +109,18 @@ const sampleWorld = (): void => {
   const step = Math.max(1, Math.round(1 / (scale * props.layout.size * 1.5)))
 
   for (let r = -store.worldRadius; r <= store.worldRadius; r += step) {
-    for (let q = -store.worldRadius; q <= store.worldRadius; q += step) {
-      const tile = store.field.at({ q, r })
-      if (!tile) continue
-
-      const world = hexToWorld(props.layout, { q, r })
-      const point = worldToMinimap(frame.value, world.x, world.z)
-      const { r: red, g, b } = tile.color
-      ink.fillStyle = `rgb(${red * 255} ${g * 255} ${b * 255})`
-      // Drawn up from the sample rather than down from it, so the flip does not
-      // leave a gap along the top edge of each patch.
-      ink.fillRect(point.x, point.y - step * 2, step * 2, step * 2)
-    }
+    for (let q = -store.worldRadius; q <= store.worldRadius; q += step) dab(ink, { q, r }, step)
   }
 
   terrain = off
+  sampleStep = step
+}
+
+/** Paint touches a few hexes, so only those are drawn again, not the world. */
+const repaint = (hexes: readonly HexKey[]): void => {
+  const ink = terrain?.getContext('2d')
+  if (!ink) return
+  for (const hex of hexes) dab(ink, parseKey(hex), sampleStep)
 }
 
 /** What the main view is looking at, in minimap pixels. */
@@ -173,13 +186,19 @@ const loop = (): void => {
 }
 
 watch(
-  [canvas, () => store.field, () => store.worldRadius],
+  [canvas, () => store.ground, () => store.worldRadius],
   () => {
     if (!canvas.value) return
     sampleWorld()
     draw()
   },
   { immediate: true, flush: 'post' },
+)
+
+watch(
+  () => store.terrainOverrides,
+  (next, previous) => repaint(repainted(previous, next)),
+  { flush: 'post' },
 )
 
 watch(

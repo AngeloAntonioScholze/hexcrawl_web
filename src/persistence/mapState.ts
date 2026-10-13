@@ -76,6 +76,8 @@ export interface MapSnapshot {
   encounterOverrides: readonly EncounterOverride[]
   /** Every stretch of road, each between two neighbouring hexes. */
   roads: readonly RoadEdge[]
+  /** Hexes the DM painted over, with the terrain each was painted. */
+  terrainOverrides: readonly { hex: HexKey; terrain: TerrainId }[]
 }
 
 const SAVE_MAP = `
@@ -338,6 +340,14 @@ export function saveSnapshot(db: Database, snapshot: MapSnapshot): void {
     } finally {
       encounterOverride.finalize()
     }
+
+    db.exec('DELETE FROM terrain_override')
+    const override = db.prepare('INSERT INTO terrain_override (hex, terrain) VALUES (?, ?)')
+    try {
+      for (const one of snapshot.terrainOverrides) override.bind([one.hex, one.terrain]).stepReset()
+    } finally {
+      override.finalize()
+    }
   })
 }
 
@@ -462,5 +472,11 @@ export function loadSnapshot(db: Database): MapSnapshot | null {
       a: String(one.a) as HexKey,
       b: String(one.b) as HexKey,
     })),
+    terrainOverrides: db
+      .selectObjects('SELECT * FROM terrain_override ORDER BY hex')
+      .map((one) => ({
+        hex: String(one.hex) as HexKey,
+        terrain: String(one.terrain) as TerrainId,
+      })),
   }
 }

@@ -76,6 +76,11 @@ const BANDS: readonly Band[] = [
   { id: 'peaks', limit: Infinity, level: 4, color: new Color3(0.78, 0.79, 0.81) },
 ]
 
+/** Each terrain's colour on the map, for anything that has to match it. */
+export const TERRAIN_COLORS = Object.fromEntries(
+  BANDS.map((band) => [band.id, band.color]),
+) as Readonly<Record<TerrainId, Color3>>
+
 /** The highest step the terrain reaches. */
 export const MAX_LEVEL = BANDS[BANDS.length - 1].level
 
@@ -100,20 +105,59 @@ export function bandFor(height: number): Band {
   return BANDS.find((band) => height < band.limit) ?? BANDS[BANDS.length - 1]
 }
 
+/**
+ * How tall a tile is drawn for its noise height. Water sits flat at one sea
+ * floor height so it reads as a surface; land climbs from the shoreline with
+ * the noise above sea level. The curve is what puts air between a plain and a
+ * peak: without it every rise reads as the same gentle ramp.
+ */
+function elevationCurve(options: TerrainOptions): (height: number) => number {
+  const seaFloor = options.seaFloor ?? TERRAIN_DEFAULTS.seaFloor
+  const shore = options.shore ?? TERRAIN_DEFAULTS.shore
+  const relief = options.relief ?? TERRAIN_DEFAULTS.relief
+  const reliefCurve = options.reliefCurve ?? TERRAIN_DEFAULTS.reliefCurve
+
+  return (height) => (height < 0 ? seaFloor : shore + Math.pow(height, reliefCurve) * relief)
+}
+
+/**
+ * Turns a tile into ground of another terrain, standing where that band stands:
+ * a noise height in the middle of the band, so its level, its colour and the
+ * height it is drawn at all agree with ground the noise made that way.
+ */
+export function createPainter(
+  options: TerrainOptions = {},
+): (tile: TerrainTile, terrain: TerrainId) => TerrainTile {
+  const elevationOf = elevationCurve(options)
+
+  return (tile, terrain) => {
+    if (tile.terrain === terrain) return tile
+    const index = BANDS.findIndex((band) => band.id === terrain)
+    const band = BANDS[index]
+    const low = index === 0 ? -1 : BANDS[index - 1].limit
+    const height = (low + Math.min(1, band.limit)) / 2
+    return {
+      hex: tile.hex,
+      terrain,
+      height,
+      level: band.level,
+      elevation: elevationOf(height),
+      color: band.color,
+    }
+  }
+}
+
 export function createTerrain(
   layout: Layout,
   options: TerrainOptions = {},
 ): (hex: Axial) => TerrainTile {
   const seed = options.seed ?? TERRAIN_DEFAULTS.seed
   const scale = options.scale ?? TERRAIN_DEFAULTS.scale
-  const seaFloor = options.seaFloor ?? TERRAIN_DEFAULTS.seaFloor
-  const shore = options.shore ?? TERRAIN_DEFAULTS.shore
-  const relief = options.relief ?? TERRAIN_DEFAULTS.relief
-  const reliefCurve = options.reliefCurve ?? TERRAIN_DEFAULTS.reliefCurve
   const contrast = options.contrast ?? TERRAIN_DEFAULTS.contrast
   const seaLevel = options.seaLevel ?? TERRAIN_DEFAULTS.seaLevel
 
   const noise = createFbm(seed, options)
+  const elevationOf = elevationCurve(options)
 
   return (hex: Axial): TerrainTile => {
     // Sampled in world space rather than axial space, or the skew between the
@@ -123,12 +167,13 @@ export function createTerrain(
     const height = clamp((raw - seaLevel) * contrast, -1, 1)
     const band = bandFor(height)
 
-    // Water sits flat at one sea floor height so it reads as a surface; land
-    // climbs from the shoreline with the noise above sea level. The curve is
-    // what puts air between a plain and a peak: without it every rise reads as
-    // the same gentle ramp.
-    const elevation = height < 0 ? seaFloor : shore + Math.pow(height, reliefCurve) * relief
-
-    return { hex, terrain: band.id, height, level: band.level, elevation, color: band.color }
+    return {
+      hex,
+      terrain: band.id,
+      height,
+      level: band.level,
+      elevation: elevationOf(height),
+      color: band.color,
+    }
   }
 }

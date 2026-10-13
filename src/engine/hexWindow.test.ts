@@ -13,6 +13,7 @@ import {
   rectCorners,
   sameSpan,
   spanCapacity,
+  tilesAmong,
   tilesEntering,
   tilesInSpan,
   worldBounds,
@@ -139,6 +140,19 @@ describe('tilesEntering', () => {
   it('builds nothing for a view that only pulled in', () => {
     const inner = { minQ: -1, maxQ: 1, minR: -1, maxR: 1 }
     expect(tilesEntering(field, from, inner)).toHaveLength(0)
+  })
+})
+
+describe('tilesAmong', () => {
+  it('builds the hexes asked for that the span holds and the world has', () => {
+    const span = { minQ: 0, maxQ: 0, minR: 0, maxR: 0 }
+    const tiles = tilesAmong(world(5), span, [
+      { q: 1, r: 1 },
+      { q: -1, r: 0 },
+      { q: 4, r: 4 },
+    ])
+
+    expect(tiles.map((tile) => hexKey(tile.hex))).toEqual(['1,1'])
   })
 })
 

@@ -1,17 +1,18 @@
-import { onBeforeUnmount, watch, type ShallowRef } from 'vue'
+import { onBeforeUnmount, watch, type ShallowRef, type WatchSource } from 'vue'
 import {
   chunkSpanFor,
   insideSpan,
   rectCorners,
   sameSpan,
   spanCapacity,
+  tilesAmong,
   tilesEntering,
   tilesInSpan,
   worldBounds,
   type ChunkSpan,
 } from '../engine/hexWindow'
 import type { HexScene } from '../engine/scene'
-import type { HexKey } from '../hex/coords'
+import { hexKey, type Axial, type HexKey } from '../hex/coords'
 import type { Layout, WorldPoint } from '../hex/layout'
 import type { TerrainField } from '../terrain/field'
 
@@ -183,7 +184,9 @@ export function useHexWindow(
   layout: Layout,
   field: () => TerrainField,
   onWindow?: (keys: readonly HexKey[]) => void,
-): void {
+  /** What changing means a new world; by default, any new field. */
+  world: WatchSource = field,
+): { repaint(hexes: readonly Axial[]): void } {
   let span: ChunkSpan | null = null
   let observer: ReturnType<HexScene['scene']['onBeforeRenderObservable']['add']> | null = null
 
@@ -252,7 +255,23 @@ export function useHexWindow(
     check()
   }
 
-  watch(field, refresh)
+  watch(world, refresh)
+
+  /**
+   * Builds a few hexes again from the field as it stands now and leaves the
+   * rest of the window alone: a brush stroke is a handful of hexes, not a
+   * new world.
+   */
+  const repaint = (hexes: readonly Axial[]): void => {
+    const scene = hexScene.value
+    if (!scene || !span || hexes.length === 0) return
+
+    const changed = new Set(hexes.map(hexKey))
+    scene.moveWindow((q, r) => !changed.has(hexKey({ q, r })), tilesAmong(field(), span, hexes))
+    onWindow?.(scene.grid.keys)
+  }
 
   onBeforeUnmount(detach)
+
+  return { repaint }
 }

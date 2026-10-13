@@ -1,6 +1,6 @@
 import { distance, hexKey, type Axial, type HexKey } from '../hex/coords'
 import type { Layout } from '../hex/layout'
-import { createTerrain, type TerrainOptions, type TerrainTile } from './terrain'
+import { createTerrain, type TerrainId, type TerrainOptions, type TerrainTile } from './terrain'
 
 const ORIGIN: Axial = { q: 0, r: 0 }
 
@@ -63,5 +63,53 @@ export function fieldFromTiles(tiles: ReadonlyMap<HexKey, TerrainTile>): Terrain
     radius: rim,
     known: tiles.size,
     at: (hex) => tiles.get(hexKey(hex)),
+  }
+}
+
+/** The hexes whose paint differs between two sets of overrides. */
+export function repainted(
+  before: ReadonlyMap<HexKey, TerrainId>,
+  after: ReadonlyMap<HexKey, TerrainId>,
+): HexKey[] {
+  const changed = [...after].filter(([hex, terrain]) => before.get(hex) !== terrain)
+  const wiped = [...before.keys()].filter((hex) => !after.has(hex))
+  return [...changed.map(([hex]) => hex), ...wiped]
+}
+
+/**
+ * The world with the DM's brushwork laid over it. Everything that reads terrain
+ * reads the field, so painting here is what a path, a line of sight and the
+ * map itself all see, without any of them knowing the ground was painted.
+ */
+export function withOverrides(
+  field: TerrainField,
+  overrides: ReadonlyMap<HexKey, TerrainId>,
+  paint: (tile: TerrainTile, terrain: TerrainId) => TerrainTile,
+): TerrainField {
+  if (overrides.size === 0) return field
+  const memo = new Map<HexKey, TerrainTile>()
+
+  return {
+    radius: field.radius,
+
+    get known() {
+      return field.known
+    },
+
+    at(hex): TerrainTile | undefined {
+      const tile = field.at(hex)
+      if (!tile) return undefined
+
+      const key = hexKey(hex)
+      const terrain = overrides.get(key)
+      if (!terrain) return tile
+
+      const known = memo.get(key)
+      if (known) return known
+
+      const made = paint(tile, terrain)
+      memo.set(key, made)
+      return made
+    },
   }
 }

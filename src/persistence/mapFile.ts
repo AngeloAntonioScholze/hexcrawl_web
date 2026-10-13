@@ -269,6 +269,12 @@ const SNAPSHOT_FIELDS: { [K in keyof MapSnapshot]-?: Guard<MapSnapshot[K]> } = {
     (value): value is RoadEdge =>
       shape<RoadEdge>({ a: isHex, b: isHex })(value) && isRoadEdge(value.a, value.b),
   ),
+  terrainOverrides: listOf(
+    shape<MapSnapshot['terrainOverrides'][number]>({
+      hex: isHex,
+      terrain: oneOf<TerrainId>(...TERRAIN_IDS),
+    }),
+  ),
 }
 
 export function serialiseMap(snapshot: MapSnapshot): string {

@@ -198,6 +198,12 @@ const MIGRATIONS: readonly string[] = [
     PRIMARY KEY (a, b)
   ) WITHOUT ROWID;
   `,
+  `
+  CREATE TABLE terrain_override (
+    hex TEXT PRIMARY KEY,
+    terrain TEXT NOT NULL
+  ) WITHOUT ROWID;
+  `,
 ]
 
 export const SCHEMA_VERSION = MIGRATIONS.length

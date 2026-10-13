@@ -55,7 +55,7 @@ import {
 import { hexKey, parseKey, range, type Axial, type HexKey } from '../hex/coords'
 import type { VisionOptions } from '../hex/vision'
 import type { MapSnapshot } from '../persistence/mapState'
-import { fieldFromTiles, type TerrainField } from '../terrain/field'
+import { fieldFromTiles, withOverrides, type TerrainField } from '../terrain/field'
 import { scatterResources } from '../terrain/resourceGen'
 import { roadEdge, roadKey, withoutRoadAt, withRoad, type Roads } from '../terrain/roads'
 import {
@@ -68,7 +68,6 @@ import {
   type ResourceType,
 } from '../terrain/resources'
 import { sightFrom, type PartySight } from '../terrain/sight'
-import { isWater, TERRAIN_DEFAULTS, type TerrainId, type TerrainTile } from '../terrain/terrain'
 import {
   canEnter,
   chainRoute,
@@ -78,6 +77,13 @@ import {
   type Route,
 } from '../terrain/travel'
 import { clockAt, isNight, nextPhaseTurn, type Clock, type Phase } from '../time/clock'
+import {
+  createPainter,
+  isWater,
+  TERRAIN_DEFAULTS,
+  type TerrainId,
+  type TerrainTile,
+} from '../terrain/terrain'
 import { createHistory, slotOf } from './history'
 
 const NOTHING_IN_SIGHT: PartySight = { radius: 0, visible: new Set(), blocked: new Set() }
@@ -191,7 +197,10 @@ export type SidePanel = 'world' | 'entities' | 'details'
 export const useHexMapStore = defineStore('hexMap', () => {
   // The world is a function, not a stored map: only the ground near the view is
   // ever worked out, and everything that reads terrain asks the field for it.
-  const field = shallowRef<TerrainField>(fieldFromTiles(new Map()))
+  const ground = shallowRef<TerrainField>(fieldFromTiles(new Map()))
+
+  /** The DM's brushwork over the generated ground, hex by hex. */
+  const terrainOverrides = shallowRef<ReadonlyMap<HexKey, TerrainId>>(new Map())
   const hovered = ref<HexKey | null>(null)
 
   // Entities are held as whole records and replaced rather than mutated, so a
@@ -285,6 +294,11 @@ export const useHexMapStore = defineStore('hexMap', () => {
 
   const clock = computed<Clock>(() => clockAt(turn.value))
 
+  /** The ground as everything reads it: what the seed made, painted over. */
+  const field = computed<TerrainField>(() =>
+    withOverrides(ground.value, terrainOverrides.value, createPainter(terrain.value)),
+  )
+
   /**
    * What undo can take back: the DM's edits and the orders being given. An
    * action opts in by being wrapped in history.track where the store hands it
@@ -309,6 +323,7 @@ export const useHexMapStore = defineStore('hexMap', () => {
     encounterOverrides: slotOf(encounterOverrides),
     roads: slotOf(roads),
     roadTail: slotOf(roadTail),
+    terrainOverrides: slotOf(terrainOverrides),
   })
 
   /**
@@ -458,12 +473,12 @@ export const useHexMapStore = defineStore('hexMap', () => {
   })
 
   const setField = (next: TerrainField): void => {
-    field.value = next
+    ground.value = next
   }
 
   /** Fixtures and tests still speak in whole maps; the field wraps one. */
   const setTiles = (next: ReadonlyMap<HexKey, TerrainTile>): void => {
-    field.value = fieldFromTiles(next)
+    ground.value = fieldFromTiles(next)
   }
 
   const tileAt = (hex: HexKey): TerrainTile | undefined => field.value.at(parseKey(hex))
@@ -854,6 +869,31 @@ export const useHexMapStore = defineStore('hexMap', () => {
     roadTail.value = null
   }
 
+  /** What the paint brush lays down. View state, never saved. */
+  const paintTerrain = ref<TerrainId>('grass')
+
+  const setPaintTerrain = (terrainId: TerrainId): void => {
+    paintTerrain.value = terrainId
+  }
+
+  // Ground painted back to what the seed made is no longer an override, so the
+  // brush can wipe its own work out as well as lay it down.
+  toolHandlers.paint = (hexes) => {
+    const next = new Map(terrainOverrides.value)
+    let changed = false
+    for (const hex of hexes) {
+      const made = ground.value.at(parseKey(hex))?.terrain
+      if (made === undefined || next.get(hex) === paintTerrain.value) continue
+      if (made === paintTerrain.value) {
+        changed = next.delete(hex) || changed
+      } else {
+        next.set(hex, paintTerrain.value)
+        changed = true
+      }
+    }
+    if (changed) terrainOverrides.value = next
+  }
+
   /**
    * A click on the map: the DM picks a hex to look at or works it with a tool, a
    * player gives an order.
@@ -1135,7 +1175,12 @@ export const useHexMapStore = defineStore('hexMap', () => {
    * at the turn that was just spent. Anything else about the crawl changing
    * invalidates it through the signature, and the set is built again.
    */
-  let rolling: { signature: string; turn: number; seen: Set<HexKey> } | null = null
+  let rolling: {
+    signature: string
+    field: TerrainField
+    turn: number
+    seen: Set<HexKey>
+  } | null = null
   let exploredVersion = 0
 
   const NOTHING_GAINED: ReadonlySet<HexKey> = new Set()
@@ -1155,7 +1200,8 @@ export const useHexMapStore = defineStore('hexMap', () => {
     ].join('|')
 
     exploredVersion += 1
-    const carried = rolling && rolling.signature === signature ? rolling : null
+    const carried =
+      rolling && rolling.signature === signature && rolling.field === field.value ? rolling : null
     if (carried && carried.turn === turn.value) {
       return { seen: carried.seen, added: NOTHING_GAINED, version: exploredVersion }
     }
@@ -1169,7 +1215,7 @@ export const useHexMapStore = defineStore('hexMap', () => {
     // Anything else — a rewind, a different record, another world — is a set
     // that has to be built again, and there is no difference worth drawing.
     if (!stepped) {
-      rolling = { signature, turn: turn.value, seen: fresh }
+      rolling = { signature, field: field.value, turn: turn.value, seen: fresh }
       return { seen: fresh, added: null, version: exploredVersion }
     }
 
@@ -1181,7 +1227,7 @@ export const useHexMapStore = defineStore('hexMap', () => {
       added.add(key)
     }
 
-    rolling = { signature, turn: turn.value, seen }
+    rolling = { signature, field: field.value, turn: turn.value, seen }
     return { seen, added, version: exploredVersion }
   })
 
@@ -1302,6 +1348,10 @@ export const useHexMapStore = defineStore('hexMap', () => {
     ],
     encounterOverrides: encounterOverrides.value,
     roads: [...roads.value].map(roadEdge),
+    terrainOverrides: [...terrainOverrides.value].map(([hex, terrainId]) => ({
+      hex,
+      terrain: terrainId,
+    })),
   }))
 
   // Terrain goes in first: laying down a new world is what wipes the map, so
@@ -1360,6 +1410,9 @@ export const useHexMapStore = defineStore('hexMap', () => {
     encounterOverrides.value = saved.encounterOverrides
     roads.value = new Set(saved.roads.map(({ a, b }) => roadKey(parseKey(a), parseKey(b))))
     roadTail.value = null
+    terrainOverrides.value = new Map(
+      saved.terrainOverrides.map(({ hex, terrain: id }) => [hex, id]),
+    )
     history.clear()
   }
 
@@ -1381,6 +1434,7 @@ export const useHexMapStore = defineStore('hexMap', () => {
       fogEdits.value = NO_FOG_EDITS
       roads.value = new Set()
       roadTail.value = null
+      terrainOverrides.value = new Map()
       history.clear()
     },
     { flush: 'sync' },
@@ -1404,8 +1458,10 @@ export const useHexMapStore = defineStore('hexMap', () => {
   )
 
   return {
+    ground,
     field,
     setField,
+    terrainOverrides,
     tileAt,
     hovered,
     entities,
@@ -1486,6 +1542,8 @@ export const useHexMapStore = defineStore('hexMap', () => {
     setDmTool,
     brushSize,
     setBrushSize,
+    paintTerrain,
+    setPaintTerrain,
     panelsOpen,
     setPanelOpen,
     select: history.track(select),

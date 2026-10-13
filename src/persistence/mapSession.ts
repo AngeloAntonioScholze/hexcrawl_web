@@ -54,6 +54,7 @@ const plain = (snapshot: MapSnapshot): MapSnapshot => ({
         : { ...one },
   ),
   roads: snapshot.roads.map((one) => ({ ...one })),
+  terrainOverrides: snapshot.terrainOverrides.map((one) => ({ ...one })),
 })
 
 interface Pending {
