@@ -104,6 +104,10 @@ const snapshot = (patch: Partial<MapSnapshot> = {}): MapSnapshot => ({
     { hex: '0,0' as HexKey, id: 'loc-b', name: 'Oakvale', kind: 'village', description: 'quiet' },
     { hex: '0,0' as HexKey, id: 'loc-a', name: 'the well', kind: 'landmark', description: '' },
   ],
+  merchants: [
+    { id: 'merchant-b', caravanId: caravan.id, name: 'Bram', type: 'smith', level: 10 },
+    { id: 'merchant-a', caravanId: caravan.id, name: 'Mira', type: 'doctor', level: 1 },
+  ],
   ...patch,
 })
 
@@ -145,6 +149,7 @@ describe('schema', () => {
     expect(loaded.turn).toBe(0)
     expect(loaded.entities).toEqual([])
     expect(loaded.record).toEqual([])
+    expect(loaded.merchants).toEqual([])
 
     saveSnapshot(old, snapshot())
     expect(loadSnapshot(old)!.turn).toBe(2)
@@ -266,6 +271,16 @@ describe('map state', () => {
     expect(loaded.notes).toEqual([])
     expect(loaded.events).toEqual([])
     expect(loaded.locations).toEqual([])
+  })
+
+  it('round-trips a caravan crew in the order it was taken on', () => {
+    const saved = snapshot()
+    saveSnapshot(db, saved)
+
+    expect(loadSnapshot(db)!.merchants).toEqual(saved.merchants)
+
+    saveSnapshot(db, snapshot({ merchants: [] }))
+    expect(loadSnapshot(db)!.merchants).toEqual([])
   })
 
   it('keeps the record in the order the turns were spent', () => {

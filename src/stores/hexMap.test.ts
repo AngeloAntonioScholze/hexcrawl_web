@@ -869,6 +869,103 @@ describe('what a hex holds', () => {
   })
 })
 
+describe('a caravan crew', () => {
+  it('takes merchants on in order and hands each caravan only its own', () => {
+    const store = setup()
+    const caravan = store.addEntity('the caravan', 'caravan').id
+    const other = store.addEntity('the other', 'caravan').id
+
+    const smith = store.addMerchant(caravan, 'smith', 'Bram', 4)!
+    const cook = store.addMerchant(caravan, 'cook')!
+    store.addMerchant(other, 'mage', 'Ilse')
+
+    expect(store.merchantsOf(caravan)).toEqual([
+      { id: smith.id, caravanId: caravan, name: 'Bram', type: 'smith', level: 4 },
+      { id: cook.id, caravanId: caravan, name: 'cook', type: 'cook', level: 1 },
+    ])
+    expect(store.merchantsOf(other).map((one) => one.name)).toEqual(['Ilse'])
+  })
+
+  it('takes no merchants onto anything but a caravan', () => {
+    const store = setup()
+    const ship = store.addEntity('the ship', 'ship').id
+
+    expect(store.addMerchant(store.selectedId, 'smith')).toBeNull()
+    expect(store.addMerchant(ship, 'smith')).toBeNull()
+    expect(store.addMerchant('nobody', 'smith')).toBeNull()
+    expect(store.merchants).toEqual([])
+  })
+
+  it('keeps every level a whole number from 1 to 10', () => {
+    const store = setup()
+    const caravan = store.addEntity('the caravan', 'caravan').id
+    const id = store.addMerchant(caravan, 'priest', 'Odo', 14)!.id
+    const level = (): number | undefined => store.merchants.find((one) => one.id === id)?.level
+
+    expect(level()).toBe(10)
+    store.setMerchantLevel(id, 0)
+    expect(level()).toBe(1)
+    store.setMerchantLevel(id, 6.4)
+    expect(level()).toBe(6)
+  })
+
+  it('renames a merchant but never to nothing', () => {
+    const store = setup()
+    const caravan = store.addEntity('the caravan', 'caravan').id
+    const id = store.addMerchant(caravan, 'hunter', 'Kell')!.id
+
+    store.renameMerchant(id, '  Kestrel ')
+    store.renameMerchant(id, '   ')
+
+    expect(store.merchants[0].name).toBe('Kestrel')
+  })
+
+  it('lets a merchant go, and the whole crew with its caravan', () => {
+    const store = setup()
+    const caravan = store.addEntity('the caravan', 'caravan').id
+    const other = store.addEntity('the other', 'caravan').id
+    const smith = store.addMerchant(caravan, 'smith')!.id
+    store.addMerchant(caravan, 'cook')
+    store.addMerchant(other, 'mage')
+
+    store.removeMerchant(smith)
+    expect(store.merchantsOf(caravan).map((one) => one.type)).toEqual(['cook'])
+
+    store.removeEntity(caravan)
+    expect(store.merchants.map((one) => one.type)).toEqual(['mage'])
+  })
+
+  it('is not wound back by the clock, nor wiped by a new world', () => {
+    const store = setup()
+    const caravan = store.addEntity('the caravan', 'caravan').id
+    const id = store.addMerchant(caravan, 'doctor', 'Mira', 2)!.id
+    sendEast(store, 2)
+    store.advanceTurn()
+    store.setMerchantLevel(id, 5)
+
+    store.rewindTurn()
+    store.setTerrain({ seed: TERRAIN_DEFAULTS.seed + 1 })
+
+    expect(store.merchants).toEqual([
+      { id, caravanId: caravan, name: 'Mira', type: 'doctor', level: 5 },
+    ])
+  })
+
+  it('comes back from a snapshot as it was saved', () => {
+    const store = setup()
+    const caravan = store.addEntity('the caravan', 'caravan').id
+    store.addMerchant(caravan, 'alchemist', 'Vey', 7)
+    store.addMerchant(caravan, 'curio')
+    const saved = store.snapshot
+
+    setActivePinia(createPinia())
+    const fresh = setup()
+    fresh.restore(saved)
+
+    expect(fresh.merchantsOf(caravan)).toEqual(store.merchantsOf(caravan))
+  })
+})
+
 describe('the side panels', () => {
   it('lets all three stay open on a wide window', () => {
     const store = useHexMapStore()

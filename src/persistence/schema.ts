@@ -141,6 +141,16 @@ const MIGRATIONS: readonly string[] = [
   `
   ALTER TABLE map DROP COLUMN allow_water;
   `,
+  `
+  CREATE TABLE merchant (
+    id TEXT PRIMARY KEY,
+    caravan_id TEXT NOT NULL,
+    ord INTEGER NOT NULL,
+    name TEXT NOT NULL,
+    type TEXT NOT NULL,
+    level INTEGER NOT NULL
+  );
+  `,
 ]
 
 export const SCHEMA_VERSION = MIGRATIONS.length

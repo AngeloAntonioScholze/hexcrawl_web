@@ -1,6 +1,7 @@
 import type { Database } from '@sqlite.org/sqlite-wasm'
 import type { Action, ActionKind, ActionRecord } from '../entities/action'
 import type { Entity, EntityKind, EntityState, Owner } from '../entities/entity'
+import type { Merchant, MerchantType } from '../entities/merchant'
 import type { HexEvent, HexLocation } from '../hex/content'
 import type { HexKey } from '../hex/coords'
 import type { Origin, TerrainControls } from '../stores/hexMap'
@@ -49,6 +50,8 @@ export interface MapSnapshot {
   /** Listed hex by hex, each hex's in the order they were added. */
   events: readonly ({ hex: HexKey } & HexEvent)[]
   locations: readonly ({ hex: HexKey } & HexLocation)[]
+  /** Every caravan's crew, in the order they were taken on. */
+  merchants: readonly Merchant[]
 }
 
 const SAVE_MAP = `
@@ -236,6 +239,18 @@ export function saveSnapshot(db: Database, snapshot: MapSnapshot): void {
     } finally {
       location.finalize()
     }
+
+    db.exec('DELETE FROM merchant')
+    const merchant = db.prepare(
+      'INSERT INTO merchant (id, caravan_id, ord, name, type, level) VALUES (?, ?, ?, ?, ?, ?)',
+    )
+    try {
+      snapshot.merchants.forEach((one, index) => {
+        merchant.bind([one.id, one.caravanId, index, one.name, one.type, one.level]).stepReset()
+      })
+    } finally {
+      merchant.finalize()
+    }
   })
 }
 
@@ -317,6 +332,13 @@ export function loadSnapshot(db: Database): MapSnapshot | null {
       name: String(one.name),
       kind: String(one.kind),
       description: String(one.description),
+    })),
+    merchants: db.selectObjects('SELECT * FROM merchant ORDER BY ord').map((one) => ({
+      id: String(one.id),
+      caravanId: String(one.caravan_id),
+      name: String(one.name),
+      type: String(one.type) as MerchantType,
+      level: Number(one.level),
     })),
   }
 }

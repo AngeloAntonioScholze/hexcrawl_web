@@ -40,6 +40,7 @@ const plain = (snapshot: MapSnapshot): MapSnapshot => ({
   notes: snapshot.notes.map((one) => ({ ...one })),
   events: snapshot.events.map((one) => ({ ...one })),
   locations: snapshot.locations.map((one) => ({ ...one })),
+  merchants: snapshot.merchants.map((one) => ({ ...one })),
 })
 
 interface Pending {

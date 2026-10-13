@@ -10,6 +10,7 @@ import {
   type EntityState,
   type Owner,
 } from '../entities/entity'
+import { clampLevel, newMerchant, type Merchant, type MerchantType } from '../entities/merchant'
 import { resolveTurn } from '../entities/resolve'
 import type { TokenShape } from '../engine/partyToken'
 import type { HexEvent, HexLocation } from '../hex/content'
@@ -160,6 +161,9 @@ export const useHexMapStore = defineStore('hexMap', () => {
   const events = shallowRef<ReadonlyMap<HexKey, readonly HexEvent[]>>(new Map())
   const locations = shallowRef<ReadonlyMap<HexKey, readonly HexLocation[]>>(new Map())
 
+  /** Every caravan's crew, in the order they were taken on. */
+  const merchants = shallowRef<readonly Merchant[]>([])
+
   const fog = ref(true)
   const showSight = ref(false)
   const showHistory = ref(false)
@@ -287,6 +291,8 @@ export const useHexMapStore = defineStore('hexMap', () => {
     const orders = new Map(queue.value)
     orders.delete(id)
     queue.value = orders
+
+    merchants.value = merchants.value.filter((one) => one.caravanId !== id)
   }
 
   const renameEntity = (id: string, name: string): void => {
@@ -402,6 +408,40 @@ export const useHexMapStore = defineStore('hexMap', () => {
 
   const removeLocation = (hex: HexKey, id: string): void => {
     locations.value = dropFrom(locations.value, hex, id)
+  }
+
+  const merchantsOf = (caravanId: string): readonly Merchant[] =>
+    merchants.value.filter((one) => one.caravanId === caravanId)
+
+  /** Only a caravan keeps a crew; asking anything else to take one on does nothing. */
+  const addMerchant = (
+    caravanId: string,
+    type: MerchantType,
+    name: string = type,
+    level?: number,
+  ): Merchant | null => {
+    if (entities.value.find((one) => one.id === caravanId)?.kind !== 'caravan') return null
+    const made = newMerchant(caravanId, name.trim() || type, type, level)
+    merchants.value = [...merchants.value, made]
+    return made
+  }
+
+  const removeMerchant = (id: string): void => {
+    const remaining = merchants.value.filter((one) => one.id !== id)
+    if (remaining.length !== merchants.value.length) merchants.value = remaining
+  }
+
+  const patchMerchant = (id: string, change: Partial<Merchant>): void => {
+    merchants.value = merchants.value.map((one) => (one.id === id ? { ...one, ...change } : one))
+  }
+
+  const renameMerchant = (id: string, name: string): void => {
+    const trimmed = name.trim()
+    if (trimmed) patchMerchant(id, { name: trimmed })
+  }
+
+  const setMerchantLevel = (id: string, level: number): void => {
+    patchMerchant(id, { level: clampLevel(level) })
   }
 
   /**
@@ -891,6 +931,7 @@ export const useHexMapStore = defineStore('hexMap', () => {
     notes: [...notes.value].map(([hex, text]) => ({ hex, text })),
     events: [...events.value].flatMap(([hex, list]) => list.map((one) => ({ hex, ...one }))),
     locations: [...locations.value].flatMap(([hex, list]) => list.map((one) => ({ hex, ...one }))),
+    merchants: merchants.value,
   }))
 
   // Terrain goes in first: laying down a new world is what wipes the map, so
@@ -937,6 +978,7 @@ export const useHexMapStore = defineStore('hexMap', () => {
     }
     events.value = grouped<HexEvent>(saved.events)
     locations.value = grouped<HexLocation>(saved.locations)
+    merchants.value = saved.merchants.map((one) => ({ ...one }))
   }
 
   // A new world is a different place, so nothing the entities learned about the
@@ -1054,6 +1096,12 @@ export const useHexMapStore = defineStore('hexMap', () => {
     locations,
     addLocation,
     removeLocation,
+    merchants,
+    merchantsOf,
+    addMerchant,
+    removeMerchant,
+    renameMerchant,
+    setMerchantLevel,
   }
 })
 
