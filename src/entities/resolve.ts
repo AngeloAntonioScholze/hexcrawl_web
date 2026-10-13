@@ -1,16 +1,18 @@
 import { parseKey, type HexKey } from '../hex/coords'
 import type { TerrainField } from '../terrain/field'
+import { hasRoad, type Roads } from '../terrain/roads'
 import { CLIMB_MULTIPLIER, KM_PER_HEX, stepCostKm, type Movement } from '../terrain/travel'
 import { isWater, type TerrainTile } from '../terrain/terrain'
 import type { Action, ActionKind, ActionRecord } from './action'
 import { idleState, isCarrier, KIND_MOVEMENT, type Entity, type EntityState } from './entity'
 
-/** One for a flat step, two for a climb: the km table read in turns. */
+/** One for a flat step or a road, two for a climb: the km table read in turns. */
 export const stepCostTurns = (
   from: TerrainTile,
   to: TerrainTile,
   movement: Movement = 'land',
-): number => stepCostKm(from, to, movement) / KM_PER_HEX
+  road = false,
+): number => stepCostKm(from, to, movement, road) / KM_PER_HEX
 
 /**
  * The most an entity can carry into the next turn: the cost of the dearest step
@@ -52,6 +54,7 @@ function intent(
 function walk(
   entity: Entity,
   field: TerrainField,
+  roads: Roads,
   from: EntityState,
 ): EntityState & { entered: HexKey[] } {
   const entered: HexKey[] = []
@@ -83,7 +86,8 @@ function walk(
     const next = field.at(parseKey(pending[0]))
     if (!here || !next) break
 
-    const cost = stepCostTurns(here, next, KIND_MOVEMENT[entity.kind])
+    const road = hasRoad(roads, here.hex, next.hex)
+    const cost = stepCostTurns(here, next, KIND_MOVEMENT[entity.kind], road)
     if (budget < cost) break
 
     budget -= cost
@@ -103,6 +107,7 @@ interface Step {
 function step(
   entity: Entity,
   field: TerrainField,
+  roads: Roads,
   before: EntityState,
   action: Action | undefined,
 ): Step {
@@ -113,7 +118,7 @@ function step(
   // standstill, whatever it had left over.
   const after =
     kind === 'move'
-      ? walk(entity, field, ordered)
+      ? walk(entity, field, roads, ordered)
       : { ...ordered, carry: kind === 'camp' ? 0 : ordered.carry, entered: [] as HexKey[] }
 
   const { entered, ...state } = after
@@ -150,6 +155,7 @@ export function resolveTurn(
   entities: readonly Entity[],
   states: ReadonlyMap<string, EntityState>,
   queued: ReadonlyMap<string, Action>,
+  roads: Roads = new Set(),
 ): TurnOutcome {
   const before = (id: string): EntityState => states.get(id) ?? idleState()
   const carriers = entities.filter((one) => isCarrier(one.kind))
@@ -157,7 +163,7 @@ export function resolveTurn(
 
   for (const carrier of carriers) {
     const own = { ...before(carrier.id), riding: null }
-    steps.set(carrier.id, step(carrier, field, own, queued.get(carrier.id)))
+    steps.set(carrier.id, step(carrier, field, roads, own, queued.get(carrier.id)))
   }
 
   for (const entity of entities) {
@@ -172,7 +178,7 @@ export function resolveTurn(
       entity.id,
       carrier && was.riding
         ? ride(was.riding, carrier)
-        : step(entity, field, { ...was, riding: null }, action),
+        : step(entity, field, roads, { ...was, riding: null }, action),
     )
   }
 

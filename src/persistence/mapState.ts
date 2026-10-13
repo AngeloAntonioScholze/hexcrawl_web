@@ -7,6 +7,7 @@ import type { Merchant, MerchantType } from '../entities/merchant'
 import type { HexEvent, HexLocation } from '../hex/content'
 import type { HexKey } from '../hex/coords'
 import type { Origin, TerrainControls } from '../stores/hexMap'
+import type { RoadEdge } from '../terrain/roads'
 import {
   defaultResourceChances,
   type Resource,
@@ -73,6 +74,8 @@ export interface MapSnapshot {
   fogEdits: readonly { hex: HexKey; revealed: boolean }[]
   /** The DM's edits to the encounter tables, in the order they were made. */
   encounterOverrides: readonly EncounterOverride[]
+  /** Every stretch of road, each between two neighbouring hexes. */
+  roads: readonly RoadEdge[]
 }
 
 const SAVE_MAP = `
@@ -298,6 +301,14 @@ export function saveSnapshot(db: Database, snapshot: MapSnapshot): void {
       resource.finalize()
     }
 
+    db.exec('DELETE FROM road')
+    const road = db.prepare('INSERT INTO road (a, b) VALUES (?, ?)')
+    try {
+      for (const one of snapshot.roads) road.bind([one.a, one.b]).stepReset()
+    } finally {
+      road.finalize()
+    }
+
     db.exec('DELETE FROM resource_chance')
     const chance = db.prepare('INSERT INTO resource_chance (terrain, chance) VALUES (?, ?)')
     try {
@@ -447,5 +458,9 @@ export function loadSnapshot(db: Database): MapSnapshot | null {
     encounterOverrides: db
       .selectObjects('SELECT payload FROM encounter_override ORDER BY ord')
       .map((one) => JSON.parse(String(one.payload)) as EncounterOverride),
+    roads: db.selectObjects('SELECT * FROM road ORDER BY a, b').map((one) => ({
+      a: String(one.a) as HexKey,
+      b: String(one.b) as HexKey,
+    })),
   }
 }

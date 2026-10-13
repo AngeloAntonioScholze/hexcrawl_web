@@ -1,6 +1,7 @@
 <script setup lang="ts">
 import type { FogMode } from '../hex/fogEdits'
 import { BRUSH_LIMITS, BRUSH_TOOLS, DM_TOOLS, useHexMapStore, type DmTool } from '../stores/hexMap'
+import RoadOptions from './RoadOptions.vue'
 
 const store = useHexMapStore()
 
@@ -58,6 +59,7 @@ const onBrush = (event: Event): void => {
         {{ mode }}
       </button>
     </div>
+    <RoadOptions v-if="store.dmTool === 'road'" />
   </div>
 </template>
 

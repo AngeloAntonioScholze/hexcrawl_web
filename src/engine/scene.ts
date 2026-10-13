@@ -22,6 +22,7 @@ import { createHexGrid, wantsDetail, type HexGrid, type HexTile } from './hexGri
 import { worldBounds } from './hexWindow'
 import { createTokenField, type TokenField } from './tokenField'
 import { createResourceMarkers, type ResourceMarkers } from './resourceMarkers'
+import { createRoadSegments, type RoadSegments } from './roadSegments'
 import { createRouteArrows, type RouteArrows } from './routeArrows'
 import { createVisionOverlay, type VisionOverlay } from './visionOverlay'
 import { createWaypointMarkers, type WaypointMarkers } from './waypointMarkers'
@@ -51,6 +52,7 @@ export interface HexScene {
   vision: VisionOverlay
   stops: WaypointMarkers
   resources: ResourceMarkers
+  roads: RoadSegments
   /** Draws a different window of the world; everything else rides along. */
   setWindow(tiles: readonly HexTile[]): void
   /** Slides the window: what `keep` turns down leaves, `entering` arrives. */
@@ -250,6 +252,7 @@ export function createHexScene(canvas: HTMLCanvasElement, options: HexSceneOptio
   const vision = createVisionOverlay(scene, options.layout, elevationOf, { gap: options.gap })
   const stops = createWaypointMarkers(scene, options.layout, elevationOf)
   const resources = createResourceMarkers(scene, options.layout, elevationOf)
+  const roads = createRoadSegments(scene, options.layout, elevationOf)
   addGroundSlab(scene, bounds, options.layout.size * 2)
 
   // Plain axial coordinates cross this boundary, never Babylon objects, so
@@ -284,6 +287,7 @@ export function createHexScene(canvas: HTMLCanvasElement, options: HexSceneOptio
   redrawOnCall(vision, ['setField', 'setShown'])
   redrawOnCall(stops, ['setStops'])
   redrawOnCall(resources, ['setMarks'])
+  redrawOnCall(roads, ['setSpans'])
 
   // The rounded edge is dropped once it shrinks to about a pixel on screen,
   // which at the widest zooms is two thirds of the grid's triangles. Worked out
@@ -347,6 +351,7 @@ export function createHexScene(canvas: HTMLCanvasElement, options: HexSceneOptio
     vision,
     stops,
     resources,
+    roads,
 
     setDaylight,
 
@@ -375,6 +380,7 @@ export function createHexScene(canvas: HTMLCanvasElement, options: HexSceneOptio
       scene.onBeforeRenderObservable.remove(detailObserver)
       detachControls()
       cancelAnimationFrame(frameRequest)
+      roads.dispose()
       resources.dispose()
       stops.dispose()
       vision.dispose()

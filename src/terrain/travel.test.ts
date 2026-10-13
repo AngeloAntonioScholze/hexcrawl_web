@@ -12,9 +12,12 @@ import {
   findRoute,
   isCoast,
   joinLegs,
+  ROADS_GRADED,
   stepCostKm,
+  stepKmOn,
 } from './travel'
 import { fieldFromTiles } from './field'
+import { withRoad } from './roads'
 
 // The number is the mechanical level; the rendered height is derived from it so
 // nothing here can lean on the rendered number by accident.
@@ -74,6 +77,73 @@ describe('stepCostKm', () => {
   it('lets a party wade ashore at the plain rate', () => {
     // Water and the beach share the ground floor, so coming out is not a climb.
     expect(stepCostKm(water({ q: 0, r: 0 }), tile({ q: 1, r: 0 }, 0))).toBe(KM_PER_HEX)
+  })
+})
+
+describe('roads', () => {
+  const low = tile({ q: 0, r: 0 }, 1)
+  const high = tile({ q: 1, r: 0 }, 1 + CLIMB_THRESHOLD)
+
+  it('grade a climb down to one hex', () => {
+    expect(stepCostKm(low, high, 'land', true)).toBe(KM_PER_HEX)
+    expect(stepKmOn(withRoad(new Set(), [low.hex, high.hex]), low, high)).toBe(KM_PER_HEX)
+    expect(stepKmOn(new Set(), low, high)).toBe(KM_PER_HEX * CLIMB_MULTIPLIER)
+  })
+
+  it('never make a hex shorter than a hex', () => {
+    expect(stepCostKm(low, tile({ q: 1, r: 0 }, 1), 'land', true)).toBe(KM_PER_HEX)
+  })
+
+  it('mean nothing afloat', () => {
+    expect(ROADS_GRADED.sea).toBe(false)
+    expect(stepCostKm(water({ q: 0, r: 0 }), water({ q: 1, r: 0 }), 'sea', true)).toBe(KM_PER_HEX)
+  })
+
+  // The ridge that is cheaper to walk around than to climb, with a road over it.
+  const ridge = (): Map<HexKey, TerrainTile> => {
+    const tiles = flatField(6)
+    for (const [q, level] of [
+      [1, 3],
+      [2, 6],
+      [3, 9],
+    ]) {
+      tiles.set(hexKey({ q, r: 0 }), tile({ q, r: 0 }, level))
+    }
+    return tiles
+  }
+  const over = Array.from({ length: 5 }, (_, q) => ({ q, r: 0 }))
+
+  it('pull a route over a climb it would otherwise walk around', () => {
+    const roads = withRoad(new Set(), over)
+    const route = findRoute(fieldFromTiles(ridge()), { q: 0, r: 0 }, { q: 4, r: 0 }, { roads })!
+    expect(route.hexes).toEqual(over)
+    expect(route.km).toBe(4 * KM_PER_HEX)
+  })
+
+  it('win a tie between routes of the same length', () => {
+    const detour = [
+      { q: 0, r: 0 },
+      { q: 0, r: 1 },
+      { q: 1, r: 1 },
+      { q: 2, r: 1 },
+      { q: 3, r: 0 },
+    ]
+    const roads = withRoad(new Set(), detour)
+    const route = findRoute(fieldFromTiles(flatField(6)), { q: 0, r: 0 }, { q: 3, r: 0 }, { roads })
+    // Four hexes on the road against three off it: longer is longer, road or not.
+    expect(route!.steps).toBe(3)
+
+    const level = withRoad(new Set(), detour.slice(1, 4))
+    const tied = findRoute(
+      fieldFromTiles(flatField(6)),
+      { q: 0, r: 1 },
+      { q: 3, r: 0 },
+      {
+        roads: level,
+      },
+    )!
+    expect(tied.km).toBe(3 * KM_PER_HEX)
+    expect(tied.hexes).toEqual(detour.slice(1))
   })
 })
 

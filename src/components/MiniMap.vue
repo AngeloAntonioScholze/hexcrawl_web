@@ -11,8 +11,9 @@ import {
   type PixelBox,
 } from '../engine/minimap'
 import { RESOURCE_MARKER_COLOR, resourceMarks } from '../engine/resourceMarkers'
+import { ROAD_COLOR, roadSpans } from '../engine/roadSegments'
 import type { HexScene } from '../engine/scene'
-import { parseKey } from '../hex/coords'
+import { parseKey, type HexKey } from '../hex/coords'
 import { hexToWorld, worldToHex, type Layout } from '../hex/layout'
 import { useHexMapStore } from '../stores/hexMap'
 
@@ -54,6 +55,19 @@ const resourceDots = computed<readonly Pixel[]>(() =>
     const world = hexToWorld(props.layout, parseKey(mark.hex))
     return worldToMinimap(frame.value, world.x, world.z)
   }),
+)
+
+const hexPixel = (hex: HexKey): Pixel => {
+  const world = hexToWorld(props.layout, parseKey(hex))
+  return worldToMinimap(frame.value, world.x, world.z)
+}
+
+const roadLines = computed<readonly [Pixel, Pixel][]>(() =>
+  roadSpans(store.roads, {
+    dmView: store.dmView,
+    fog: store.fog,
+    explored: store.explored,
+  }).map((span) => [hexPixel(span.a), hexPixel(span.b)]),
 )
 
 /**
@@ -118,6 +132,17 @@ const draw = (): void => {
     ink.strokeStyle = 'rgba(240, 244, 255, 0.85)'
     ink.lineWidth = 1
     ink.strokeRect(box.x - box.width / 2, box.y - box.height / 2, box.width, box.height)
+  }
+
+  if (roadLines.value.length > 0) {
+    ink.strokeStyle = ROAD_COLOR
+    ink.lineWidth = 1
+    ink.beginPath()
+    for (const [from, to] of roadLines.value) {
+      ink.moveTo(from.x, from.y)
+      ink.lineTo(to.x, to.y)
+    }
+    ink.stroke()
   }
 
   ink.fillStyle = RESOURCE_MARKER_COLOR

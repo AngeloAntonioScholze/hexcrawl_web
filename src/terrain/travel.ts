@@ -1,6 +1,7 @@
 import { distance, neighbors, type Axial } from '../hex/coords'
 import { findPath } from '../hex/pathfind'
 import type { TerrainField } from './field'
+import { hasRoad, type Roads } from './roads'
 import { isWater, type TerrainTile } from './terrain'
 
 /** Every hex is ten kilometres across. */
@@ -16,6 +17,23 @@ export const CLIMB_MULTIPLIER = 2
  * walking the length of a plain costs the plain distance.
  */
 export const CLIMB_THRESHOLD = 1
+
+/**
+ * A road cannot make a hex shorter without breaking the whole-hex costs below,
+ * so what it buys is the climb: a road is graded, and the step along it costs
+ * one hex however far it rises. Only feet and hooves use roads.
+ */
+export const ROADS_GRADED: Readonly<Record<Movement, boolean>> = {
+  land: true,
+  sea: false,
+}
+
+/**
+ * Added to every step off the road while searching, never to what a route
+ * costs: among routes of the same length the one with more road wins, and it
+ * would take ten thousand steps of it to outweigh a single kilometre.
+ */
+const OFF_ROAD_NUDGE = 1e-4
 
 /** How a mover gets about: on foot or hoof, or afloat. */
 export type Movement = 'land' | 'sea'
@@ -43,6 +61,7 @@ export const MOVEMENT_RULES: Readonly<Record<Movement, MovementRule>> = {
 export interface RouteOptions {
   /** Land by default: parties travel on foot and cannot cross open water. */
   movement?: Movement
+  roads?: Roads
 }
 
 export interface Route {
@@ -56,12 +75,22 @@ export function stepCostKm(
   from: TerrainTile,
   to: TerrainTile,
   movement: Movement = 'land',
+  road = false,
 ): number {
   const rise = to.level - from.level
-  return MOVEMENT_RULES[movement].climbs && rise >= CLIMB_THRESHOLD
+  const graded = road && ROADS_GRADED[movement]
+  return MOVEMENT_RULES[movement].climbs && !graded && rise >= CLIMB_THRESHOLD
     ? KM_PER_HEX * CLIMB_MULTIPLIER
     : KM_PER_HEX
 }
+
+/** What a step between two hexes costs, reading the road between them off the map. */
+export const stepKmOn = (
+  roads: Roads,
+  from: TerrainTile,
+  to: TerrainTile,
+  movement: Movement = 'land',
+): number => stepCostKm(from, to, movement, hasRoad(roads, from.hex, to.hex))
 
 /** Land with open water on at least one side. */
 export function isCoast(field: TerrainField, tile: TerrainTile): boolean {
@@ -85,6 +114,8 @@ export function findRoute(
   options: RouteOptions = {},
 ): Route | null {
   const movement = options.movement ?? 'land'
+  const roads = options.roads ?? new Set()
+  const usesRoads = ROADS_GRADED[movement] && roads.size > 0
   const tileAt = (hex: Axial): TerrainTile | undefined => field.at(hex)
 
   const passable = (tile: TerrainTile | undefined): tile is TerrainTile =>
@@ -98,7 +129,10 @@ export function findRoute(
     cost: (a, b) => {
       const here = tileAt(a)
       const there = tileAt(b)
-      return here && passable(there) ? stepCostKm(here, there, movement) : null
+      if (!here || !passable(there)) return null
+      const road = hasRoad(roads, a, b)
+      const nudge = usesRoads && !road ? OFF_ROAD_NUDGE : 0
+      return stepCostKm(here, there, movement, road) + nudge
     },
     // The cheapest step under any movement rule is one flat hex, so this never
     // overestimates.
@@ -106,7 +140,12 @@ export function findRoute(
   })
 
   if (!result) return null
-  return { hexes: result.path, steps: result.path.length - 1, km: result.cost }
+  const hexes = result.path
+  let km = 0
+  for (let i = 1; i < hexes.length; i++) {
+    km += stepKmOn(roads, tileAt(hexes[i - 1])!, tileAt(hexes[i])!, movement)
+  }
+  return { hexes, steps: hexes.length - 1, km }
 }
 
 /**

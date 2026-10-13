@@ -1,6 +1,7 @@
 import { Color3 } from '@babylonjs/core/Maths/math.color'
 import { describe, expect, it } from 'vitest'
-import { hexKey, range, type Axial, type HexKey } from '../hex/coords'
+import { hexKey, parseKey, range, type Axial, type HexKey } from '../hex/coords'
+import { withRoad } from '../terrain/roads'
 import type { TerrainTile } from '../terrain/terrain'
 import type { Action } from './action'
 import { KIND_DEFAULTS, idleState, type Entity, type EntityState } from './entity'
@@ -84,6 +85,29 @@ describe('the cost of a step', () => {
   it('never charges a climb at sea', () => {
     const tiles = ridgeField(4)
     expect(stepCostTurns(tiles.get('1,0')!, tiles.get('2,0')!, 'sea')).toBe(1)
+  })
+
+  it('charges one turn for a climb along a road', () => {
+    const tiles = ridgeField(4)
+    expect(stepCostTurns(tiles.get('1,0')!, tiles.get('2,0')!, 'land', true)).toBe(1)
+  })
+
+  it('lets a party up a ridge on the turn it reaches it when a road climbs it', () => {
+    const tiles = ridgeField(4)
+    const who = entity({ pacePerTurn: 1 })
+    const order = move(east(2))
+    const field = fieldFromTiles(tiles)
+    const from = new Map([[who.id, standing('0,0')]])
+    const queued = new Map([[who.id, order]])
+
+    const roads = withRoad(new Set(), east(2).map(parseKey))
+    const paved = resolveTurn(0, field, [who], from, queued, roads)
+    const second = resolveTurn(1, field, [who], paved.states, new Map(), roads)
+    expect(second.states.get(who.id)!.at).toBe('2,0')
+
+    const rough = resolveTurn(0, field, [who], from, queued)
+    const stuck = resolveTurn(1, field, [who], rough.states, new Map())
+    expect(stuck.states.get(who.id)!.at).toBe('1,0')
   })
 })
 

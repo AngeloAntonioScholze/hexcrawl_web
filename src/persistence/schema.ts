@@ -191,6 +191,13 @@ const MIGRATIONS: readonly string[] = [
     payload TEXT NOT NULL
   );
   `,
+  `
+  CREATE TABLE road (
+    a TEXT NOT NULL,
+    b TEXT NOT NULL,
+    PRIMARY KEY (a, b)
+  ) WITHOUT ROWID;
+  `,
 ]
 
 export const SCHEMA_VERSION = MIGRATIONS.length

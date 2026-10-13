@@ -152,6 +152,10 @@ const snapshot = (patch: Partial<MapSnapshot> = {}): MapSnapshot => ({
       },
     },
   ],
+  roads: [
+    { a: '0,0' as HexKey, b: '1,0' as HexKey },
+    { a: '1,0' as HexKey, b: '2,-1' as HexKey },
+  ],
   ...patch,
 })
 
@@ -200,6 +204,7 @@ describe('schema', () => {
     expect(loaded.resourceSpacing).toBe(DEFAULT_RESOURCE_SPACING)
     expect(loaded.fogEdits).toEqual([])
     expect(loaded.encounterOverrides).toEqual([])
+    expect(loaded.roads).toEqual([])
 
     saveSnapshot(old, snapshot())
     expect(loadSnapshot(old)!.turn).toBe(2)
@@ -340,6 +345,20 @@ describe('map state', () => {
 
     saveSnapshot(db, snapshot({ encounterOverrides: [] }))
     expect(loadSnapshot(db)!.encounterOverrides).toEqual([])
+  })
+
+  it('round-trips the roads', () => {
+    const saved = snapshot()
+    saveSnapshot(db, saved)
+
+    expect(loadSnapshot(db)!.roads).toEqual(saved.roads)
+  })
+
+  it('lets the roads be torn up', () => {
+    saveSnapshot(db, snapshot())
+    saveSnapshot(db, snapshot({ roads: [] }))
+
+    expect(loadSnapshot(db)!.roads).toEqual([])
   })
 
   it('lets the resources be cleared off the map', () => {

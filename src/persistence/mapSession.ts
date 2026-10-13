@@ -53,6 +53,7 @@ const plain = (snapshot: MapSnapshot): MapSnapshot => ({
         ? { kind: one.kind, id: one.id, change: { ...one.change } }
         : { ...one },
   ),
+  roads: snapshot.roads.map((one) => ({ ...one })),
 })
 
 interface Pending {

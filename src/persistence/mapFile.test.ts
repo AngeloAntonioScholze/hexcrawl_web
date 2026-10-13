@@ -123,6 +123,10 @@ const snapshot = (): MapSnapshot => ({
       },
     },
   ],
+  roads: [
+    { a: '0,0' as HexKey, b: '1,0' as HexKey },
+    { a: '1,0' as HexKey, b: '1,1' as HexKey },
+  ],
 })
 
 // Breaking the file in every way it can be broken is the point, so the edits
@@ -268,6 +272,10 @@ describe('parseMapFile', () => {
       (map) => delete map.encounterOverrides[2].entry.title,
       'encounterOverrides',
     ],
+    ['a road with no roads list', (map) => delete map.roads, 'roads'],
+    ['a road end that is not a hex', (map) => (map.roads[0].b = 'east'), 'roads'],
+    ['a road between hexes apart', (map) => (map.roads[0].b = '2,0'), 'roads'],
+    ['a road from a hex to itself', (map) => (map.roads[0].b = '0,0'), 'roads'],
   ])('turns away %s, naming the field', (_, edit, field) => {
     expect(rejected(tampered((file) => edit(file.map)))).toContain(`"${field}"`)
   })
@@ -317,6 +325,10 @@ describe('a map carried out and back in', () => {
     store.fog = true
     store.dmView = true
     expect(store.snapshot.fogEdits.length).toBeGreaterThan(0)
+    store.setDmTool('road')
+    store.click({ q: 0, r: 1 })
+    store.click({ q: 3, r: 1 })
+    expect(store.snapshot.roads).toHaveLength(3)
     expect(store.snapshot.record.length).toBeGreaterThan(0)
     const exported = serialiseMap(store.snapshot)
 

@@ -8,6 +8,7 @@ import {
   defaultResourceChances,
   RESOURCE_SPACING_LIMITS,
 } from '../terrain/resources'
+import { roadHexes } from '../terrain/roads'
 import { TERRAIN_DEFAULTS, type TerrainTile } from '../terrain/terrain'
 import { TURNS_PER_PHASE } from '../time/clock'
 import { BRUSH_LIMITS, MAX_SIGHT, MIN_SIGHT, TERRAIN_LIMITS, useHexMapStore } from './hexMap'
@@ -225,6 +226,130 @@ describe('the fog tool', () => {
 
     expect(fresh.known.has('1,0')).toBe(true)
     expect(fresh.fogEdits.hidden.has('2,0')).toBe(true)
+  })
+})
+
+describe('roads', () => {
+  const roadTool = (): Store => {
+    const store = setup()
+    store.setDmTool('road')
+    return store
+  }
+
+  it('starts a road on the first tap and carries it on with each tap after', () => {
+    const store = roadTool()
+
+    store.click({ q: 0, r: 0 })
+    expect(store.roadTail).toBe('0,0')
+    expect(store.roads.size).toBe(0)
+
+    store.click({ q: 3, r: 0 })
+    expect(store.roadTail).toBe('3,0')
+    expect([...roadHexes(store.roads)].sort()).toEqual(['0,0', '1,0', '2,0', '3,0'])
+
+    store.click({ q: 3, r: 2 })
+    expect(store.roads.size).toBe(5)
+    expect(store.roadTail).toBe('3,2')
+  })
+
+  it('ends the road on a second tap of its last hex, or on finish', () => {
+    const store = roadTool()
+    store.click({ q: 0, r: 0 })
+    store.click({ q: 2, r: 0 })
+    store.click({ q: 2, r: 0 })
+    expect(store.roadTail).toBeNull()
+    expect(store.roads.size).toBe(2)
+
+    store.click({ q: 0, r: 2 })
+    store.finishRoad()
+    expect(store.roadTail).toBeNull()
+  })
+
+  it('ends the road when the tool is put down', () => {
+    const store = roadTool()
+    store.click({ q: 0, r: 0 })
+    store.setDmTool('select')
+    expect(store.roadTail).toBeNull()
+  })
+
+  it('never lays road across open water', () => {
+    const store = useHexMapStore()
+    const tiles = flatField(6)
+    for (let r = -6; r <= 6; r++) {
+      const hex = { q: 1, r }
+      if (tiles.has(hexKey(hex)))
+        tiles.set(hexKey(hex), { ...tile(hex, 0), terrain: 'water', height: -0.5 })
+    }
+    store.setTiles(tiles)
+    store.setDmTool('road')
+
+    store.click({ q: 1, r: 0 })
+    expect(store.roadTail).toBeNull()
+
+    store.click({ q: 0, r: 0 })
+    store.click({ q: 2, r: 0 })
+    expect(store.roads.size).toBe(0)
+    expect(store.roadTail).toBe('0,0')
+  })
+
+  it('tears up the road touching a tapped hex while erasing', () => {
+    const store = roadTool()
+    store.click({ q: 0, r: 0 })
+    store.click({ q: 3, r: 0 })
+
+    store.setRoadErase(true)
+    expect(store.roadTail).toBeNull()
+    store.click({ q: 1, r: 0 })
+    expect([...roadHexes(store.roads)].sort()).toEqual(['2,0', '3,0'])
+  })
+
+  it('takes a tap back with undo, pen and all', () => {
+    const store = roadTool()
+    store.click({ q: 0, r: 0 })
+    store.click({ q: 2, r: 0 })
+
+    store.undo()
+    expect(store.roads.size).toBe(0)
+    expect(store.roadTail).toBe('0,0')
+
+    store.redo()
+    expect(store.roads.size).toBe(2)
+    expect(store.roadTail).toBe('2,0')
+  })
+
+  it('makes a climb along it quicker to plan and to walk', () => {
+    const store = useHexMapStore()
+    const tiles = flatField(6)
+    tiles.set('2,0', tile({ q: 2, r: 0 }, 3))
+    store.setTiles(tiles)
+    sendEast(store, 2)
+    expect(store.route!.km).toBe(30)
+
+    store.setDmTool('road')
+    store.click({ q: 0, r: 0 })
+    store.click({ q: 2, r: 0 })
+    expect(store.route!.km).toBe(20)
+
+    store.dmView = false
+    store.advanceTurn()
+    store.advanceTurn()
+    expect(store.start).toBe('2,0')
+  })
+
+  it('round-trips through a snapshot and is cleared by a new world', () => {
+    const store = roadTool()
+    store.click({ q: 0, r: 0 })
+    store.click({ q: 2, r: -1 })
+    const saved = store.snapshot
+    expect(saved.roads).toHaveLength(2)
+
+    setActivePinia(createPinia())
+    const fresh = setup()
+    fresh.restore(saved)
+    expect(fresh.roads).toEqual(store.roads)
+
+    fresh.setTerrain({ seed: TERRAIN_DEFAULTS.seed + 1 })
+    expect(fresh.roads.size).toBe(0)
   })
 })
 

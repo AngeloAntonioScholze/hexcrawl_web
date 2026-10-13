@@ -9,6 +9,7 @@ import { useTurnPlayback } from '../composables/useTurnPlayback'
 import { createFogStepper } from '../engine/fogStepper'
 import type { HexGrid } from '../engine/hexGrid'
 import { resourceMarks } from '../engine/resourceMarkers'
+import { roadSpans } from '../engine/roadSegments'
 import { useHexScene } from '../engine/useHexScene'
 import { useHexMapStore } from '../stores/hexMap'
 import { createTerrainField } from '../terrain/field'
@@ -35,6 +36,7 @@ const TRAIL_TINT = 0.72
 const HEAD_TINT = new Color3(0.99, 0.93, 0.7)
 const START_TINT = new Color3(0.44, 0.78, 0.5)
 const GOAL_TINT = new Color3(0.86, 0.36, 0.36)
+const ROAD_TAIL_TINT = new Color3(0.78, 0.55, 0.3)
 
 // Dev-only; the static DEV check lets the build drop the chunk entirely.
 const RenderStats = import.meta.env.DEV
@@ -120,6 +122,8 @@ const overlay = computed(() => {
   if (store.start) result.set(store.start, START_TINT)
   if (store.goal) result.set(store.goal, GOAL_TINT)
 
+  if (store.roadTail) result.set(store.roadTail, ROAD_TAIL_TINT)
+
   // Last of all: the hex the DM picked must read as picked whatever runs over it.
   if (store.selectedHex) result.set(store.selectedHex, SELECT_TINT)
   return result
@@ -179,6 +183,12 @@ const marks = computed(() =>
 
 watch(marks, (next) => hexScene.value?.resources.setMarks(next))
 
+const spans = computed(() =>
+  roadSpans(store.roads, { dmView: store.dmView, fog: store.fog, explored: store.explored }),
+)
+
+watch(spans, (next) => hexScene.value?.roads.setSpans(next))
+
 // The sky over the map follows the same clock the dial draws: the sun swings
 // across the four turns of the day and the ground goes cold after dark.
 watch(
@@ -206,6 +216,7 @@ const pushEverything = (created: NonNullable<typeof hexScene.value>): void => {
   created.tokens.setEntries(tokens.value)
   created.stops.setStops(store.stops.hexes, store.stops.color)
   created.resources.setMarks(marks.value)
+  created.roads.setSpans(spans.value)
   created.vision.setField(sightField.value.lit, sightField.value.shadow)
   created.vision.setShown(store.showSight)
   created.setDaylight(store.clock.phase, store.clock.index)

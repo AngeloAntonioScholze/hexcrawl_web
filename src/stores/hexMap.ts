@@ -57,6 +57,7 @@ import type { VisionOptions } from '../hex/vision'
 import type { MapSnapshot } from '../persistence/mapState'
 import { fieldFromTiles, type TerrainField } from '../terrain/field'
 import { scatterResources } from '../terrain/resourceGen'
+import { roadEdge, roadKey, withoutRoadAt, withRoad, type Roads } from '../terrain/roads'
 import {
   DEFAULT_RESOURCE_SPACING,
   RESOURCE_SPACING_LIMITS,
@@ -68,7 +69,14 @@ import {
 } from '../terrain/resources'
 import { sightFrom, type PartySight } from '../terrain/sight'
 import { isWater, TERRAIN_DEFAULTS, type TerrainId, type TerrainTile } from '../terrain/terrain'
-import { canEnter, chainRoute, joinLegs, KM_PER_HEX, type Route } from '../terrain/travel'
+import {
+  canEnter,
+  chainRoute,
+  findRoute,
+  joinLegs,
+  KM_PER_HEX,
+  type Route,
+} from '../terrain/travel'
 import { clockAt, isNight, nextPhaseTurn, type Clock, type Phase } from '../time/clock'
 import { createHistory, slotOf } from './history'
 
@@ -235,6 +243,16 @@ export const useHexMapStore = defineStore('hexMap', () => {
   const resourceChances = shallowRef<ResourceChances>(defaultResourceChances())
   const resourceSpacing = ref(DEFAULT_RESOURCE_SPACING)
 
+  const roads = shallowRef<Roads>(new Set())
+
+  /**
+   * Where the road being drawn last reached, so the next tap carries it on from
+   * there; null when no road is being drawn. Never saved, but undone with the
+   * tap that moved it, so undoing a stretch hands the pen back where it was.
+   */
+  const roadTail = ref<HexKey | null>(null)
+  const roadErase = ref(false)
+
   const resourcesByHex = computed<ReadonlyMap<HexKey, readonly Resource[]>>(() => {
     const byHex = new Map<HexKey, Resource[]>()
     for (const one of resources.value) byHex.set(one.hex, [...(byHex.get(one.hex) ?? []), one])
@@ -289,6 +307,8 @@ export const useHexMapStore = defineStore('hexMap', () => {
     resourceSpacing: slotOf(resourceSpacing),
     fogEdits: slotOf(fogEdits),
     encounterOverrides: slotOf(encounterOverrides),
+    roads: slotOf(roads),
+    roadTail: slotOf(roadTail),
   })
 
   /**
@@ -707,6 +727,7 @@ export const useHexMapStore = defineStore('hexMap', () => {
     const kind = entities.value.find((one) => one.id === walker)?.kind ?? 'party'
     return chainRoute(field.value, parseKey(from), waypoints.map(parseKey), {
       movement: KIND_MOVEMENT[kind],
+      roads: roads.value,
     })
   }
 
@@ -793,6 +814,47 @@ export const useHexMapStore = defineStore('hexMap', () => {
   }
 
   /**
+   * The first tap starts a road, each tap after carries it on to the hex tapped
+   * along the cheapest land route there, so a road never fords the sea, and
+   * tapping the hex it reached last ends it. Erasing tears up the road touching
+   * the hex tapped.
+   */
+  const roadTap = (hex: HexKey): void => {
+    if (roadErase.value) {
+      roads.value = withoutRoadAt(roads.value, parseKey(hex))
+      return
+    }
+    const tail = roadTail.value
+    if (tail === hex) {
+      roadTail.value = null
+      return
+    }
+    const under = tileAt(hex)
+    if (!under || !canEnter(field.value, under, 'land')) return
+    if (tail === null) {
+      roadTail.value = hex
+      return
+    }
+    const path = findRoute(field.value, parseKey(tail), parseKey(hex), { roads: roads.value })
+    if (!path) return
+    roads.value = withRoad(roads.value, path.hexes)
+    roadTail.value = hex
+  }
+
+  toolHandlers.road = (hexes) => {
+    if (hexes[0]) roadTap(hexes[0])
+  }
+
+  const finishRoad = (): void => {
+    roadTail.value = null
+  }
+
+  const setRoadErase = (on: boolean): void => {
+    roadErase.value = on
+    roadTail.value = null
+  }
+
+  /**
    * A click on the map: the DM picks a hex to look at or works it with a tool, a
    * player gives an order.
    * Clicking the picked hex again, or the goal of the order just given, takes
@@ -834,7 +896,14 @@ export const useHexMapStore = defineStore('hexMap', () => {
   /** Spends a turn: every entity resolves, ordered or not, and is written down. */
   const advanceTurn = (): void => {
     truncate()
-    const outcome = resolveTurn(turn.value, field.value, entities.value, states.value, queue.value)
+    const outcome = resolveTurn(
+      turn.value,
+      field.value,
+      entities.value,
+      states.value,
+      queue.value,
+      roads.value,
+    )
     setFrames([...frames.value, { records: outcome.records, states: outcome.states }])
     queue.value = new Map()
     turn.value += 1
@@ -1232,6 +1301,7 @@ export const useHexMapStore = defineStore('hexMap', () => {
       ...[...fogEdits.value.hidden].map((hex) => ({ hex, revealed: false })),
     ],
     encounterOverrides: encounterOverrides.value,
+    roads: [...roads.value].map(roadEdge),
   }))
 
   // Terrain goes in first: laying down a new world is what wipes the map, so
@@ -1288,6 +1358,8 @@ export const useHexMapStore = defineStore('hexMap', () => {
       hidden: new Set(saved.fogEdits.filter((one) => !one.revealed).map((one) => one.hex)),
     }
     encounterOverrides.value = saved.encounterOverrides
+    roads.value = new Set(saved.roads.map(({ a, b }) => roadKey(parseKey(a), parseKey(b))))
+    roadTail.value = null
     history.clear()
   }
 
@@ -1307,6 +1379,8 @@ export const useHexMapStore = defineStore('hexMap', () => {
       locations.value = new Map()
       resources.value = []
       fogEdits.value = NO_FOG_EDITS
+      roads.value = new Set()
+      roadTail.value = null
       history.clear()
     },
     { flush: 'sync' },
@@ -1316,6 +1390,15 @@ export const useHexMapStore = defineStore('hexMap', () => {
     dmView,
     (dm) => {
       if (!dm) selectedHex.value = null
+    },
+    { flush: 'sync' },
+  )
+
+  // Putting the road tool down, or leaving the DM's view, ends the road in hand.
+  watch(
+    [dmTool, dmView],
+    ([tool, dm]) => {
+      if (tool !== 'road' || !dm) roadTail.value = null
     },
     { flush: 'sync' },
   )
@@ -1447,6 +1530,11 @@ export const useHexMapStore = defineStore('hexMap', () => {
     restoreEncounter: history.track(restoreEncounter),
     addEncounter: history.track(addEncounter),
     resetEncounters: history.track(resetEncounters),
+    roads,
+    roadTail,
+    roadErase,
+    finishRoad,
+    setRoadErase,
     undo: history.undo,
     redo: history.redo,
     canUndo: history.canUndo,

@@ -16,6 +16,7 @@ import {
 } from '../entities/merchant'
 import type { HexKey } from '../hex/coords'
 import type { TerrainControls } from '../stores/hexMap'
+import { isRoadEdge, type RoadEdge } from '../terrain/roads'
 import {
   defaultResourceChances,
   RESOURCE_TYPES,
@@ -264,6 +265,10 @@ const SNAPSHOT_FIELDS: { [K in keyof MapSnapshot]-?: Guard<MapSnapshot[K]> } = {
   resourceSpacing: isTurn,
   fogEdits: listOf(shape<MapSnapshot['fogEdits'][number]>({ hex: isHex, revealed: isBoolean })),
   encounterOverrides: listOf(isEncounterOverride),
+  roads: listOf(
+    (value): value is RoadEdge =>
+      shape<RoadEdge>({ a: isHex, b: isHex })(value) && isRoadEdge(value.a, value.b),
+  ),
 }
 
 export function serialiseMap(snapshot: MapSnapshot): string {
