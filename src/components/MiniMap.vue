@@ -10,6 +10,7 @@ import {
   type Pixel,
   type PixelBox,
 } from '../engine/minimap'
+import { RESOURCE_MARKER_COLOR, resourceMarks } from '../engine/resourceMarkers'
 import type { HexScene } from '../engine/scene'
 import { parseKey } from '../hex/coords'
 import { hexToWorld, worldToHex, type Layout } from '../hex/layout'
@@ -38,6 +39,22 @@ const frame = computed(() => ({
   bounds: worldBounds(props.layout, store.worldRadius),
   size: SIZE.value,
 }))
+
+/** Pixels on a side of a resource's square: smaller than a token, which it sits under. */
+const RESOURCE_DOT = 2
+
+// Worked out when the resources or the view change rather than on every frame
+// the minimap draws: the biggest world holds a couple of thousand.
+const resourceDots = computed<readonly Pixel[]>(() =>
+  resourceMarks(store.resources, {
+    dmView: store.dmView,
+    fog: store.fog,
+    explored: store.explored,
+  }).map((mark) => {
+    const world = hexToWorld(props.layout, parseKey(mark.hex))
+    return worldToMinimap(frame.value, world.x, world.z)
+  }),
+)
 
 /**
  * The terrain, sampled every few hexes into an off-screen canvas. Sampling is
@@ -101,6 +118,11 @@ const draw = (): void => {
     ink.strokeStyle = 'rgba(240, 244, 255, 0.85)'
     ink.lineWidth = 1
     ink.strokeRect(box.x - box.width / 2, box.y - box.height / 2, box.width, box.height)
+  }
+
+  ink.fillStyle = RESOURCE_MARKER_COLOR
+  for (const dot of resourceDots.value) {
+    ink.fillRect(dot.x - RESOURCE_DOT / 2, dot.y - RESOURCE_DOT / 2, RESOURCE_DOT, RESOURCE_DOT)
   }
 
   for (const token of store.tokens) {

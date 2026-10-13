@@ -92,7 +92,7 @@ const DETAILED_ABOVE_PX = 2.5
 export const wantsDetail = (bevelPixels: number, detailed: boolean): boolean =>
   detailed ? bevelPixels >= FLAT_BELOW_PX : bevelPixels > DETAILED_ABOVE_PX
 
-const MIN_ELEVATION = 0.05
+export const MIN_ELEVATION = 0.05
 const DEFAULT_GAP = 0.06
 
 // Floats per slot in each buffer. Base colours carry no alpha: it is always 1.

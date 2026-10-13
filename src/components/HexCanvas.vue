@@ -8,6 +8,7 @@ import { gridCapacity, maxZoomFor, useHexWindow } from '../composables/useHexWin
 import { useTurnPlayback } from '../composables/useTurnPlayback'
 import { createFogStepper } from '../engine/fogStepper'
 import type { HexGrid } from '../engine/hexGrid'
+import { resourceMarks } from '../engine/resourceMarkers'
 import { useHexScene } from '../engine/useHexScene'
 import { useHexMapStore } from '../stores/hexMap'
 import { createTerrainField } from '../terrain/field'
@@ -168,6 +169,16 @@ watch(
   ({ hexes, color }) => hexScene.value?.stops.setStops(hexes, color),
 )
 
+const marks = computed(() =>
+  resourceMarks(store.resources, {
+    dmView: store.dmView,
+    fog: store.fog,
+    explored: store.explored,
+  }),
+)
+
+watch(marks, (next) => hexScene.value?.resources.setMarks(next))
+
 // The sky over the map follows the same clock the dial draws: the sun swings
 // across the four turns of the day and the ground goes cold after dark.
 watch(
@@ -194,6 +205,7 @@ const pushEverything = (created: NonNullable<typeof hexScene.value>): void => {
   created.arrows.setPaths(store.paths)
   created.tokens.setEntries(tokens.value)
   created.stops.setStops(store.stops.hexes, store.stops.color)
+  created.resources.setMarks(marks.value)
   created.vision.setField(sightField.value.lit, sightField.value.shadow)
   created.vision.setShown(store.showSight)
   created.setDaylight(store.clock.phase, store.clock.index)

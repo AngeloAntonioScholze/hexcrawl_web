@@ -21,6 +21,7 @@ import type { TerrainField } from '../terrain/field'
 import { createHexGrid, wantsDetail, type HexGrid, type HexTile } from './hexGrid'
 import { worldBounds } from './hexWindow'
 import { createTokenField, type TokenField } from './tokenField'
+import { createResourceMarkers, type ResourceMarkers } from './resourceMarkers'
 import { createRouteArrows, type RouteArrows } from './routeArrows'
 import { createVisionOverlay, type VisionOverlay } from './visionOverlay'
 import { createWaypointMarkers, type WaypointMarkers } from './waypointMarkers'
@@ -49,6 +50,7 @@ export interface HexScene {
   tokens: TokenField
   vision: VisionOverlay
   stops: WaypointMarkers
+  resources: ResourceMarkers
   /** Draws a different window of the world; everything else rides along. */
   setWindow(tiles: readonly HexTile[]): void
   /** Slides the window: what `keep` turns down leaves, `entering` arrives. */
@@ -247,6 +249,7 @@ export function createHexScene(canvas: HTMLCanvasElement, options: HexSceneOptio
   const tokens = createTokenField(scene, options.layout, elevationOf)
   const vision = createVisionOverlay(scene, options.layout, elevationOf, { gap: options.gap })
   const stops = createWaypointMarkers(scene, options.layout, elevationOf)
+  const resources = createResourceMarkers(scene, options.layout, elevationOf)
   addGroundSlab(scene, bounds, options.layout.size * 2)
 
   // Plain axial coordinates cross this boundary, never Babylon objects, so
@@ -280,6 +283,7 @@ export function createHexScene(canvas: HTMLCanvasElement, options: HexSceneOptio
   redrawOnCall(tokens, ['setEntries', 'place', 'hop', 'board', 'alight'])
   redrawOnCall(vision, ['setField', 'setShown'])
   redrawOnCall(stops, ['setStops'])
+  redrawOnCall(resources, ['setMarks'])
 
   // The rounded edge is dropped once it shrinks to about a pixel on screen,
   // which at the widest zooms is two thirds of the grid's triangles. Worked out
@@ -342,6 +346,7 @@ export function createHexScene(canvas: HTMLCanvasElement, options: HexSceneOptio
     tokens,
     vision,
     stops,
+    resources,
 
     setDaylight,
 
@@ -370,6 +375,7 @@ export function createHexScene(canvas: HTMLCanvasElement, options: HexSceneOptio
       scene.onBeforeRenderObservable.remove(detailObserver)
       detachControls()
       cancelAnimationFrame(frameRequest)
+      resources.dispose()
       stops.dispose()
       vision.dispose()
       tokens.dispose()
