@@ -1,6 +1,9 @@
 /**
- * What one party step costs: the sight recompute, the fog map HexCanvas builds
- * from it, and the buffer scan setFog does to upload it. Run with `bun bench`.
+ * What one party step costs the fog: the sight recompute, the clarity map
+ * HexCanvas builds from it, and the buffer write that uploads it. The
+ * whole-window path is timed beside the stepped one on two boards, so the cost
+ * that grows with the view and the cost that does not stand side by side. Run
+ * with `bun bench`.
  */
 import { NullEngine } from '@babylonjs/core/Engines/nullEngine'
 import { Scene } from '@babylonjs/core/scene'
@@ -11,27 +14,20 @@ import { sightFrom } from '../src/terrain/sight'
 import { createTerrain } from '../src/terrain/terrain'
 import { fieldFromTiles } from '../src/terrain/field'
 
-// The board MapView ships with: a 40-hex radius is 4921 tiles. Sight runs from
-// the default 5 up to the 14 a party standing on a peak reaches.
-const BOARD_RADIUS = 40
+// The board MapView shipped with, and one four times the size: the two paths
+// should part company between them.
+const BOARDS = [40, 80]
 const REMEMBERED = 0.42
 
-const layout = createLayout(2)
-const field = spiral({ q: 0, r: 0 }, BOARD_RADIUS)
-const terrain = createTerrain(layout, { octaves: 4 })
-const terrainTiles = field.map(terrain)
-const tiles = new Map(terrainTiles.map((tile) => [hexKey(tile.hex), tile]))
+/** The reach of a party standing on a peak: the widest disc one step moves. */
+const SIGHT = 14
 
+const layout = createLayout(2)
 const engine = new NullEngine()
 const scene = new Scene(engine)
-const grid = createHexGrid(scene, layout, { capacity: terrainTiles.length })
-grid.setWindow(
-  terrainTiles.map((tile): HexTile => ({
-    hex: tile.hex,
-    elevation: tile.elevation,
-    color: tile.color,
-  })),
-)
+
+const origin: Axial = { q: 0, r: 0 }
+const nextHex: Axial = { q: 1, r: 0 }
 
 const time = (label: string, iterations: number, run: () => void): void => {
   for (let i = 0; i < Math.min(iterations, 50); i++) run()
@@ -45,66 +41,92 @@ const time = (label: string, iterations: number, run: () => void): void => {
   )
 }
 
-const sightAt = (hex: Axial, radius: number) =>
-  sightFrom(fieldFromTiles(tiles), hex, { radius, maxRadius: radius })
+const board = (radius: number, timeSight: boolean): void => {
+  const terrain = createTerrain(layout, { octaves: 4 })
+  const terrainTiles = spiral(origin, radius).map(terrain)
+  const tiles = new Map(terrainTiles.map((tile) => [hexKey(tile.hex), tile]))
+  const field = fieldFromTiles(tiles)
 
-const fogMapFrom = (visible: ReadonlySet<HexKey>, explored: ReadonlySet<HexKey>) => {
-  const result = new Map<HexKey, number>()
-  for (const key of tiles.keys()) {
-    if (visible.has(key)) continue
-    result.set(key, explored.has(key) ? REMEMBERED : 0)
+  const grid = createHexGrid(scene, layout, { capacity: terrainTiles.length })
+  grid.setWindow(
+    terrainTiles.map((tile): HexTile => ({
+      hex: tile.hex,
+      elevation: tile.elevation,
+      color: tile.color,
+    })),
+  )
+
+  const sightAt = (hex: Axial, reach: number) =>
+    sightFrom(field, hex, { radius: reach, maxRadius: reach })
+
+  console.log(`\nboard radius ${radius}: ${tiles.size} hexes, ${grid.count} instances\n`)
+
+  if (timeSight) {
+    for (const reach of [5, 10, SIGHT]) {
+      time(`sightFrom radius ${reach}`, 2000, () => {
+        sightAt(origin, reach)
+      })
+    }
+    console.log('')
   }
-  return result
-}
 
-const origin: Axial = { q: 0, r: 0 }
-const nextHex: Axial = { q: 1, r: 0 }
+  const here = sightAt(origin, SIGHT)
+  const there = sightAt(nextHex, SIGHT)
+  const explored = new Set<HexKey>(here.visible)
+  for (const key of there.visible) explored.add(key)
 
-console.log(`board ${tiles.size} hexes, ${grid.count} instances\n`)
+  // The whole window, every step: what HexCanvas used to hand setFog.
+  const wholeFog = (visible: ReadonlySet<HexKey>): Map<HexKey, number> => {
+    const result = new Map<HexKey, number>()
+    for (const key of tiles.keys()) {
+      if (visible.has(key)) continue
+      result.set(key, explored.has(key) ? REMEMBERED : 0)
+    }
+    return result
+  }
 
-for (const radius of [5, 10, 14]) {
-  time(`sightFrom radius ${radius}`, 2000, () => {
-    sightAt(origin, radius)
+  // And the difference it hands updateFog now: what left sight and what entered
+  // it, which is the party's disc rather than the view.
+  const fogStep = (was: ReadonlySet<HexKey>, visible: ReadonlySet<HexKey>): Map<HexKey, number> => {
+    const changed = new Map<HexKey, number>()
+    for (const key of was) {
+      if (!visible.has(key)) changed.set(key, explored.has(key) ? REMEMBERED : 0)
+    }
+    for (const key of visible) if (!was.has(key)) changed.set(key, 1)
+    return changed
+  }
+
+  const wholeHere = wholeFog(here.visible)
+  const wholeThere = wholeFog(there.visible)
+  const stepOn = fogStep(here.visible, there.visible)
+  const stepBack = fogStep(there.visible, here.visible)
+
+  console.log(`a step moves ${stepOn.size} hexes of ${tiles.size}\n`)
+
+  time('whole-window fog map', 500, () => {
+    wholeFog(there.visible)
   })
+
+  let flip = false
+  time('setFog after one step', 500, () => {
+    grid.setFog(flip ? wholeHere : wholeThere)
+    flip = !flip
+  })
+
+  time('stepped fog diff', 20000, () => {
+    fogStep(here.visible, there.visible)
+  })
+
+  let back = false
+  time('updateFog after one step', 20000, () => {
+    grid.updateFog(back ? stepBack : stepOn)
+    back = !back
+  })
+
+  grid.dispose()
 }
 
-const here = sightAt(origin, 14)
-const there = sightAt(nextHex, 14)
-const explored = new Set<HexKey>(here.visible)
-console.log(`\nsight disc at radius 14: ${here.visible.size} lit, ${here.blocked.size} blocked\n`)
+for (const radius of BOARDS) board(radius, radius === BOARDS[0])
 
-time('whole-board fog map', 2000, () => {
-  fogMapFrom(here.visible, explored)
-})
-
-time('incremental fog diff', 20000, () => {
-  const result = new Map<HexKey, number>()
-  for (const key of there.visible) {
-    if (here.visible.has(key)) continue
-    result.set(key, explored.has(key) ? REMEMBERED : 0)
-  }
-  for (const key of here.visible) result.delete(key)
-})
-
-time('explored set copy', 2000, () => {
-  const next = new Set(explored)
-  for (const key of here.visible) next.add(key)
-})
-
-const fogHere = fogMapFrom(here.visible, explored)
-const fogThere = fogMapFrom(there.visible, explored)
-let flip = false
-
-time('setFog after one step', 2000, () => {
-  grid.setFog(flip ? fogHere : fogThere)
-  flip = !flip
-})
-
-grid.setFog(fogHere)
-time('setFog with nothing changed', 2000, () => {
-  grid.setFog(fogHere)
-})
-
-grid.dispose()
 scene.dispose()
 engine.dispose()

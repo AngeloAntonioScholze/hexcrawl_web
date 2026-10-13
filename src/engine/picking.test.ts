@@ -10,7 +10,7 @@ import { createHexGrid, type HexGrid } from './hexGrid'
 // Deliberately imports nothing from Babylon's Ray module: this exercises the
 // same module graph the app has, so dropping scene.ts's side-effect import
 // fails these tests instead of only breaking the browser.
-import { hexFromPick } from './scene'
+import { hexFromPick, hexUnderPointer } from './scene'
 
 const layout = createLayout(2)
 const WIDTH = 512
@@ -24,17 +24,22 @@ let scene: Scene
 let iso: IsoCamera
 let grid: HexGrid
 
-const screenPick = (x: number, y: number): Axial | null =>
-  hexFromPick(
-    grid,
-    scene.pick(x, y, (mesh) => mesh === grid.mesh),
-  )
+// scene.pick is the reference the ground ray hover uses must agree with.
+const pickers = {
+  'scene.pick': (x: number, y: number): Axial | null =>
+    hexFromPick(
+      grid,
+      scene.pick(x, y, (mesh) => mesh === grid.mesh),
+    ),
+  'ground ray': (x: number, y: number): Axial | null =>
+    hexUnderPointer(grid, layout, scene.createPickingRay(x, y, Matrix.Identity(), iso.camera)),
+}
 
 // Where a hex's top face lands on screen under the current camera.
-const screenPositionOf = (hex: Axial): { x: number; y: number } => {
+const screenPositionOf = (hex: Axial, top = 1): { x: number; y: number } => {
   const world = hexToWorld(layout, hex)
   const projected = Vector3.Project(
-    new Vector3(world.x, 1, world.z),
+    new Vector3(world.x, top, world.z),
     Matrix.Identity(),
     scene.getTransformMatrix(),
     iso.camera.viewport.toGlobal(WIDTH, HEIGHT),
@@ -71,7 +76,7 @@ afterEach(() => {
   engine.dispose()
 })
 
-describe('screen picking', () => {
+describe.each(Object.entries(pickers))('screen picking with %s', (_, screenPick) => {
   it('resolves the hex under the pointer', () => {
     for (const hex of [
       { q: 0, r: 0 },
@@ -124,6 +129,23 @@ describe('screen picking', () => {
 
     const left = screenPositionOf({ q: 0, r: 0 })
     expect(screenPick(left.x, left.y)).toBeNull()
+  })
+
+  // At the map's lean a mountain's top is drawn over the ground of the hexes
+  // behind it, so the pointer on its top must land on it and not behind.
+  it('resolves the top of a tall hex, not the ground behind it', () => {
+    const hex = { q: 0, r: 1 }
+    grid.setWindow(
+      spiral({ q: 0, r: 0 }, 4).map((each) => ({
+        hex: each,
+        elevation: each.q === hex.q && each.r === hex.r ? 6 : 1,
+        color: new Color3(0.3, 0.3, 0.3),
+      })),
+    )
+    scene.render()
+
+    const screen = screenPositionOf(hex, 6)
+    expect(screenPick(screen.x, screen.y)).toEqual(hex)
   })
 
   // The flat prism sits empty until it takes over. The render loop's readiness

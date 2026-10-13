@@ -33,6 +33,8 @@ export interface HexGrid {
   readonly detailed: boolean
   /** How far the rounded edge reaches in from the rim, in world units. */
   readonly bevelRadius: number
+  /** Centre-to-corner radius of a drawn tile: the layout size less the border gap. */
+  readonly tileSize: number
   /** The most hexes the buffers hold. */
   readonly capacity: number
   /** Hexes drawn right now; never more than the capacity. */
@@ -41,6 +43,8 @@ export interface HexGrid {
   readonly keys: readonly HexKey[]
   indexOf(key: HexKey): number | undefined
   hexAt(index: number): Axial | undefined
+  /** The height the hex in this slot is drawn at, which fog may hold below its elevation. */
+  heightAt(index: number): number
   colorAt(index: number): [number, number, number, number]
   /** Replaces every tinted hex at once; anything absent returns to its terrain colour. */
   setOverlay(overlay: ReadonlyMap<HexKey, Color3>): void
@@ -49,6 +53,14 @@ export interface HexGrid {
    * colour. Anything absent is fully clear, so an empty map lifts the fog.
    */
   setFog(clarity: ReadonlyMap<HexKey, number>): void
+  /**
+   * Moves the fog on the hexes given and leaves every other one alone: 1 lifts
+   * the fog, anything less buries it. A party step changes the clarity of a few
+   * hundred hexes out of a window of tens of thousands, and the scan setFog
+   * makes over the whole window is most of what that step costs. A hex not in
+   * the window is remembered anyway, so it arrives already fogged.
+   */
+  updateFog(changed: ReadonlyMap<HexKey, number>): void
   /**
    * Puts the grid on a different set of hexes, reusing the same buffers: the
    * first window, or the same window re-terrained. The tint and fog layers ride
@@ -119,6 +131,7 @@ export function createHexGrid(scene: Scene, layout: Layout, options: HexGridOpti
   const colors = new Float32Array(capacity * COLOR)
   const baseColors = new Float32Array(capacity * BASE)
   const clarity = new Float32Array(capacity).fill(1)
+  const elevations = new Float32Array(capacity)
   const qs = new Int32Array(capacity)
   const rs = new Int32Array(capacity)
   const keys: HexKey[] = []
@@ -166,7 +179,7 @@ export function createHexGrid(scene: Scene, layout: Layout, options: HexGridOpti
     const m = index * MATRIX
     matrices.fill(0, m, m + MATRIX)
     matrices[m] = 1
-    matrices[m + 5] = Math.max(MIN_ELEVATION, tile.elevation)
+    elevations[index] = Math.max(MIN_ELEVATION, tile.elevation)
     matrices[m + 10] = 1
     matrices[m + 12] = world.x
     matrices[m + 14] = world.z
@@ -203,6 +216,16 @@ export function createHexGrid(scene: Scene, layout: Layout, options: HexGridOpti
     colors[offset + 3] = 1
   }
 
+  // Ground nobody has seen lies flat, or a mountain's silhouette would stand
+  // up out of the fog and give away what the fog is there to hide.
+  const raise = (index: number): boolean => {
+    const height = clarity[index] > 0 ? elevations[index] : MIN_ELEVATION
+    const at = index * MATRIX + 5
+    if (matrices[at] === height) return false
+    matrices[at] = height
+    return true
+  }
+
   const append = (tile: HexTile): void => {
     const index = count++
     const key = hexKey(tile.hex)
@@ -215,6 +238,7 @@ export function createHexGrid(scene: Scene, layout: Layout, options: HexGridOpti
     // The fog and the tint belong to the hex, not to the slot it landed in, so
     // both are read back for whatever moved into this one.
     clarity[index] = fog.get(key) ?? 1
+    raise(index)
     composite(index)
   }
 
@@ -229,6 +253,7 @@ export function createHexGrid(scene: Scene, layout: Layout, options: HexGridOpti
       colors.copyWithin(index * COLOR, last * COLOR, count * COLOR)
       baseColors.copyWithin(index * BASE, last * BASE, count * BASE)
       clarity[index] = clarity[last]
+      elevations[index] = elevations[last]
       qs[index] = qs[last]
       rs[index] = rs[last]
       keys[index] = keys[last]
@@ -261,7 +286,9 @@ export function createHexGrid(scene: Scene, layout: Layout, options: HexGridOpti
       if (x > maxX) maxX = x
       if (z < minZ) minZ = z
       if (z > maxZ) maxZ = z
-      if (matrices[m + 5] > top) top = matrices[m + 5]
+      // The real height rather than the drawn one, so lifting the fog off a
+      // mountain never pokes it out of bounds the window has not refreshed.
+      if (elevations[index] > top) top = elevations[index]
     }
 
     if (count === 0) {
@@ -272,6 +299,27 @@ export function createHexGrid(scene: Scene, layout: Layout, options: HexGridOpti
       high.set(maxX + layout.size, top, maxZ + layout.size)
     }
     mesh.getBoundingInfo().reConstruct(low, high)
+  }
+
+  // Only the stretch of slots whose height changed goes up, not the window.
+  let raisedFrom = Infinity
+  let raisedTo = -1
+
+  const refog = (index: number, fade: number): void => {
+    clarity[index] = fade
+    if (raise(index)) {
+      if (index < raisedFrom) raisedFrom = index
+      if (index > raisedTo) raisedTo = index
+    }
+    composite(index)
+  }
+
+  const uploadHeights = (): void => {
+    if (raisedTo >= 0) {
+      mesh.thinInstancePartialBufferUpdate('matrix', raisedTo - raisedFrom + 1, raisedFrom)
+    }
+    raisedFrom = Infinity
+    raisedTo = -1
   }
 
   const commit = (): void => {
@@ -285,6 +333,7 @@ export function createHexGrid(scene: Scene, layout: Layout, options: HexGridOpti
     keys,
     capacity,
     bevelRadius: bevelRadius(size, options.bevel),
+    tileSize: size,
 
     get mesh() {
       return mesh
@@ -300,6 +349,7 @@ export function createHexGrid(scene: Scene, layout: Layout, options: HexGridOpti
 
     indexOf: (key) => indexByKey.get(key),
     hexAt: (index) => (index < count ? { q: qs[index], r: rs[index] } : undefined),
+    heightAt: (index) => matrices[index * MATRIX + 5],
     colorAt: (index) => [
       colors[index * COLOR],
       colors[index * COLOR + 1],
@@ -340,12 +390,36 @@ export function createHexGrid(scene: Scene, layout: Layout, options: HexGridOpti
       for (let index = 0; index < count; index++) {
         const fade = fog.get(keys[index]) ?? 1
         if (fade === clarity[index]) continue
-        clarity[index] = fade
-        composite(index)
+        refog(index, fade)
         changed = true
       }
 
-      if (changed) uploadColors()
+      if (changed) {
+        uploadColors()
+        uploadHeights()
+      }
+    },
+
+    updateFog(changed): void {
+      let touched = false
+
+      for (const [key, fade] of changed) {
+        // Clear is the absence of fog rather than a clarity of 1, so the map
+        // holds only what is fogged however long the crawl runs.
+        if (fade === 1) fog.delete(key)
+        else fog.set(key, fade)
+
+        const index = indexByKey.get(key)
+        if (index === undefined || clarity[index] === fade) continue
+
+        refog(index, fade)
+        touched = true
+      }
+
+      if (touched) {
+        uploadColors()
+        uploadHeights()
+      }
     },
 
     setWindow(tiles): void {

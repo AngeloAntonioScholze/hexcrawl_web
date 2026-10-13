@@ -1,11 +1,13 @@
 <script setup lang="ts">
 import { Color3 } from '@babylonjs/core/Maths/math.color'
-import { computed, defineAsyncComponent, ref, shallowRef, triggerRef, watch } from 'vue'
+import { computed, defineAsyncComponent, ref, watch, watchEffect } from 'vue'
 import { hexKey, parseKey, type HexKey } from '../hex/coords'
 import { createLayout } from '../hex/layout'
 import MiniMap from './MiniMap.vue'
 import { gridCapacity, maxZoomFor, useHexWindow } from '../composables/useHexWindow'
 import { useTurnPlayback } from '../composables/useTurnPlayback'
+import { createFogStepper } from '../engine/fogStepper'
+import type { HexGrid } from '../engine/hexGrid'
 import { useHexScene } from '../engine/useHexScene'
 import { useHexMapStore } from '../stores/hexMap'
 import { createTerrainField } from '../terrain/field'
@@ -26,14 +28,12 @@ const props = withDefaults(
 )
 
 const HOVER_TINT = new Color3(0.55, 0.62, 0.72)
+const SELECT_TINT = new Color3(0.98, 0.78, 0.25)
 /** How much of an entity's colour its trail keeps. */
 const TRAIL_TINT = 0.72
 const HEAD_TINT = new Color3(0.99, 0.93, 0.7)
 const START_TINT = new Color3(0.44, 0.78, 0.5)
 const GOAL_TINT = new Color3(0.86, 0.36, 0.36)
-
-/** How much of a hex survives once the party has walked on past it. */
-const REMEMBERED = 0.42
 
 // Dev-only; the static DEV check lets the build drop the chunk entirely.
 const RenderStats = import.meta.env.DEV
@@ -75,23 +75,24 @@ const { hexScene } = useHexScene(canvas, {
   gap: props.gap,
   bevel: props.bevel,
   onHover: store.setHovered,
-  onSelect: store.select,
+  onSelect: store.click,
 })
 
 /**
  * The keys the grid is holding right now; the fog is drawn over these. The grid
- * hands over its own live array, the same one every time, so the ref is
- * triggered by hand rather than by a new value.
+ * hands over its own live array, the same one every time, so what says the
+ * window moved is the tick beside it rather than a new value.
  */
-const windowed = shallowRef<readonly HexKey[]>([])
+let windowKeys: readonly HexKey[] = []
+const windowTick = ref(0)
 
 useHexWindow(
   hexScene,
   layout,
   () => store.field,
   (keys) => {
-    windowed.value = keys
-    triggerRef(windowed)
+    windowKeys = keys
+    windowTick.value += 1
   },
 )
 
@@ -117,27 +118,29 @@ const overlay = computed(() => {
 
   if (store.start) result.set(store.start, START_TINT)
   if (store.goal) result.set(store.goal, GOAL_TINT)
+
+  // Last of all: the hex the DM picked must read as picked whatever runs over it.
+  if (store.selectedHex) result.set(store.selectedHex, SELECT_TINT)
   return result
 })
 
-// Everything the party has never seen is buried, and ground it has left behind
-// keeps a dimmer copy of itself: the map remembers, the party does not watch.
-const fog = computed(() => {
-  const result = new Map<HexKey, number>()
-  if (!store.fog) return result
+const fogStepper = createFogStepper()
 
-  // Only the window is drawn, so only the window needs fogging: a fog map over
-  // a world of a quarter of a million hexes would be rebuilt on every step.
-  for (const key of windowed.value) {
-    if (store.visible.has(key)) continue
-    result.set(key, store.explored.has(key) ? REMEMBERED : 0)
-  }
-  return result
-})
+const paintFog = (grid: HexGrid): void =>
+  fogStepper.paint(grid, {
+    fog: store.fog,
+    visible: store.visible,
+    windowKeys,
+    windowTick: windowTick.value,
+    explored: store.exploredState,
+  })
 
 watch(overlay, (next) => hexScene.value?.grid.setOverlay(next))
 
-watch(fog, (next) => hexScene.value?.grid.setFog(next))
+watchEffect(() => {
+  const grid = hexScene.value?.grid
+  if (grid) paintFog(grid)
+})
 
 // The disc the party can see, with the pockets the terrain hides carved out of
 // it, so a ridge shows up as the shadow it casts rather than as missing fog.
@@ -173,7 +176,7 @@ watch(
 )
 
 const tokens = computed(() =>
-  store.tokens.map(({ id, hex, color }) => ({ id, hex: hex ? parseKey(hex) : null, color })),
+  store.tokens.map((token) => ({ ...token, hex: token.hex ? parseKey(token.hex) : null })),
 )
 
 // Everything the store knows, pushed at the scene in one go. Needed both when
@@ -184,7 +187,10 @@ const pushEverything = (created: NonNullable<typeof hexScene.value>): void => {
   // than the new world allows asks the grid for more than it holds.
   created.setMaxZoom(maxZoom())
   created.grid.setOverlay(overlay.value)
-  created.grid.setFog(fog.value)
+  // Neither the window nor the crawl is anything this fog has seen before, so
+  // it goes down whole rather than as a step off the last painting.
+  fogStepper.reset()
+  paintFog(created.grid)
   created.arrows.setPaths(store.paths)
   created.tokens.setEntries(tokens.value)
   created.stops.setStops(store.stops.hexes, store.stops.color)

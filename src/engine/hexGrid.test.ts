@@ -1,7 +1,7 @@
 import { NullEngine } from '@babylonjs/core/Engines/nullEngine'
 import { Color3 } from '@babylonjs/core/Maths/math.color'
 import { Scene } from '@babylonjs/core/scene'
-import { afterEach, beforeEach, describe, expect, it } from 'vitest'
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { hexKey, spiral, type Axial } from '../hex/coords'
 import { createLayout, hexToWorld } from '../hex/layout'
 import { createHexGrid, wantsDetail, type HexGrid, type HexTile } from './hexGrid'
@@ -241,12 +241,133 @@ describe('fog', () => {
     expectColor(0, FOG)
   })
 
+  it('moves the fog on the hexes given and leaves the rest as they were', () => {
+    grid.setFog(new Map([[keyOf(0), 0]]))
+    grid.updateFog(new Map([[keyOf(1), 0]]))
+
+    expectColor(0, FOG)
+    expectColor(1, FOG)
+  })
+
+  it('lifts the fog from a hex handed back full clarity', () => {
+    grid.setFog(new Map([[keyOf(0), 0]]))
+    grid.updateFog(new Map([[keyOf(0), 1]]))
+    expectColor(0, [BASE.r, BASE.g, BASE.b])
+  })
+
+  it('remembers a hex it was told about before the window reached it', () => {
+    const outside = hexKey({ q: 20, r: 0 })
+    grid.updateFog(new Map([[outside, 0]]))
+
+    grid.setWindow([...tiles, { hex: { q: 20, r: 0 }, elevation: 1, color: BASE }])
+
+    expect(grid.colorAt(grid.indexOf(outside)!)[0]).toBeCloseTo(FOG[0], 6)
+  })
+
+  it('forgets a hex once the fog is lifted, so a later window finds it clear', () => {
+    const outside = hexKey({ q: 20, r: 0 })
+    grid.updateFog(new Map([[outside, 0]]))
+    grid.updateFog(new Map([[outside, 1]]))
+
+    grid.setWindow([...tiles, { hex: { q: 20, r: 0 }, elevation: 1, color: BASE }])
+
+    expect(grid.colorAt(grid.indexOf(outside)!)[0]).toBeCloseTo(BASE.r, 6)
+  })
+
+  it('leaves a whole-map replacement holding only what it was given', () => {
+    grid.updateFog(new Map([[keyOf(0), 0]]))
+    grid.setFog(new Map([[keyOf(1), 0]]))
+
+    expectColor(0, [BASE.r, BASE.g, BASE.b])
+    expectColor(1, FOG)
+  })
+
   it('fogs a tinted hex that was clear when the tint went on', () => {
     grid.setOverlay(new Map([[keyOf(0), new Color3(1, 1, 1)]]))
     grid.setFog(new Map([[keyOf(0), 0]]))
 
     const lit = FOG.map((channel) => channel + (1 - channel) * TINT_FLOOR)
     expectColor(0, lit as [number, number, number])
+  })
+})
+
+describe('fog flattening', () => {
+  const MIN = 0.05
+  const keyOf = (index: number): ReturnType<typeof hexKey> => hexKey(tiles[index].hex)
+  const heightAt = (index: number): number => grid.mesh.thinInstanceGetWorldMatrices()[index].m[5]
+
+  it('lays a hex nobody has seen flat', () => {
+    grid.setFog(new Map([[keyOf(0), 0]]))
+    expect(heightAt(0)).toBeCloseTo(MIN, 6)
+  })
+
+  it('keeps the terrain height of remembered and visible hexes', () => {
+    grid.setFog(new Map([[keyOf(0), 0.42]]))
+    const matrices = grid.mesh.thinInstanceGetWorldMatrices()
+    expect(matrices[0].m[5]).toBeCloseTo(tiles[0].elevation, 6)
+    expect(matrices[1].m[5]).toBeCloseTo(tiles[1].elevation, 6)
+  })
+
+  it('flattens through a single step of the fog', () => {
+    grid.updateFog(new Map([[keyOf(2), 0]]))
+    expect(heightAt(2)).toBeCloseTo(MIN, 6)
+  })
+
+  it('raises a hex back to its terrain once it is seen', () => {
+    const fresh = createHexGrid(scene, layout, { capacity: 100 })
+    fresh.setFog(new Map([[keyOf(0), 0]]))
+    fresh.setWindow(tiles)
+    fresh.updateFog(new Map([[keyOf(0), 0.42]]))
+    expect(fresh.mesh.thinInstanceGetWorldMatrices()[0].m[5]).toBeCloseTo(tiles[0].elevation, 6)
+    fresh.dispose()
+  })
+
+  it('arrives flat when the window reaches ground still unexplored', () => {
+    const outside = hexKey({ q: 20, r: 0 })
+    grid.updateFog(new Map([[outside, 0]]))
+    grid.setWindow([...tiles, { hex: { q: 20, r: 0 }, elevation: 3, color: BASE }])
+    expect(heightAt(grid.indexOf(outside)!)).toBeCloseTo(MIN, 6)
+  })
+
+  it('keeps a flattened hex flat when it changes slot', () => {
+    const last = tiles.length - 1
+    grid.setFog(new Map([[keyOf(last), 0]]))
+    grid.moveWindow((q, r) => q !== tiles[0].hex.q || r !== tiles[0].hex.r, [])
+    expect(grid.indexOf(keyOf(last))).toBe(0)
+    const matrices = grid.mesh.thinInstanceGetWorldMatrices()
+    expect(matrices[0].m[5]).toBeCloseTo(MIN, 6)
+    expect(matrices[1].m[5]).toBeCloseTo(tiles[1].elevation, 6)
+  })
+
+  it('uploads only the stretch of heights that changed', () => {
+    const upload = vi.spyOn(grid.mesh, 'thinInstancePartialBufferUpdate')
+    grid.updateFog(
+      new Map([
+        [keyOf(4), 0],
+        [keyOf(6), 0],
+      ]),
+    )
+    expect(upload).toHaveBeenCalledWith('matrix', 3, 4)
+  })
+
+  it('leaves the heights alone when only the shade of the fog moves', () => {
+    grid.setFog(new Map([[keyOf(0), 0.42]]))
+    const upload = vi.spyOn(grid.mesh, 'thinInstancePartialBufferUpdate')
+    grid.updateFog(new Map([[keyOf(0), 1]]))
+    expect(upload).not.toHaveBeenCalledWith('matrix', expect.anything(), expect.anything())
+  })
+
+  it('keeps the grid bounds over a mountain still under fog', () => {
+    grid.setFog(new Map(tiles.map((tile) => [hexKey(tile.hex), 0])))
+    grid.setWindow(tiles)
+    const top = Math.max(...tiles.map((tile) => tile.elevation))
+    expect(grid.mesh.getBoundingInfo().boundingBox.maximum.y).toBeCloseTo(top, 6)
+  })
+
+  it('carries the flat ground over to the zoomed-out prism', () => {
+    grid.setFog(new Map([[keyOf(0), 0]]))
+    grid.setDetail(false)
+    expect(heightAt(0)).toBeCloseTo(MIN, 6)
   })
 })
 
