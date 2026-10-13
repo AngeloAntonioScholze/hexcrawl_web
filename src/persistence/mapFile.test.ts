@@ -191,6 +191,7 @@ describe('parseMapFile', () => {
 
   it.each<[string, (map: Loose) => void, string]>([
     ['a missing field', (map) => delete map.fog, 'fog'],
+    ['a field added later but malformed', (map) => (map.roads = null), 'roads'],
     ['a field of the wrong type', (map) => (map.worldRadius = '150'), 'worldRadius'],
     ['a number that is not finite', (map) => (map.terrain.relief = null), 'terrain'],
     ['a negative turn', (map) => (map.turn = -1), 'turn'],
@@ -238,10 +239,8 @@ describe('parseMapFile', () => {
     ],
     ['an unknown resource', (map) => (map.resources[0].type = 'mithril'), 'resources'],
     ['odds above certainty', (map) => (map.resourceChances.forest = 2), 'resourceChances'],
-    ['a terrain with no odds', (map) => delete map.resourceChances.peaks, 'resourceChances'],
     ['a fractional spacing', (map) => (map.resourceSpacing = 2.5), 'resourceSpacing'],
     ['a fog edit with no side', (map) => (map.fogEdits[0].revealed = 1), 'fogEdits'],
-    ['no fog edits at all', (map) => delete map.fogEdits, 'fogEdits'],
     [
       'an unknown override',
       (map) => (map.encounterOverrides[1].kind = 'swap'),
@@ -273,7 +272,6 @@ describe('parseMapFile', () => {
       (map) => delete map.encounterOverrides[2].entry.title,
       'encounterOverrides',
     ],
-    ['a road with no roads list', (map) => delete map.roads, 'roads'],
     ['a road end that is not a hex', (map) => (map.roads[0].b = 'east'), 'roads'],
     ['a road between hexes apart', (map) => (map.roads[0].b = '2,0'), 'roads'],
     ['a road from a hex to itself', (map) => (map.roads[0].b = '0,0'), 'roads'],
@@ -287,9 +285,52 @@ describe('parseMapFile', () => {
       (map) => (map.terrainOverrides[0].hex = 'here'),
       'terrainOverrides',
     ],
-    ['no painted ground at all', (map) => delete map.terrainOverrides, 'terrainOverrides'],
   ])('turns away %s, naming the field', (_, edit, field) => {
     expect(rejected(tampered((file) => edit(file.map)))).toContain(`"${field}"`)
+  })
+
+  it.each([
+    'terrain',
+    'worldRadius',
+    'fog',
+    'showSight',
+    'showHistory',
+    'dmView',
+    'turn',
+    'selectedId',
+    'entities',
+    'origins',
+    'record',
+    'states',
+    'queue',
+    'notes',
+    'events',
+    'locations',
+    'merchants',
+    'resources',
+    'resourceChances',
+    'resourceSpacing',
+  ])('turns away a file with no %s, which every export has had', (field) => {
+    expect(rejected(tampered((file) => delete file.map[field]))).toContain(`"${field}"`)
+  })
+
+  it.each<[keyof MapSnapshot, unknown]>([
+    ['fogEdits', []],
+    ['encounterOverrides', []],
+    ['catalogOverrides', []],
+    ['roads', []],
+    ['terrainOverrides', []],
+  ])('opens a file from before %s existed with the default', (field, fallback) => {
+    const result = parseMapFile(tampered((file) => delete file.map[field]))
+    expect(result).toEqual({ ok: true, snapshot: { ...snapshot(), [field]: fallback } })
+  })
+
+  it('gives a terrain the file has no odds for the default odds', () => {
+    const result = parseMapFile(tampered((file) => delete file.map.resourceChances.peaks))
+    expect(result.ok && result.snapshot.resourceChances).toEqual({
+      ...snapshot().resourceChances,
+      peaks: defaultResourceChances().peaks,
+    })
   })
 })
 

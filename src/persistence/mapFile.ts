@@ -169,7 +169,7 @@ const isCatalogOverrides: Guard<readonly CatalogOverride[]> = (
 ): value is readonly CatalogOverride[] =>
   listOf(isCatalogOverride)(value) && new Set(value.map((one) => one.id)).size === value.length
 
-/** One check per snapshot field; a new field is one new line here. */
+/** One check per snapshot field; a new field is one line here and one in ADDED_FIELD_DEFAULTS. */
 const SNAPSHOT_FIELDS: { [K in keyof MapSnapshot]-?: Guard<MapSnapshot[K]> } = {
   terrain: shape<TerrainControls>({
     seed: isNumber,
@@ -277,6 +277,53 @@ const SNAPSHOT_FIELDS: { [K in keyof MapSnapshot]-?: Guard<MapSnapshot[K]> } = {
   ),
 }
 
+/** The fields every version 1 file has carried since the first export. */
+type OriginalField = keyof Pick<
+  MapSnapshot,
+  | 'terrain'
+  | 'worldRadius'
+  | 'fog'
+  | 'showSight'
+  | 'showHistory'
+  | 'dmView'
+  | 'turn'
+  | 'selectedId'
+  | 'entities'
+  | 'origins'
+  | 'record'
+  | 'states'
+  | 'queue'
+  | 'notes'
+  | 'events'
+  | 'locations'
+  | 'merchants'
+  | 'resources'
+  | 'resourceChances'
+  | 'resourceSpacing'
+>
+
+// Every later field must say what a file from before it existed stands for, or
+// that file stops opening the day the field ships.
+const ADDED_FIELD_DEFAULTS: {
+  [K in Exclude<keyof MapSnapshot, OriginalField>]-?: () => MapSnapshot[K]
+} = {
+  fogEdits: () => [],
+  encounterOverrides: () => [],
+  catalogOverrides: () => [],
+  roads: () => [],
+  terrainOverrides: () => [],
+}
+
+const withDefault = (key: string, value: unknown): unknown => {
+  if (value === undefined && Object.hasOwn(ADDED_FIELD_DEFAULTS, key)) {
+    return ADDED_FIELD_DEFAULTS[key as keyof typeof ADDED_FIELD_DEFAULTS]()
+  }
+  // Odds for a terrain the file never knew fall back to the default, as they do
+  // when an older save is loaded.
+  if (key === 'resourceChances' && isObject(value)) return { ...defaultResourceChances(), ...value }
+  return value
+}
+
 export function serialiseMap(snapshot: MapSnapshot): string {
   return JSON.stringify(
     { format: MAP_FILE_FORMAT, version: MAP_FILE_VERSION, map: snapshot },
@@ -310,10 +357,11 @@ export function parseMapFile(text: string): MapFileResult {
 
   const snapshot: Record<string, unknown> = {}
   for (const [key, guard] of Object.entries(SNAPSHOT_FIELDS)) {
-    if (!(guard as Guard<unknown>)(map[key])) {
+    const value = withDefault(key, map[key])
+    if (!(guard as Guard<unknown>)(value)) {
       return fail(`This map file is damaged: "${key}" is missing or malformed.`)
     }
-    snapshot[key] = map[key]
+    snapshot[key] = value
   }
   return { ok: true, snapshot: snapshot as unknown as MapSnapshot }
 }
