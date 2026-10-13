@@ -9,11 +9,14 @@ import {
   buildGem,
   buildResourceModel,
   createResourceMarkers,
+  FOOTPRINT,
   instanceBuffer,
   markPlacements,
   MAX_CLUSTER,
   placementsByType,
   resourceMarks,
+  SLOTS,
+  type MarkPlacement,
   type ResourceMark,
   type ResourceMarkers,
 } from './resourceMarkers'
@@ -71,49 +74,84 @@ describe('resourceMarks', () => {
 
 describe('markPlacements', () => {
   const elevationOf = (hex: Axial): number => (hex.q === 3 ? 4 : 1)
+  const centre = hexToWorld(layout, { q: 0, r: 0 })
+  const footprint = FOOTPRINT * layout.size
+  const fromCentre = (placed: MarkPlacement): number =>
+    Math.hypot(placed.x - centre.x, placed.z - centre.z)
 
-  it('stands a lone model on the tile top, inside the hex', () => {
-    const [placed] = markPlacements(layout, mark('3,-1', ['fish']), elevationOf, 0.5)
-    const centre = hexToWorld(layout, { q: 3, r: -1 })
-    expect(placed.type).toBe('fish')
-    expect(placed.y).toBeCloseTo(4.5)
-    expect(Math.hypot(placed.x - centre.x, placed.z - centre.z)).toBeLessThan(layout.size * 0.8)
-    expect(placed.scale).toBe(1)
+  /** The flat top of a drawn tile: inside the gap between tiles and the rounded rim. */
+  const capApothem = layout.size * 0.94 * (1 - 0.14) * (Math.sqrt(3) / 2)
+
+  const crowds = [['iron'], ['iron', 'stone'], ['iron', 'stone', 'gems']].map(
+    (types) => [types.join(' + '), types as ResourceType[]] as const,
+  )
+
+  it('stands every clump on the tile top', () => {
+    const placed = markPlacements(layout, mark('3,-1', ['fish']), elevationOf, 0.5)
+    expect(placed.every((one) => one.y === 4.5)).toBe(true)
   })
 
-  it('lays a buried model on the flattened tile instead', () => {
-    const [placed] = markPlacements(layout, mark('3,-1', ['fish'], true), elevationOf, 0.5)
-    expect(placed.y).toBeCloseTo(MIN_ELEVATION + 0.5)
+  it('lays a buried clump on the flattened tile instead', () => {
+    const placed = markPlacements(layout, mark('3,-1', ['fish'], true), elevationOf, 0.5)
+    expect(placed.every((one) => one.y === MIN_ELEVATION + 0.5)).toBe(true)
   })
 
-  it('stands several kinds apart around the same point, smaller, and no more than a few', () => {
-    const [alone] = markPlacements(layout, mark('0,0', ['iron']), elevationOf, 0)
-    const crowd = markPlacements(
+  it.each(crowds)('fills the hex with %s, no clump reaching past the flat top', (_, types) => {
+    const placed = markPlacements(layout, mark('0,0', types), elevationOf, 0)
+    expect(placed).toHaveLength(SLOTS)
+    for (const one of placed) {
+      for (let side = 0; side < 6; side++) {
+        const angle = (Math.PI / 3) * side
+        const reach =
+          (one.x - centre.x) * Math.cos(angle) + (one.z - centre.z) * Math.sin(angle) + footprint
+        expect(reach).toBeLessThan(capApothem)
+      }
+    }
+    // Between them the clumps reach out over most of the hex.
+    expect(Math.min(...placed.map(fromCentre)) + footprint).toBeGreaterThan(layout.size * 0.7)
+  })
+
+  it.each(crowds)('keeps the middle clear for tokens with %s', (_, types) => {
+    for (const one of markPlacements(layout, mark('0,0', types), elevationOf, 0)) {
+      expect(fromCentre(one) - footprint).toBeGreaterThan(layout.size * 0.25)
+    }
+  })
+
+  it.each(crowds)('never overlaps two clumps of %s', (_, types) => {
+    const placed = markPlacements(layout, mark('0,0', types), elevationOf, 0)
+    for (const [i, one] of placed.entries()) {
+      for (const other of placed.slice(i + 1)) {
+        expect(Math.hypot(one.x - other.x, one.z - other.z)).toBeGreaterThan(2 * footprint)
+      }
+    }
+  })
+
+  it.each(crowds)('gives each of %s an equal run of neighbouring slots', (_, types) => {
+    const placed = markPlacements(layout, mark('0,0', types), elevationOf, 0)
+    expect(placed.map((one) => one.type)).toEqual(
+      types.flatMap((type) => Array<ResourceType>(SLOTS / types.length).fill(type)),
+    )
+  })
+
+  it('shows no more than a few kinds', () => {
+    const placed = markPlacements(
       layout,
       mark('0,0', ['iron', 'stone', 'gems', 'crystal']),
       elevationOf,
       0,
     )
-    expect(crowd.map((placed) => placed.type)).toEqual(['iron', 'stone', 'gems'])
-    expect(crowd).toHaveLength(MAX_CLUSTER)
+    expect(new Set(placed.map((one) => one.type))).toEqual(new Set(['iron', 'stone', 'gems']))
+    expect(MAX_CLUSTER).toBe(3)
+  })
 
-    const middle = {
-      x: crowd.reduce((sum, placed) => sum + placed.x, 0) / crowd.length,
-      z: crowd.reduce((sum, placed) => sum + placed.z, 0) / crowd.length,
+  it('turns and sizes clumps differently, the same way every time', () => {
+    const placed = markPlacements(layout, mark('4,-2', ['herbs']), elevationOf, 0)
+    expect(new Set(placed.map((one) => one.yaw.toFixed(3))).size).toBe(SLOTS)
+    for (const one of placed) {
+      expect(one.scale).toBeGreaterThan(0.8)
+      expect(one.scale).toBeLessThanOrEqual(1)
     }
-    expect(middle.x).toBeCloseTo(alone.x)
-    expect(middle.z).toBeCloseTo(alone.z)
-
-    const centre = hexToWorld(layout, { q: 0, r: 0 })
-    for (const [i, placed] of crowd.entries()) {
-      expect(placed.scale).toBeLessThan(1)
-      expect(Math.hypot(placed.x - centre.x, placed.z - centre.z)).toBeLessThan(layout.size * 0.8)
-      for (const other of crowd.slice(i + 1)) {
-        expect(Math.hypot(placed.x - other.x, placed.z - other.z)).toBeGreaterThan(
-          layout.size * 0.2,
-        )
-      }
-    }
+    expect(markPlacements(layout, mark('4,-2', ['herbs']), elevationOf, 0)).toEqual(placed)
   })
 })
 
@@ -126,23 +164,27 @@ describe('placementsByType', () => {
       0,
     )
     expect(Object.keys(byType).sort()).toEqual([...RESOURCE_TYPES].sort())
-    expect(byType.iron).toHaveLength(2)
-    expect(byType.stone).toHaveLength(1)
-    expect(byType.fish).toHaveLength(1)
+    expect(byType.iron).toHaveLength(SLOTS + SLOTS / 2)
+    expect(byType.stone).toHaveLength(SLOTS / 2)
+    expect(byType.fish).toHaveLength(SLOTS)
     expect(byType.whales).toEqual([])
     expect(byType.iron.every((placed) => placed.type === 'iron')).toBe(true)
   })
 })
 
 describe('instanceBuffer', () => {
-  it('writes one scaled, translated matrix per placement', () => {
+  it('writes one scaled, turned, translated matrix per placement', () => {
     const buffer = instanceBuffer([
-      { type: 'salt', x: 1, y: 2, z: 3, scale: 1 },
-      { type: 'salt', x: 4, y: 5, z: 6, scale: 0.5 },
+      { type: 'salt', x: 1, y: 2, z: 3, scale: 1, yaw: 0 },
+      { type: 'salt', x: 4, y: 5, z: 6, scale: 0.5, yaw: Math.PI / 2 },
     ])
     expect(buffer).toHaveLength(32)
     expect([...buffer.slice(12, 15)]).toEqual([1, 2, 3])
-    expect(buffer[16]).toBe(0.5)
+    expect(buffer[0]).toBe(1)
+    // A quarter turn about the vertical sends x to -z, at half size.
+    expect(buffer[16]).toBeCloseTo(0)
+    expect(buffer[18]).toBeCloseTo(-0.5)
+    expect(buffer[21]).toBeCloseTo(0.5)
     expect([...buffer.slice(28, 31)]).toEqual([4, 5, 6])
   })
 
@@ -175,21 +217,23 @@ describe('buildResourceModel', () => {
     return [Math.min(...along), Math.max(...along)]
   }
 
-  it.each(RESOURCE_TYPES)('builds %s as a small coloured model on the origin', (type) => {
+  it.each(RESOURCE_TYPES)('builds %s as a low, cheap, coloured clump on the origin', (type) => {
     const model = buildResourceModel(type, 2)
     const positions = model.positions!
     expect(positions.length).toBeGreaterThan(0)
     expect(model.normals).toHaveLength(positions.length)
     expect(model.colors).toHaveLength((positions.length / 3) * 4)
+    expect(model.indices!.length / 3).toBeLessThanOrEqual(128)
 
-    // Feet on the ground, give or take a mound sunk into the tile, and no taller than the gem.
+    // Feet on the ground, a rock bedded in a little, and low beside a token.
     const [low, high] = extent(positions, 1)
-    expect(low).toBeGreaterThan(-0.6)
-    expect(low).toBeLessThan(0.5)
-    expect(high).toBeLessThan(4.01)
-    for (const axis of [0, 2]) {
-      const [from, to] = extent(positions, axis)
-      expect(Math.max(-from, to)).toBeLessThan(1.4)
+    expect(low).toBeGreaterThan(-0.15)
+    expect(low).toBeLessThan(0.1)
+    expect(high).toBeLessThan(1.3)
+
+    // Inside its footprint whichever way the clump is turned.
+    for (let i = 0; i < positions.length; i += 3) {
+      expect(Math.hypot(positions[i], positions[i + 2])).toBeLessThanOrEqual(1)
     }
   })
 
@@ -238,15 +282,15 @@ describe('createResourceMarkers', () => {
     expect(Object.values(markers.meshes).every((mesh) => !mesh.isVisible)).toBe(true)
   })
 
-  it('puts an instance of each kind on each hex holding it, and takes them away again', () => {
+  it('puts the clumps of each kind on each hex holding it, and takes them away again', () => {
     const marks = resourceMarks(resources, { dmView: true, fog: false, explored: new Set() })
     markers.setMarks(marks)
 
-    expect(markers.count).toBe(4)
-    expect(markers.meshes.iron.thinInstanceCount).toBe(1)
-    expect(markers.meshes.stone.thinInstanceCount).toBe(1)
-    expect(markers.meshes.fish.thinInstanceCount).toBe(1)
-    expect(markers.meshes.gems.thinInstanceCount).toBe(1)
+    expect(markers.count).toBe(3 * SLOTS)
+    expect(markers.meshes.iron.thinInstanceCount).toBe(SLOTS / 2)
+    expect(markers.meshes.stone.thinInstanceCount).toBe(SLOTS / 2)
+    expect(markers.meshes.fish.thinInstanceCount).toBe(SLOTS)
+    expect(markers.meshes.gems.thinInstanceCount).toBe(SLOTS)
     expect(markers.meshes.iron.isVisible).toBe(true)
     expect(markers.meshes.whales.isVisible).toBe(false)
 
@@ -266,12 +310,12 @@ describe('createResourceMarkers', () => {
       mark(`${i},0` as HexKey, [RESOURCE_TYPES[i % RESOURCE_TYPES.length]]),
     )
     markers.setMarks(many)
-    expect(markers.count).toBe(3000)
+    expect(markers.count).toBe(3000 * SLOTS)
     const total = Object.values(markers.meshes).reduce(
       (sum, mesh) => sum + mesh.thinInstanceCount,
       0,
     )
-    expect(total).toBe(3000)
+    expect(total).toBe(3000 * SLOTS)
   })
 
   it('leaves nothing behind in the scene once disposed', () => {

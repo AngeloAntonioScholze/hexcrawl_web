@@ -1,10 +1,9 @@
 import { StandardMaterial } from '@babylonjs/core/Materials/standardMaterial'
-import { Color3 } from '@babylonjs/core/Maths/math.color'
+import { Color3, Color4 } from '@babylonjs/core/Maths/math.color'
 import { Matrix, Quaternion, Vector3 } from '@babylonjs/core/Maths/math.vector'
 import { CreateBoxVertexData } from '@babylonjs/core/Meshes/Builders/boxBuilder'
 import { CreateCylinderVertexData } from '@babylonjs/core/Meshes/Builders/cylinderBuilder'
 import { CreateSphereVertexData } from '@babylonjs/core/Meshes/Builders/sphereBuilder'
-import { CreateTorusVertexData } from '@babylonjs/core/Meshes/Builders/torusBuilder'
 import { Mesh } from '@babylonjs/core/Meshes/mesh'
 import { VertexData } from '@babylonjs/core/Meshes/mesh.vertexData'
 import '@babylonjs/core/Meshes/thinInstanceMesh'
@@ -51,25 +50,33 @@ export function resourceMarks(resources: readonly Resource[], view: ResourceView
 }
 
 export interface ResourceMarkerOptions {
-  /** Width of one model, as a fraction of the hex size. */
-  size?: number
   /** Gap between the tile top and a model's base, as a fraction of the hex size. */
   hover?: number
 }
 
-const DEFAULTS = { size: 0.42, hover: 0.03 } as const
-
-/** Off the centre of the hex, so a token standing there does not swallow the models. */
-const OFFSET = { x: 0.45, z: 0.3 }
+const DEFAULTS = { hover: 0.03 } as const
 
 /** Past this many kinds on one hex the rest go unshown: the hex panel lists them all. */
 export const MAX_CLUSTER = 3
 
-/** How far a clustered model stands from the offset point, as a fraction of the hex size. */
-const CLUSTER_RADIUS = 0.17
+/**
+ * A hex's resources stand in a ring of clumps, one toward each corner, so a
+ * lone kind covers the hex and two or three split it into halves or thirds.
+ */
+export const SLOTS = 6
 
-/** A clustered model shrinks a little, so the cluster stays inside its hex. */
-const CLUSTER_SCALE = 0.75
+/** How far a clump stands from the hex centre, as a fraction of the hex size. */
+export const SLOT_DISTANCE = 0.52
+
+/**
+ * Radius of the circle a clump fits in, as a fraction of the hex size. With
+ * the distance above it keeps clear of the bevelled rim, of its neighbours,
+ * and of the middle, where tokens stand.
+ */
+export const FOOTPRINT = 0.24
+
+/** How much smaller than full size a clump may be drawn, so a hex of them does not look stamped. */
+const SHRINK = 0.15
 
 export interface MarkPlacement {
   type: ResourceType
@@ -77,9 +84,20 @@ export interface MarkPlacement {
   y: number
   z: number
   scale: number
+  /** Turn about the vertical, in radians. */
+  yaw: number
 }
 
-/** Where each kind on a marked hex stands: alone on the offset point, or around it. */
+/** A fixed number in [0, 1) for a hex and a draw, so a hex's clumps look the same every frame. */
+function jitter(hex: Axial, draw: number): number {
+  let h =
+    Math.imul(hex.q, 0x27d4eb2d) ^ Math.imul(hex.r, 0x165667b1) ^ Math.imul(draw + 1, 0x9e3779b1)
+  h = Math.imul(h ^ (h >>> 15), 0x85ebca6b)
+  h = Math.imul(h ^ (h >>> 13), 0xc2b2ae35)
+  return ((h ^ (h >>> 16)) >>> 0) / 2 ** 32
+}
+
+/** A clump in every slot of the hex, each kind taking a run of neighbouring slots. */
 export function markPlacements(
   layout: Layout,
   mark: ResourceMark,
@@ -89,20 +107,18 @@ export function markPlacements(
   const hex = parseKey(mark.hex)
   const world = hexToWorld(layout, hex)
   const y = (mark.buried ? MIN_ELEVATION : Math.max(MIN_ELEVATION, elevationOf(hex))) + hover
-  const x = world.x + OFFSET.x * layout.size
-  const z = world.z + OFFSET.z * layout.size
   const shown = mark.types.slice(0, MAX_CLUSTER)
-  if (shown.length === 1) return [{ type: shown[0], x, y, z, scale: 1 }]
-
-  const radius = CLUSTER_RADIUS * layout.size
-  return shown.map((type, index) => {
-    const angle = Math.PI / 2 + (2 * Math.PI * index) / shown.length
+  const share = SLOTS / shown.length
+  const distance = SLOT_DISTANCE * layout.size
+  return Array.from({ length: SLOTS }, (_, slot) => {
+    const angle = (Math.PI / 3) * slot - Math.PI / 6
     return {
-      type,
-      x: x + radius * Math.cos(angle),
+      type: shown[Math.floor(slot / share)],
+      x: world.x + distance * Math.cos(angle),
       y,
-      z: z + radius * Math.sin(angle),
-      scale: CLUSTER_SCALE,
+      z: world.z + distance * Math.sin(angle),
+      scale: 1 - SHRINK * jitter(hex, slot + SLOTS),
+      yaw: 2 * Math.PI * jitter(hex, slot),
     }
   })
 }
@@ -129,9 +145,12 @@ export function placementsByType(
 export function instanceBuffer(placements: readonly MarkPlacement[]): Float32Array {
   const buffer = new Float32Array(placements.length * 16)
   const matrix = new Matrix()
-  placements.forEach(({ x, y, z, scale }, index) => {
-    Matrix.ScalingToRef(scale, scale, scale, matrix)
-    matrix.setTranslationFromFloats(x, y, z)
+  const scaling = new Vector3()
+  const turn = new Quaternion()
+  const translation = new Vector3()
+  placements.forEach(({ x, y, z, scale, yaw }, index) => {
+    Quaternion.RotationYawPitchRollToRef(yaw, 0, 0, turn)
+    Matrix.ComposeToRef(scaling.setAll(scale), turn, translation.copyFromFloats(x, y, z), matrix)
     matrix.copyToArray(buffer, index * 16)
   })
   return buffer
@@ -183,8 +202,12 @@ interface Pose {
   stretch?: Triple
 }
 
-/** A primitive moved into place and painted one colour throughout. */
-function part(data: VertexData, color: Triple, { at, turn, stretch }: Pose = {}): VertexData {
+/** A primitive moved into place and painted one colour throughout, or left with its own. */
+function part(
+  data: VertexData,
+  color: Triple | null,
+  { at, turn, stretch }: Pose = {},
+): VertexData {
   data.transform(
     Matrix.Compose(
       new Vector3(...(stretch ?? [1, 1, 1])),
@@ -192,16 +215,20 @@ function part(data: VertexData, color: Triple, { at, turn, stretch }: Pose = {})
       new Vector3(...(at ?? [0, 0, 0])),
     ),
   )
-  const colors: number[] = []
-  for (let i = 0; i < data.positions!.length; i += 3) colors.push(...color, 1)
-  data.colors = colors
+  // Painted, never textured; and the gem has no uvs, which merging would refuse.
+  data.uvs = null
+  if (color) {
+    const colors: number[] = []
+    for (let i = 0; i < data.positions!.length; i += 3) colors.push(...color, 1)
+    data.colors = colors
+  }
   return data
 }
 
 const box = (width: number, height: number, depth: number): VertexData =>
   CreateBoxVertexData({ width, height, depth })
 
-const cylinder = (height: number, bottom: number, top = bottom, sides = 8): VertexData =>
+const cylinder = (height: number, bottom: number, top = bottom, sides = 6): VertexData =>
   CreateCylinderVertexData({
     height,
     diameterBottom: bottom,
@@ -209,81 +236,98 @@ const cylinder = (height: number, bottom: number, top = bottom, sides = 8): Vert
     tessellation: sides,
   })
 
-const ball = (diameter: number): VertexData => CreateSphereVertexData({ diameter, segments: 4 })
-
-const ring = (diameter: number, thickness: number): VertexData =>
-  CreateTorusVertexData({ diameter, thickness, tessellation: 14 })
+/** A cylinder whose two ends are painted apart from its side: cut wood, a float's cap. */
+const banded = (height: number, diameter: number, side: Triple, ends: Triple, sides = 6) =>
+  CreateCylinderVertexData({
+    height,
+    diameter,
+    tessellation: sides,
+    faceColors: [ends, side, ends].map(([r, g, b]) => new Color4(r, g, b, 1)),
+  })
 
 /** A cylinder turned by this about z lies along x. */
 const LYING = Math.PI / 2
 
-/** Each kind's model at unit width, standing on the origin, painted by vertex. */
+/** A thin box from one point on the ground to another, a little above it. */
+function rope(from: readonly [number, number], to: readonly [number, number], color: Triple) {
+  const [dx, dz] = [to[0] - from[0], to[1] - from[1]]
+  return part(box(Math.hypot(dx, dz), 0.012, 0.012), color, {
+    at: [(from[0] + to[0]) / 2, 0.03, (from[1] + to[1]) / 2],
+    turn: [0, Math.atan2(-dz, dx), 0],
+  })
+}
+
+/**
+ * Each kind's clump at unit width: it fits in a circle half a unit across the
+ * origin, stands on it, and stays low beside the tokens. Six of them cover a
+ * hex, so each is kept to a hundred or so triangles.
+ */
 const MODELS: Readonly<Record<ResourceType, () => VertexData[]>> = {
   timber: () => {
     const bark: Triple = [0.48, 0.29, 0.14]
     const heart: Triple = [0.88, 0.7, 0.44]
-    const logs: Triple[] = [
-      [0, 0.13, -0.14],
-      [0, 0.13, 0.14],
-      [0, 0.36, 0],
+    const log = (y: number, z: number): VertexData =>
+      part(banded(0.56, 0.16, bark, heart), null, { at: [0, y, z], turn: [0, 0, LYING] })
+    const stump = (height: number, diameter: number, x: number, z: number): VertexData =>
+      part(banded(height, diameter, bark, heart), null, { at: [x, height / 2, z] })
+    return [
+      log(0.08, -0.2),
+      log(0.08, -0.04),
+      log(0.22, -0.12),
+      stump(0.16, 0.18, 0.2, 0.2),
+      stump(0.12, 0.14, -0.2, 0.2),
     ]
-    return logs.flatMap(([x, y, z]) => [
-      part(cylinder(0.85, 0.26), bark, { at: [x, y, z], turn: [0, 0, LYING] }),
-      ...[-1, 1].map((end) =>
-        part(cylinder(0.02, 0.2), heart, { at: [end * 0.43, y, z], turn: [0, 0, LYING] }),
-      ),
-    ])
   },
 
   herbs: () => {
-    const leaf: Triple = [0.3, 0.72, 0.25]
-    const sprigs = Array.from({ length: 5 }, (_, i) => {
-      const angle = (2 * Math.PI * i) / 5
-      const height = 0.32 + 0.08 * (i % 2)
-      return part(cylinder(height, 0.14, 0, 5), leaf, {
-        at: [0.17 * Math.cos(angle), height / 2, 0.17 * Math.sin(angle)],
-        turn: [0.3 * Math.sin(angle), 0, -0.3 * Math.cos(angle)],
-      })
-    })
+    const tufts: [number, number, number, number][] = [
+      [0.22, 0.08, 0.38, 0.18],
+      [-0.12, 0.24, 0.3, 0.16],
+      [-0.24, -0.12, 0.34, 0.16],
+      [0.08, -0.24, 0.26, 0.14],
+      [0, 0, 0.22, 0.14],
+    ]
+    const blades = tufts.map(([x, z, height, diameter], i) =>
+      part(cylinder(height, diameter, 0, 5), i % 2 ? [0.22, 0.6, 0.2] : [0.3, 0.72, 0.25], {
+        at: [x, height / 2, z],
+        turn: [0.25 * z, 0, -0.25 * x],
+      }),
+    )
     return [
-      ...sprigs,
-      part(cylinder(0.5, 0.16, 0, 5), [0.22, 0.6, 0.2], { at: [0, 0.25, 0] }),
-      part(ball(0.1), [0.96, 0.84, 0.3], { at: [0, 0.5, 0] }),
+      ...blades,
+      part(box(0.07, 0.07, 0.07), [0.96, 0.84, 0.3], { at: [0.25, 0.38, 0.1] }),
+      part(box(0.06, 0.06, 0.06), [0.86, 0.62, 0.95], { at: [-0.25, 0.34, -0.13] }),
     ]
   },
 
   game: () => {
     const hide: Triple = [0.62, 0.4, 0.2]
     const antler: Triple = [0.93, 0.87, 0.7]
-    const legs = [-1, 1].flatMap((x) =>
-      [-1, 1].map((z) => part(box(0.05, 0.32, 0.05), hide, { at: [x * 0.17, 0.16, z * 0.06] })),
-    )
-    const antlers = [-1, 1].flatMap((side) => [
-      part(box(0.03, 0.26, 0.03), antler, {
-        at: [0.3, 0.9, side * 0.07],
-        turn: [side * 0.4, 0, 0],
-      }),
-      part(box(0.03, 0.14, 0.03), antler, {
-        at: [0.36, 0.9, side * 0.07],
-        turn: [side * 0.3, 0, -0.7],
-      }),
-    ])
     return [
-      ...legs,
-      part(box(0.48, 0.2, 0.18), hide, { at: [0, 0.41, 0] }),
-      part(box(0.08, 0.26, 0.08), hide, { at: [0.23, 0.58, 0], turn: [0, 0, -0.45] }),
-      part(box(0.18, 0.1, 0.1), hide, { at: [0.33, 0.72, 0] }),
-      part(box(0.06, 0.1, 0.04), [0.95, 0.92, 0.85], { at: [-0.25, 0.47, 0], turn: [0, 0, 0.5] }),
-      ...antlers,
+      ...[-1, 1].map((end) => part(box(0.03, 0.19, 0.1), hide, { at: [end * 0.1, 0.095, 0] })),
+      part(box(0.29, 0.12, 0.11), hide, { at: [0, 0.25, 0] }),
+      part(box(0.05, 0.16, 0.05), hide, { at: [0.14, 0.35, 0], turn: [0, 0, -0.45] }),
+      part(box(0.11, 0.06, 0.06), hide, { at: [0.2, 0.43, 0] }),
+      part(box(0.04, 0.06, 0.03), [0.95, 0.92, 0.85], { at: [-0.15, 0.28, 0], turn: [0, 0, 0.5] }),
+      ...[-1, 1].map((side) =>
+        part(box(0.02, 0.16, 0.02), antler, {
+          at: [0.18, 0.53, side * 0.04],
+          turn: [side * 0.4, 0, 0],
+        }),
+      ),
+      part(cylinder(0.22, 0.2, 0, 5), [0.26, 0.5, 0.22], { at: [-0.2, 0.11, 0.25] }),
     ]
   },
 
   clay: () => {
     const fired: Triple = [0.8, 0.48, 0.22]
+    const brick: Triple = [0.7, 0.32, 0.18]
     return [
-      part(ball(0.5), fired, { at: [0, 0.19, 0], stretch: [1, 0.75, 1] }),
-      part(cylinder(0.14, 0.26, 0.22), fired, { at: [0, 0.4, 0] }),
-      part(ring(0.26, 0.06), [0.64, 0.35, 0.16], { at: [0, 0.47, 0] }),
+      part(cylinder(0.12, 0.6, 0.4, 8), [0.72, 0.42, 0.22], { at: [-0.05, 0.06, -0.05] }),
+      part(cylinder(0.16, 0.12, 0.1), fired, { at: [0.28, 0.08, 0.12] }),
+      part(cylinder(0.12, 0.1, 0.08), [0.64, 0.35, 0.16], { at: [0.2, 0.06, -0.26] }),
+      part(box(0.16, 0.06, 0.1), brick, { at: [-0.2, 0.03, 0.28], turn: [0, 0.3, 0] }),
+      part(box(0.16, 0.06, 0.1), brick, { at: [-0.2, 0.09, 0.28], turn: [0, -0.2, 0] }),
     ]
   },
 
@@ -291,109 +335,147 @@ const MODELS: Readonly<Record<ResourceType, () => VertexData[]>> = {
     const ore: Triple = [0.42, 0.44, 0.5]
     const rust: Triple = [0.72, 0.36, 0.18]
     return [
-      part(box(0.3, 0.24, 0.26), ore, { at: [-0.08, 0.12, 0], turn: [0.2, 0.5, 0.15] }),
-      part(box(0.24, 0.2, 0.2), ore, { at: [0.15, 0.1, 0.08], turn: [-0.3, 1.1, 0.2] }),
-      part(box(0.2, 0.18, 0.18), ore, { at: [0.02, 0.3, -0.04], turn: [0.6, 0.2, 0.5] }),
-      part(box(0.08, 0.06, 0.08), rust, { at: [-0.1, 0.25, 0.1], turn: [0, 0.4, 0] }),
-      part(box(0.07, 0.05, 0.07), rust, { at: [0.2, 0.2, -0.04], turn: [0.3, 0, 0] }),
+      part(box(0.3, 0.26, 0.26), ore, { at: [-0.08, 0.13, -0.04], turn: [0.2, 0.5, 0.15] }),
+      part(box(0.24, 0.2, 0.2), ore, { at: [0.18, 0.1, 0.1], turn: [-0.3, 1.1, 0.2] }),
+      part(box(0.2, 0.18, 0.18), ore, { at: [0, 0.3, -0.04], turn: [0.6, 0.2, 0.5] }),
+      part(box(0.18, 0.14, 0.16), ore, { at: [-0.18, 0.07, 0.22], turn: [0.1, 0.8, 0] }),
+      part(box(0.08, 0.06, 0.08), rust, { at: [-0.12, 0.26, 0.08], turn: [0, 0.4, 0] }),
+      part(box(0.07, 0.05, 0.07), rust, { at: [0.2, 0.2, 0.06], turn: [0.3, 0, 0] }),
     ]
   },
 
   stone: () => {
     const block: Triple = [0.7, 0.69, 0.66]
     return [
-      part(box(0.36, 0.18, 0.28), block, { at: [-0.19, 0.09, 0] }),
-      part(box(0.36, 0.18, 0.28), [0.62, 0.61, 0.58], { at: [0.19, 0.09, 0] }),
-      part(box(0.38, 0.18, 0.28), [0.8, 0.79, 0.76], { at: [0, 0.27, 0], turn: [0, 0.25, 0] }),
-      part(box(0.2, 0.14, 0.18), block, { at: [0.02, 0.43, 0], turn: [0, -0.4, 0] }),
+      part(box(0.3, 0.16, 0.22), block, { at: [-0.14, 0.08, -0.1] }),
+      part(box(0.3, 0.16, 0.22), [0.62, 0.61, 0.58], {
+        at: [0.16, 0.08, -0.06],
+        turn: [0, 0.2, 0],
+      }),
+      part(box(0.28, 0.15, 0.2), [0.8, 0.79, 0.76], { at: [0, 0.235, -0.08], turn: [0, -0.25, 0] }),
+      part(box(0.2, 0.12, 0.16), block, { at: [-0.1, 0.06, 0.22], turn: [0, 0.6, 0] }),
+      part(box(0.14, 0.1, 0.14), [0.62, 0.61, 0.58], { at: [0.2, 0.05, 0.2], turn: [0, 0.3, 0] }),
     ]
   },
 
-  // The gem keeps floating clear of its tile, as the one marker did before every kind had its own.
-  gems: () => [part(buildGem(1, 1.8), [0.84, 0.3, 0.95], { at: [0, 0.2, 0] })],
+  gems: () => {
+    const gem = (width: number, height: number, color: Triple, pose: Pose): VertexData =>
+      part(buildGem(width, height), color, pose)
+    return [
+      part(box(0.32, 0.14, 0.26), [0.3, 0.27, 0.33], { at: [0, 0.07, 0], turn: [0, 0.4, 0] }),
+      gem(0.14, 0.42, [0.84, 0.3, 0.95], { at: [0.02, 0.1, 0.02] }),
+      gem(0.11, 0.3, [0.95, 0.35, 0.6], { at: [0.14, 0.05, -0.12], turn: [0.3, 0, -0.4] }),
+      gem(0.1, 0.26, [0.84, 0.3, 0.95], { at: [-0.14, 0.04, 0.1], turn: [-0.3, 0, 0.4] }),
+      gem(0.1, 0.22, [0.6, 0.35, 0.95], { at: [0.2, 0, 0.18], turn: [0.6, 0, -0.9] }),
+    ]
+  },
 
   rareOre: () => {
     const rock: Triple = [0.14, 0.11, 0.18]
     const vein: Triple = [1, 0.55, 0.18]
     return [
-      part(box(0.34, 0.26, 0.3), rock, { at: [-0.06, 0.13, 0], turn: [0.15, 0.4, 0.1] }),
-      part(box(0.24, 0.22, 0.22), rock, { at: [0.16, 0.24, 0.06], turn: [-0.2, 1.2, 0.35] }),
-      part(box(0.36, 0.04, 0.05), vein, { at: [-0.04, 0.2, 0.15], turn: [0, 0.4, 0.4] }),
-      part(box(0.05, 0.3, 0.04), vein, { at: [0.12, 0.2, -0.13], turn: [0.2, 0, -0.3] }),
-      part(box(0.04, 0.04, 0.32), vein, { at: [-0.18, 0.27, 0.02], turn: [0.3, 0.4, 0] }),
+      part(box(0.32, 0.24, 0.28), rock, { at: [-0.1, 0.12, -0.06], turn: [0.15, 0.4, 0.1] }),
+      part(box(0.24, 0.2, 0.22), rock, { at: [0.18, 0.1, 0.06], turn: [-0.2, 1.2, 0.35] }),
+      part(box(0.18, 0.14, 0.16), rock, { at: [-0.12, 0.07, 0.24], turn: [0.1, 0.5, 0] }),
+      part(box(0.34, 0.04, 0.05), vein, { at: [-0.08, 0.18, 0.08], turn: [0, 0.4, 0.4] }),
+      part(box(0.05, 0.26, 0.04), vein, { at: [0.14, 0.14, -0.06], turn: [0.2, 0, -0.3] }),
+      part(box(0.04, 0.04, 0.2), vein, { at: [-0.12, 0.15, 0.24], turn: [0.3, 0.4, 0] }),
     ]
   },
 
   crystal: () => {
     const pale: Triple = [0.78, 0.93, 1]
     const spike = (height: number, x: number, z: number, lean: Triple): VertexData =>
-      part(cylinder(height, 0.17, 0, 6), pale, { at: [x, height / 2 - 0.04, z], turn: lean })
+      part(cylinder(height, 0.15, 0), pale, { at: [x, height / 2 - 0.03, z], turn: lean })
     return [
-      spike(0.9, 0, 0, [0, 0, 0]),
-      spike(0.62, 0.13, 0.05, [0.2, 0, -0.45]),
-      spike(0.55, -0.12, 0.07, [0.35, 0, 0.4]),
-      spike(0.45, 0, -0.13, [-0.5, 0, 0]),
+      spike(0.6, 0, 0, [0, 0, 0]),
+      spike(0.42, 0.14, 0.08, [0.2, 0, -0.45]),
+      spike(0.38, -0.14, 0.1, [0.35, 0, 0.4]),
+      spike(0.3, 0.02, -0.18, [-0.5, 0, 0]),
+      spike(0.22, -0.22, -0.18, [-0.3, 0, 0.4]),
     ]
   },
 
   salt: () => {
     const white: Triple = [0.97, 0.97, 0.99]
     return [
-      part(ball(0.62), white, { at: [0, 0.03, 0], stretch: [1, 0.55, 1] }),
-      part(box(0.1, 0.1, 0.1), [0.86, 0.9, 0.96], { at: [0.02, 0.2, 0], turn: [0.6, 0.6, 0] }),
-      part(box(0.08, 0.08, 0.08), white, { at: [0.15, 0.13, 0.08], turn: [0.3, 0.9, 0.4] }),
-      part(box(0.07, 0.07, 0.07), white, { at: [-0.14, 0.12, -0.06], turn: [0.7, 0.2, 0.5] }),
+      part(cylinder(0.04, 0.8, 0.8, 8), [0.88, 0.9, 0.94], { at: [0, 0.02, 0] }),
+      part(cylinder(0.22, 0.3, 0.04), white, { at: [-0.1, 0.11, -0.05] }),
+      part(box(0.08, 0.08, 0.08), white, { at: [0.18, 0.08, 0.1], turn: [0.3, 0.9, 0.4] }),
+      part(box(0.07, 0.07, 0.07), [0.86, 0.9, 0.96], {
+        at: [0.05, 0.07, 0.25],
+        turn: [0.6, 0.6, 0],
+      }),
+      part(box(0.07, 0.07, 0.07), white, { at: [-0.2, 0.07, 0.2], turn: [0.7, 0.2, 0.5] }),
     ]
   },
 
   glassSand: () => {
+    const sand: Triple = [0.96, 0.88, 0.62]
     const shine: Triple = [0.78, 0.96, 1]
     return [
-      part(ball(0.6), [0.96, 0.88, 0.62], { at: [0, 0.02, 0], stretch: [1.25, 0.42, 0.85] }),
+      part(cylinder(0.12, 0.8, 0.3, 8), sand, { at: [0, 0.06, 0], stretch: [1, 1, 0.7] }),
+      part(cylinder(0.08, 0.36, 0.14), [0.92, 0.82, 0.55], { at: [0.18, 0.04, 0.24] }),
       part(box(0.09, 0.02, 0.09), shine, { at: [0.08, 0.13, 0.02], turn: [0.2, 0.7, 0.1] }),
-      part(box(0.07, 0.02, 0.07), shine, { at: [-0.14, 0.1, 0.05], turn: [-0.2, 0.3, 0.2] }),
-      part(box(0.06, 0.02, 0.06), shine, { at: [0.02, 0.11, -0.12], turn: [0.3, 1.1, -0.2] }),
+      part(box(0.07, 0.02, 0.07), shine, { at: [-0.2, 0.08, 0.06], turn: [-0.2, 0.3, 0.2] }),
+      part(box(0.06, 0.02, 0.06), shine, { at: [0.02, 0.1, -0.16], turn: [0.3, 1.1, -0.2] }),
     ]
   },
 
   fish: () => {
     const scales: Triple = [0.55, 0.7, 0.86]
+    const floats = [Math.PI / 2, (7 * Math.PI) / 6, (11 * Math.PI) / 6].map(
+      (angle) => [0.32 * Math.cos(angle), 0.32 * Math.sin(angle)] as const,
+    )
     return [
-      part(cylinder(0.06, 0.52, 0.52, 10), [0.56, 0.39, 0.22], { at: [0, 0.03, 0] }),
-      part(ball(0.3), scales, { at: [0.04, 0.15, 0], stretch: [1.4, 0.6, 0.45] }),
-      part(cylinder(0.16, 0.16, 0, 4), scales, {
-        at: [-0.24, 0.15, 0],
-        turn: [0, 0, -LYING],
+      ...floats.map(([x, z]) =>
+        part(banded(0.08, 0.1, [0.9, 0.2, 0.15], [0.97, 0.95, 0.9], 5), null, {
+          at: [x, 0.04, z],
+        }),
+      ),
+      rope(floats[0], floats[1], [0.56, 0.39, 0.22]),
+      rope(floats[1], floats[2], [0.56, 0.39, 0.22]),
+      part(box(0.2, 0.07, 0.04), scales, { at: [0, 0.18, 0], turn: [0, 0, 0.4] }),
+      part(cylinder(0.08, 0.1, 0, 4), scales, {
+        at: [-0.12, 0.12, 0],
+        turn: [0, 0, -LYING + 0.4],
         stretch: [1, 1, 0.3],
       }),
-      part(ball(0.04), [0.1, 0.1, 0.12], { at: [0.22, 0.18, 0.05] }),
     ]
   },
 
   pearls: () => {
     const shell: Triple = [0.88, 0.66, 0.62]
     return [
-      part(ball(0.46), shell, { at: [0, 0.05, 0], stretch: [1, 0.3, 1] }),
-      part(ball(0.46), [0.8, 0.58, 0.55], {
-        at: [-0.1, 0.24, 0],
-        turn: [0, 0, 1],
-        stretch: [1, 0.3, 1],
+      part(cylinder(0.05, 0.3, 0.24), shell, { at: [-0.08, 0.025, 0.05] }),
+      part(cylinder(0.03, 0.3, 0.24), [0.8, 0.58, 0.55], {
+        at: [-0.2, 0.12, 0.05],
+        turn: [0, 0, 1.1],
       }),
-      part(ball(0.17), [1, 0.97, 0.93], { at: [0.06, 0.15, 0] }),
+      part(CreateSphereVertexData({ diameter: 0.12, segments: 1 }), [1, 0.97, 0.93], {
+        at: [-0.06, 0.1, 0.05],
+      }),
+      part(cylinder(0.06, 0.2, 0.12), [0.8, 0.58, 0.55], { at: [0.24, 0.03, -0.16] }),
     ]
   },
 
   whales: () => {
     const skin: Triple = [0.27, 0.33, 0.46]
     return [
-      part(ring(0.42, 0.07), [0.88, 0.94, 1], { at: [0, 0.02, 0] }),
-      part(cylinder(0.48, 0.2, 0.07), skin, { at: [0, 0.24, 0], turn: [0, 0, 0.12] }),
+      part(cylinder(0.02, 0.6, 0.6, 8), [0.88, 0.94, 1], { at: [0, 0.01, 0] }),
+      part(cylinder(0.4, 0.18, 0.08), skin, {
+        at: [0.06, 0.04, 0],
+        turn: [0, 0, LYING],
+        stretch: [0.6, 1, 1],
+      }),
+      part(box(0.06, 0.2, 0.06), skin, { at: [-0.2, 0.12, 0], turn: [0, 0, 0.3] }),
       ...[-1, 1].map((side) =>
-        part(box(0.3, 0.04, 0.14), skin, {
-          at: [side * 0.14 + 0.03, 0.52, 0],
-          turn: [0, 0, side * 0.4],
+        part(box(0.06, 0.03, 0.16), skin, {
+          at: [-0.25, 0.23, side * 0.08],
+          turn: [side * 0.3, 0, 0],
         }),
       ),
+      part(cylinder(0.18, 0.08, 0, 5), [0.92, 0.96, 1], { at: [0.18, 0.15, 0] }),
     ]
   },
 }
@@ -417,15 +499,15 @@ export function buildResourceModel(type: ResourceType, width: number): VertexDat
 
 export interface ResourceMarkers {
   meshes: Readonly<Record<ResourceType, Mesh>>
-  /** Models standing right now, across every kind. */
+  /** Clumps standing right now, across every kind: a few for each hex marked. */
   readonly count: number
   setMarks(marks: readonly ResourceMark[]): void
   dispose(): void
 }
 
 /**
- * One mesh a kind, every hex holding that kind a thin instance of it. The whole
- * world's worth is a couple of thousand small models, cheaper drawn whole than
+ * One mesh a kind, every clump of that kind a thin instance of it. The whole
+ * world's worth is some ten thousand clumps of a hundred triangles, cheaper drawn whole than
  * kept in step with the grid's window, and each buffer is rebuilt to fit on
  * every set, so there is no capacity to run past.
  */
@@ -435,7 +517,7 @@ export function createResourceMarkers(
   elevationOf: (hex: Axial) => number,
   options: ResourceMarkerOptions = {},
 ): ResourceMarkers {
-  const width = layout.size * (options.size ?? DEFAULTS.size)
+  const width = layout.size * 2 * FOOTPRINT
   const hover = layout.size * (options.hover ?? DEFAULTS.hover)
 
   const materials: StandardMaterial[] = []
