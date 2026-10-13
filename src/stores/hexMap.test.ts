@@ -123,6 +123,89 @@ describe('clicking the map', () => {
     expect(store.selectedHex).toBeNull()
   })
 
+  it('deselects the hex the DM clicks a second time, and moves to another', () => {
+    const store = setup()
+
+    store.click({ q: 2, r: 0 })
+    store.click({ q: 2, r: 0 })
+    expect(store.selectedHex).toBeNull()
+
+    store.click({ q: 2, r: 0 })
+    store.click({ q: 1, r: 1 })
+    expect(store.selectedHex).toBe('1,1')
+    expect(store.canUndo).toBe(false)
+  })
+
+  it('takes back the order just given when its goal is clicked again', () => {
+    const store = setup()
+    store.dmView = false
+    store.click({ q: 0, r: 0 })
+
+    store.click({ q: 2, r: 0 })
+    store.click({ q: 2, r: 0 })
+    expect(store.goal).toBeNull()
+    expect(store.queue.size).toBe(0)
+
+    store.click({ q: 2, r: 0 })
+    store.click({ q: 3, r: 0 })
+    expect(store.goal).toBe('3,0')
+  })
+
+  it('leaves the standing order behind the one taken back', () => {
+    const store = setup()
+    store.dmView = false
+    store.click({ q: 0, r: 0 })
+    store.click({ q: 4, r: 0 })
+    store.advanceTurn()
+
+    store.click({ q: 1, r: 2 })
+    store.click({ q: 1, r: 2 })
+    expect(store.goal).toBe('4,0')
+
+    store.advanceTurn()
+    expect(store.start).toBe('2,0')
+  })
+
+  it('takes the whole chain back from its last stop, but not on shift-click', () => {
+    const store = setup()
+    store.dmView = false
+    store.click({ q: 0, r: 0 })
+    store.click({ q: 2, r: 0 })
+    store.click({ q: 2, r: 2 }, true)
+
+    store.click({ q: 2, r: 2 }, true)
+    expect(store.legs.map((leg) => leg.to)).toEqual(['2,0', '2,2'])
+
+    store.click({ q: 2, r: 2 })
+    expect(store.goal).toBeNull()
+  })
+
+  it('still calls the order off however often the entity is clicked where it stands', () => {
+    const store = setup()
+    store.dmView = false
+    store.click({ q: 0, r: 0 })
+    store.click({ q: 3, r: 0 })
+    store.advanceTurn()
+
+    store.click({ q: 1, r: 0 })
+    store.click({ q: 1, r: 0 })
+    expect(store.goal).toBeNull()
+    expect(store.queue.get(store.selectedId)?.kind).toBe('move')
+  })
+
+  it('undoes taking an order back as one step', () => {
+    const store = setup()
+    store.dmView = false
+    store.click({ q: 0, r: 0 })
+    store.click({ q: 2, r: 0 })
+    store.click({ q: 2, r: 0 })
+
+    store.undo()
+    expect(store.goal).toBe('2,0')
+    store.redo()
+    expect(store.goal).toBeNull()
+  })
+
   it('drops the selection when the DM view is switched off', () => {
     const store = setup()
     store.click({ q: 1, r: 1 })

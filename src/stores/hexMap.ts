@@ -616,10 +616,37 @@ export const useHexMapStore = defineStore('hexMap', () => {
     if (key !== (stops[stops.length - 1] ?? at)) orderChain(id, [...stops, key])
   }
 
-  /** A click on the map: the DM picks a hex to look at, a player gives an order. */
+  /** Takes back the order given this turn, leaving whatever stood before it. */
+  const dropQueued = (id: string): void => {
+    const next = new Map(queue.value)
+    next.delete(id)
+    queue.value = next
+  }
+
+  /**
+   * A click on the map: the DM picks a hex to look at, a player gives an order.
+   * Clicking the picked hex again, or the goal of the order just given, takes
+   * the pick back.
+   */
   const click = (hex: Axial | null, append = false): void => {
-    if (dmView.value) selectHex(hex)
-    else select(hex, append)
+    const key = hex ? hexKey(hex) : null
+    if (dmView.value) {
+      selectHex(key === selectedHex.value ? null : hex)
+      return
+    }
+    const id = selectedId.value
+    const queued = queue.value.get(id)
+    // Against the last stop rather than the route's end, so a second click on
+    // the ground the entity stands on still calls its order off.
+    if (
+      !append &&
+      queued?.kind === 'move' &&
+      key === queued.waypoints[queued.waypoints.length - 1]
+    ) {
+      dropQueued(id)
+      return
+    }
+    select(hex, append)
   }
 
   const removeWaypoint = (index: number): void => {
