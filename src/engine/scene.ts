@@ -252,7 +252,10 @@ export function createHexScene(canvas: HTMLCanvasElement, options: HexSceneOptio
   const vision = createVisionOverlay(scene, options.layout, elevationOf, { gap: options.gap })
   const stops = createWaypointMarkers(scene, options.layout, elevationOf)
   const resources = createResourceMarkers(scene, options.layout, elevationOf)
-  const roads = createRoadSegments(scene, options.layout, elevationOf)
+  const roads = createRoadSegments(scene, options.layout, elevationOf, {
+    tileSize: grid.tileSize,
+    bevel: options.bevel,
+  })
   addGroundSlab(scene, bounds, options.layout.size * 2)
 
   // Plain axial coordinates cross this boundary, never Babylon objects, so
@@ -295,6 +298,7 @@ export function createHexScene(canvas: HTMLCanvasElement, options: HexSceneOptio
   const detailObserver = scene.onBeforeRenderObservable.add(() => {
     const pixels = (grid.bevelRadius * engine.getRenderHeight()) / (2 * iso.zoom)
     grid.setDetail(wantsDetail(pixels, grid.detailed))
+    roads.setDetail(grid.detailed)
   })
 
   // A drag or a jump moves the target directly rather than through the easing,

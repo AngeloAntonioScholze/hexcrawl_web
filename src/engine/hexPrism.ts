@@ -36,31 +36,25 @@ export function hexCornerOffsets(size: number): { x: number; z: number }[] {
   return result
 }
 
-export function buildHexPrismGeometry(
-  size: number,
-  options: HexPrismOptions = {},
-): HexPrismGeometry {
+export interface ProfileRing {
+  /** Centre-to-corner radius of the ring. */
+  radius: number
+  /** Height of the ring on the unit-height prism. */
+  y: number
+}
+
+/**
+ * The rings of the top, from the rim of the flat cap out to the top of the
+ * wall, each a hexagon flat across every side. No bevel is a plain prism: the
+ * cap's rim is the top of the wall, the only ring.
+ */
+export function bevelProfile(size: number, options: HexPrismOptions = {}): ProfileRing[] {
   const bevel = bevelRadius(size, options.bevel)
-  // No bevel is a plain prism: the cap's rim is the top of the wall, with no
-  // rings rolling between them.
   const segments = bevel > 0 ? Math.max(1, options.bevelSegments ?? DEFAULT_BEVEL_SEGMENTS) : 0
-  const unit = hexCornerOffsets(1)
-
-  const positions: number[] = []
-  const indices: number[] = []
-
-  // The top cap sits inset by the bevel radius; the rounded edge rolls from its
-  // rim out to the full hex radius before the wall drops straight down.
   const capRadius = size - bevel
-  positions.push(0, HEIGHT, 0)
-  for (const corner of unit) positions.push(corner.x * capRadius, HEIGHT, corner.z * capRadius)
-  for (let i = 0; i < 6; i++) {
-    indices.push(0, 1 + i, 1 + ((i + 1) % 6))
-  }
-
   // A quarter-round profile: each ring steps outward and downward along the arc,
   // ending flush with the wall.
-  const profile: { radius: number; y: number }[] = []
+  const profile: ProfileRing[] = []
   for (let step = 0; step <= segments; step++) {
     const angle = segments > 0 ? (Math.PI / 2) * (step / segments) : 0
     profile.push({
@@ -68,6 +62,28 @@ export function buildHexPrismGeometry(
       y: HEIGHT - bevel * (1 - Math.cos(angle)),
     })
   }
+  return profile
+}
+
+export function buildHexPrismGeometry(
+  size: number,
+  options: HexPrismOptions = {},
+): HexPrismGeometry {
+  const unit = hexCornerOffsets(1)
+
+  const positions: number[] = []
+  const indices: number[] = []
+
+  // The top cap sits inset by the bevel radius; the rounded edge rolls from its
+  // rim out to the full hex radius before the wall drops straight down.
+  const profile = bevelProfile(size, options)
+  const capRadius = profile[0].radius
+  positions.push(0, HEIGHT, 0)
+  for (const corner of unit) positions.push(corner.x * capRadius, HEIGHT, corner.z * capRadius)
+  for (let i = 0; i < 6; i++) {
+    indices.push(0, 1 + i, 1 + ((i + 1) % 6))
+  }
+
   profile.push({ radius: size, y: 0 })
 
   // Each side gets its own vertices so faces shade flat across the hex, while
