@@ -1122,6 +1122,31 @@ describe('resources', () => {
     expect(store.resourceChances.forest).toBe(0.5)
   })
 
+  it('generates afresh around the manual resources, undone in one step', () => {
+    const store = useHexMapStore()
+    store.setTiles(flatField(30))
+    store.setResourceChance('grass', 1)
+    store.setResourceSpacing(5)
+    const kept = store.addResource('0,0' as HexKey, 'iron')
+    store.addResource('3,0' as HexKey, 'clay', 'generated')
+
+    store.generateResources(7)
+    const first = store.resources
+
+    expect(first[0].id).toBe(kept)
+    expect(first.filter((one) => one.origin === 'manual')).toHaveLength(1)
+    expect(first.some((one) => one.hex === '3,0')).toBe(false)
+    expect(first.length).toBeGreaterThan(10)
+
+    store.generateResources(7)
+    expect(store.resources.map((one) => one.hex)).toEqual(first.map((one) => one.hex))
+
+    store.undo()
+    expect(store.resources).toBe(first)
+    store.undo()
+    expect(store.resources.map((one) => one.hex)).toEqual(['0,0', '3,0'])
+  })
+
   it('comes back from a snapshot as it was saved', () => {
     const store = setup()
     store.setTerrain({ seed: TERRAIN_DEFAULTS.seed + 7 })

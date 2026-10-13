@@ -24,6 +24,7 @@ import { hexKey, parseKey, type Axial, type HexKey } from '../hex/coords'
 import type { VisionOptions } from '../hex/vision'
 import type { MapSnapshot } from '../persistence/mapState'
 import { fieldFromTiles, type TerrainField } from '../terrain/field'
+import { scatterResources } from '../terrain/resourceGen'
 import {
   DEFAULT_RESOURCE_SPACING,
   defaultResourceChances,
@@ -506,6 +507,18 @@ export const useHexMapStore = defineStore('hexMap', () => {
   const removeResource = (id: string): void => {
     if (!resources.value.some((one) => one.id === id)) return
     resources.value = resources.value.filter((one) => one.id !== id)
+  }
+
+  /** Lays the generated resources down afresh, around the ones placed by hand. */
+  const generateResources = (seed = Math.floor(Math.random() * MAX_SEED)): void => {
+    const manual = resources.value.filter((one) => one.origin === 'manual')
+    const made = scatterResources(field.value, {
+      chances: resourceChances.value,
+      spacing: resourceSpacing.value,
+      seed,
+      existing: manual,
+    })
+    resources.value = [...manual, ...made]
   }
 
   const setResourceChance = (terrainId: TerrainId, chance: number): void => {
@@ -1223,6 +1236,7 @@ export const useHexMapStore = defineStore('hexMap', () => {
     resourcesOn,
     addResource: history.track(addResource),
     removeResource: history.track(removeResource),
+    generateResources: history.track(generateResources),
     resourceChances,
     setResourceChance: history.track(setResourceChance, (terrainId) => `chance:${terrainId}`),
     resourceSpacing,

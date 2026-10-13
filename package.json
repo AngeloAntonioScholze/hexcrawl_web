@@ -5,6 +5,7 @@
   "scripts": {
     "bench": "bun run scripts/bench-fog.ts",
     "bench:pick": "bun run scripts/bench-pick.ts",
+    "bench:resources": "bun run scripts/bench-resources.ts",
     "bench:window": "bun run scripts/bench-window.ts",
     "build": "vue-tsc --noEmit && vite build",
     "dev": "vite",
