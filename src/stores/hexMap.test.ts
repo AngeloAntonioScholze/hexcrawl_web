@@ -137,6 +137,75 @@ describe('DM tools', () => {
   })
 })
 
+describe('the hover footprint', () => {
+  const footprint = (store: Store): string[] => [...store.hoverFootprint].sort()
+
+  it('is empty with nothing under the pointer', () => {
+    const store = setup()
+    expect(store.hoverFootprint).toEqual([])
+  })
+
+  it('covers every hex a brush tool would touch', () => {
+    const store = setup()
+    store.setDmTool('paint')
+    store.setBrushSize(1)
+    store.setHovered({ q: 2, r: 0 })
+
+    expect(footprint(store)).toEqual(range({ q: 2, r: 0 }, 1).map(hexKey).sort())
+
+    store.setDmTool('fog')
+    store.setBrushSize(2)
+    expect(store.hoverFootprint).toHaveLength(19)
+  })
+
+  it('follows the brush slider as it moves', () => {
+    const store = setup()
+    store.setDmTool('fog')
+    store.setHovered({ q: 0, r: 0 })
+
+    store.setBrushSize(0)
+    expect(store.hoverFootprint).toEqual(['0,0'])
+    store.setBrushSize(3)
+    expect(store.hoverFootprint).toHaveLength(37)
+  })
+
+  it('leaves out hexes beyond the edge of the world', () => {
+    const store = setup()
+    store.setDmTool('paint')
+    store.setBrushSize(1)
+    store.setHovered({ q: 6, r: 0 })
+
+    expect(store.hoverFootprint).toHaveLength(4)
+    expect(store.hoverFootprint).not.toContain('7,0')
+  })
+
+  it('is the single hovered hex for select and road, and for the players', () => {
+    const store = setup()
+    store.setBrushSize(2)
+    store.setHovered({ q: 1, r: 0 })
+    expect(store.hoverFootprint).toEqual(['1,0'])
+
+    store.setDmTool('road')
+    expect(store.hoverFootprint).toEqual(['1,0'])
+
+    store.setDmTool('paint')
+    store.dmView = false
+    expect(store.hoverFootprint).toEqual(['1,0'])
+  })
+
+  it('stays the same array while the hexes under it do not change', () => {
+    const store = setup()
+    store.setDmTool('paint')
+    store.setPaintTerrain('forest')
+    store.setHovered({ q: 0, r: 0 })
+    const before = store.hoverFootprint
+
+    store.click({ q: 0, r: 0 })
+
+    expect(store.hoverFootprint).toBe(before)
+  })
+})
+
 describe('the fog tool', () => {
   const fogTool = (store: Store, mode: 'reveal' | 'hide', brush = 0): void => {
     store.setDmTool('fog')

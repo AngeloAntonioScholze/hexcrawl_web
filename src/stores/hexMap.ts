@@ -514,6 +514,21 @@ export const useHexMapStore = defineStore('hexMap', () => {
       .filter((hex) => field.value.at(hex) !== undefined)
       .map(hexKey)
 
+  /**
+   * The hexes a tap would touch, for the hover highlight. Kept as the same array
+   * while the keys hold, so painting under a still pointer redraws nothing.
+   */
+  const hoverFootprint = computed<readonly HexKey[]>((previous) => {
+    const hex = hovered.value
+    if (!hex) return []
+    const next = dmView.value && BRUSH_TOOLS.has(dmTool.value) ? brushHexes(parseKey(hex)) : [hex]
+    const same =
+      previous !== undefined &&
+      previous.length === next.length &&
+      previous.every((key, index) => key === next[index])
+    return same ? previous : next
+  })
+
   /** Which side panels are expanded; view state, never saved. */
   const panelsOpen = ref<Record<SidePanel, boolean>>({ world: true, entities: true, details: true })
 
@@ -1502,6 +1517,7 @@ export const useHexMapStore = defineStore('hexMap', () => {
     showAllPaths,
     clearHistory,
     hoveredTile,
+    hoverFootprint,
     turn,
     clock,
     states,

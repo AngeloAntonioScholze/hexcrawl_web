@@ -13,6 +13,7 @@ import { roadSpans } from '../engine/roadSegments'
 import { useHexScene } from '../engine/useHexScene'
 import { useHexMapStore } from '../stores/hexMap'
 import { createTerrainField, repainted } from '../terrain/field'
+import { TERRAIN_COLORS } from '../terrain/terrain'
 
 const props = withDefaults(
   defineProps<{
@@ -30,6 +31,10 @@ const props = withDefaults(
 )
 
 const HOVER_TINT = new Color3(0.55, 0.62, 0.72)
+/** How far a paint brush's footprint leans toward the terrain it lays down. */
+const PAINT_LEAN = 0.4
+const REVEAL_TINT = new Color3(0.82, 0.86, 0.92)
+const HIDE_TINT = new Color3(0.26, 0.29, 0.36)
 const SELECT_TINT = new Color3(0.98, 0.78, 0.25)
 /** How much of an entity's colour its trail keeps. */
 const TRAIL_TINT = 0.72
@@ -102,11 +107,20 @@ const { repaint } = useHexWindow(
 
 useTurnPlayback(hexScene, layout)
 
+const hoverTint = computed(() => {
+  if (!store.dmView) return HOVER_TINT
+  if (store.dmTool === 'paint')
+    return Color3.Lerp(HOVER_TINT, TERRAIN_COLORS[store.paintTerrain], PAINT_LEAN)
+  if (store.dmTool === 'fog') return store.fogMode === 'reveal' ? REVEAL_TINT : HIDE_TINT
+  return HOVER_TINT
+})
+
 // Later writes win, so endpoints stay visible on top of the route and the
 // route stays visible under the pointer.
 const overlay = computed(() => {
   const result = new Map<HexKey, Color3>()
-  if (store.hovered) result.set(store.hovered, HOVER_TINT)
+  const tint = hoverTint.value
+  for (const key of store.hoverFootprint) result.set(key, tint)
 
   // Tinted in the entity's own colour, dimmed so the pawn standing on it still
   // reads as the brighter thing.
