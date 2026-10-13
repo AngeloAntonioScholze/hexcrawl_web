@@ -1,6 +1,7 @@
 import { Color3 } from '@babylonjs/core/Maths/math.color'
 import { createPinia, setActivePinia } from 'pinia'
 import { beforeEach, describe, expect, it } from 'vitest'
+import { catalogFor, DEFAULT_CATALOG, unlockedServices } from '../entities/catalog'
 import { hexKey, range, type Axial, type HexKey } from '../hex/coords'
 import {
   DEFAULT_RESOURCE_SPACING,
@@ -1204,6 +1205,79 @@ describe('a caravan crew', () => {
     fresh.restore(saved)
 
     expect(fresh.merchantsOf(caravan)).toEqual(store.merchantsOf(caravan))
+  })
+})
+
+describe('the services catalog', () => {
+  const find = (store: Store, id: string) => store.catalog.find((one) => one.id === id)
+
+  it('starts from the defaults', () => {
+    const store = setup()
+    expect(store.catalogOverrides).toEqual([])
+    expect(store.catalog).toEqual(DEFAULT_CATALOG)
+  })
+
+  it('edits, strikes off and resets entries, and what a merchant offers follows', () => {
+    const store = setup()
+    store.editCatalogEntry('smith.sharpen', { level: 1, price: '5 gp' })
+    store.removeCatalogEntry('smith.armour')
+
+    const offered = unlockedServices('smith', 3, store.catalog).map((one) => one.id)
+    expect(offered).toContain('smith.sharpen')
+    expect(offered).not.toContain('smith.armour')
+    expect(find(store, 'smith.sharpen')?.price).toBe('5 gp')
+
+    store.resetCatalogEntry('smith.sharpen')
+    store.resetCatalogEntry('smith.armour')
+    expect(store.catalog).toEqual(DEFAULT_CATALOG)
+  })
+
+  it('adds an entry of the DM’s own and lets it go again', () => {
+    const store = setup()
+    const made = store.addCatalogEntry('cook', { name: 'Pickled eel', level: 2 })
+
+    expect(catalogFor('cook', store.catalog)).toContainEqual(made)
+    store.editCatalogEntry(made.id, { description: 'Keeps a month.' })
+    expect(find(store, made.id)?.description).toBe('Keeps a month.')
+
+    store.removeCatalogEntry(made.id)
+    expect(find(store, made.id)).toBeUndefined()
+    expect(store.catalogOverrides).toEqual([])
+  })
+
+  it('undoes a run of typing into one entry as one step', () => {
+    const store = setup()
+    store.editCatalogEntry('smith.sharpen', { description: 'K' })
+    store.editCatalogEntry('smith.sharpen', { description: 'Ke' })
+    store.editCatalogEntry('smith.sharpen', { description: 'Keen' })
+    store.removeCatalogEntry('smith.armour')
+
+    store.undo()
+    expect(find(store, 'smith.armour')).toBeDefined()
+    expect(find(store, 'smith.sharpen')?.description).toBe('Keen')
+    store.undo()
+    expect(store.catalog).toEqual(DEFAULT_CATALOG)
+    store.redo()
+    expect(find(store, 'smith.sharpen')?.description).toBe('Keen')
+  })
+
+  it('keeps the DM’s catalog across a new world, as it does the crews', () => {
+    const store = setup()
+    store.removeCatalogEntry('smith.armour')
+    store.reseed()
+    expect(find(store, 'smith.armour')).toBeUndefined()
+  })
+
+  it('comes back from a snapshot', () => {
+    const store = setup()
+    store.editCatalogEntry('mage.teleport', { price: '2,000 gp' })
+    const made = store.addCatalogEntry('mage')
+
+    setActivePinia(createPinia())
+    const fresh = setup()
+    fresh.restore(store.snapshot)
+    expect(fresh.catalog).toEqual(store.catalog)
+    expect(find(fresh, made.id)).toEqual(made)
   })
 })
 

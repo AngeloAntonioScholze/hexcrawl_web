@@ -184,6 +184,13 @@ const MIGRATIONS: readonly string[] = [
     payload TEXT NOT NULL
   );
   `,
+  `
+  CREATE TABLE catalog_override (
+    id TEXT PRIMARY KEY,
+    ord INTEGER NOT NULL,
+    payload TEXT NOT NULL
+  );
+  `,
 ]
 
 export const SCHEMA_VERSION = MIGRATIONS.length

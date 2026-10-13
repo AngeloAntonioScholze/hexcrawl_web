@@ -109,6 +109,24 @@ const snapshot = (patch: Partial<MapSnapshot> = {}): MapSnapshot => ({
     { id: 'merchant-b', caravanId: caravan.id, name: 'Bram', type: 'smith', level: 10 },
     { id: 'merchant-a', caravanId: caravan.id, name: 'Mira', type: 'doctor', level: 1 },
   ],
+  catalogOverrides: [
+    { id: 'smith.sharpen', op: 'edit', patch: { price: '12 gp', level: 5, materials: [] } },
+    {
+      id: 'mage.custom-0f0f0f0f',
+      op: 'add',
+      entry: {
+        id: 'mage.custom-0f0f0f0f',
+        merchant: 'mage',
+        level: 7,
+        kind: 'service',
+        name: 'Scry',
+        description: 'Shows a far hex.',
+        price: '200 gp',
+        materials: ['crystal'],
+      },
+    },
+    { id: 'smith.armour', op: 'remove' },
+  ],
   resources: [
     { id: 'res-2', hex: '2,0' as HexKey, type: 'timber', origin: 'generated' },
     { id: 'res-1', hex: '-3,1' as HexKey, type: 'iron', origin: 'manual' },
@@ -176,6 +194,7 @@ describe('schema', () => {
     expect(loaded.entities).toEqual([])
     expect(loaded.record).toEqual([])
     expect(loaded.merchants).toEqual([])
+    expect(loaded.catalogOverrides).toEqual([])
     expect(loaded.resources).toEqual([])
     expect(loaded.resourceChances).toEqual(defaultResourceChances())
     expect(loaded.resourceSpacing).toBe(DEFAULT_RESOURCE_SPACING)
@@ -349,6 +368,16 @@ describe('map state', () => {
 
     saveSnapshot(db, snapshot({ merchants: [] }))
     expect(loadSnapshot(db)!.merchants).toEqual([])
+  })
+
+  it('round-trips the catalog changes in the order they were made', () => {
+    const saved = snapshot()
+    saveSnapshot(db, saved)
+
+    expect(loadSnapshot(db)!.catalogOverrides).toEqual(saved.catalogOverrides)
+
+    saveSnapshot(db, snapshot({ catalogOverrides: [] }))
+    expect(loadSnapshot(db)!.catalogOverrides).toEqual([])
   })
 
   it('keeps the record in the order the turns were spent', () => {

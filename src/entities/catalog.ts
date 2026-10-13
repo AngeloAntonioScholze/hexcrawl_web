@@ -1,5 +1,5 @@
-import type { ResourceType } from '../terrain/resources'
-import { MERCHANT_TYPES, type MerchantType } from './merchant'
+import { RESOURCE_TYPES, type ResourceType } from '../terrain/resources'
+import { clampLevel, MERCHANT_LEVELS, MERCHANT_TYPES, type MerchantType } from './merchant'
 
 export type CatalogKind = 'trade' | 'service'
 
@@ -939,4 +939,165 @@ export function nextUnlocks(
 ): CatalogEntry[] {
   const locked = catalogFor(type, catalog).filter((entry) => entry.level > level)
   return locked.filter((entry) => entry.level === locked[0]?.level)
+}
+
+/** The parts of an entry the DM can rewrite. */
+export type CatalogPatch = Partial<
+  Pick<CatalogEntry, 'name' | 'description' | 'price' | 'level' | 'kind' | 'materials'>
+>
+
+/**
+ * One DM change to the catalog, keyed by entry id: a rewrite of part of a
+ * default entry, a default struck off, or an entry the DM made up whole.
+ */
+export type CatalogOverride =
+  | { id: string; op: 'edit'; patch: CatalogPatch }
+  | { id: string; op: 'remove' }
+  | { id: string; op: 'add'; entry: CatalogEntry }
+
+const sameMaterials = (a: readonly ResourceType[] = [], b: readonly ResourceType[] = []): boolean =>
+  a.length === b.length && a.every((one, index) => one === b[index])
+
+const sameEntry = (a: CatalogEntry, b: CatalogEntry): boolean =>
+  a.name === b.name &&
+  a.description === b.description &&
+  a.price === b.price &&
+  a.level === b.level &&
+  a.kind === b.kind &&
+  sameMaterials(a.materials, b.materials)
+
+// An entry with nothing to bring carries no materials list at all, as the
+// defaults do, so an emptied list and a missing one read the same.
+const settle = ({ materials, ...entry }: CatalogEntry): CatalogEntry => {
+  const settled = { ...entry, level: clampLevel(entry.level) }
+  return materials?.length ? { ...settled, materials } : settled
+}
+
+/** The catalog as the DM has left it: defaults rewritten or struck off, then the DM's own. */
+export function applyCatalogOverrides(
+  defaults: readonly CatalogEntry[],
+  overrides: readonly CatalogOverride[],
+): CatalogEntry[] {
+  const byId = new Map(overrides.map((one) => [one.id, one]))
+  const known = new Set(defaults.map((one) => one.id))
+
+  const kept = defaults.flatMap((entry) => {
+    const override = byId.get(entry.id)
+    if (override?.op === 'remove') return []
+    if (override?.op === 'edit') return [settle({ ...entry, ...override.patch })]
+    return [entry]
+  })
+
+  const added = overrides.flatMap((one) =>
+    one.op === 'add' && !known.has(one.id) ? [settle({ ...one.entry, id: one.id })] : [],
+  )
+  return [...kept, ...added]
+}
+
+// A blank name is no name at all, since an entry still has to be called
+// something, and resources the world does not have fall away.
+const cleanPatch = (patch: CatalogPatch): CatalogPatch => {
+  const clean: CatalogPatch = {}
+  if (patch.name?.trim()) clean.name = patch.name
+  if (patch.description !== undefined) clean.description = patch.description
+  if (patch.price !== undefined) clean.price = patch.price
+  if (patch.level !== undefined && Number.isFinite(patch.level)) {
+    clean.level = clampLevel(patch.level)
+  }
+  if (patch.kind !== undefined) clean.kind = patch.kind
+  if (patch.materials !== undefined) {
+    clean.materials = [...new Set(patch.materials)].filter((one) => RESOURCE_TYPES.includes(one))
+  }
+  return clean
+}
+
+const replaceOverride = (
+  overrides: readonly CatalogOverride[],
+  id: string,
+  next: CatalogOverride | null,
+): readonly CatalogOverride[] => {
+  const at = overrides.findIndex((one) => one.id === id)
+  if (at < 0) return next ? [...overrides, next] : overrides
+  return next
+    ? overrides.map((one, index) => (index === at ? next : one))
+    : overrides.filter((_, index) => index !== at)
+}
+
+/**
+ * Folds an edit into the overrides. Whatever matches the default is left out
+ * of the patch, so an entry edited back to how it shipped holds no override.
+ * Hands the same list back when nothing changes, which is what keeps a no-op
+ * out of the undo history.
+ */
+export function editOverride(
+  overrides: readonly CatalogOverride[],
+  id: string,
+  patch: CatalogPatch,
+  defaults: readonly CatalogEntry[] = DEFAULT_CATALOG,
+): readonly CatalogOverride[] {
+  const current = overrides.find((one) => one.id === id)
+  const change = cleanPatch(patch)
+
+  if (current?.op === 'add') {
+    const entry = settle({ ...current.entry, ...change })
+    return sameEntry(entry, current.entry)
+      ? overrides
+      : replaceOverride(overrides, id, { id, op: 'add', entry })
+  }
+
+  const base = defaults.find((one) => one.id === id)
+  if (!base || current?.op === 'remove') return overrides
+
+  const before = current?.op === 'edit' ? settle({ ...base, ...current.patch }) : base
+  const after = settle({ ...before, ...change })
+  if (sameEntry(before, after)) return overrides
+
+  const differs: CatalogPatch = {}
+  if (after.name !== base.name) differs.name = after.name
+  if (after.description !== base.description) differs.description = after.description
+  if (after.price !== base.price) differs.price = after.price
+  if (after.level !== base.level) differs.level = after.level
+  if (after.kind !== base.kind) differs.kind = after.kind
+  if (!sameMaterials(after.materials, base.materials)) differs.materials = after.materials ?? []
+
+  return replaceOverride(
+    overrides,
+    id,
+    Object.keys(differs).length > 0 ? { id, op: 'edit', patch: differs } : null,
+  )
+}
+
+/** Strikes a default off, or throws away an entry the DM made. */
+export function removeOverride(
+  overrides: readonly CatalogOverride[],
+  id: string,
+  defaults: readonly CatalogEntry[] = DEFAULT_CATALOG,
+): readonly CatalogOverride[] {
+  const current = overrides.find((one) => one.id === id)
+  if (current?.op === 'add') return replaceOverride(overrides, id, null)
+  if (current?.op === 'remove' || !defaults.some((one) => one.id === id)) return overrides
+  return replaceOverride(overrides, id, { id, op: 'remove' })
+}
+
+/** Puts a default back as it shipped; an entry the DM made has nothing to go back to. */
+export function resetOverride(
+  overrides: readonly CatalogOverride[],
+  id: string,
+): readonly CatalogOverride[] {
+  const current = overrides.find((one) => one.id === id)
+  return current && current.op !== 'add' ? replaceOverride(overrides, id, null) : overrides
+}
+
+export function customEntry(merchant: MerchantType, fields: CatalogPatch = {}): CatalogEntry {
+  const clean = cleanPatch(fields)
+  return settle({
+    id: `${merchant}.custom-${crypto.randomUUID().slice(0, 8)}`,
+    merchant,
+    level: clean.level ?? MERCHANT_LEVELS.min,
+    kind: clean.kind ?? 'service',
+    name: clean.name ?? 'New service',
+    description: clean.description ?? '',
+    price: clean.price ?? '',
+    materials: clean.materials,
+  })
 }

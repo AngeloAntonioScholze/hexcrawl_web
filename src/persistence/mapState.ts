@@ -1,6 +1,7 @@
 import type { Database } from '@sqlite.org/sqlite-wasm'
 import type { EncounterOverride } from '../encounters/tables'
 import type { Action, ActionKind, ActionRecord } from '../entities/action'
+import type { CatalogOverride } from '../entities/catalog'
 import type { Entity, EntityKind, EntityState, Owner } from '../entities/entity'
 import type { Merchant, MerchantType } from '../entities/merchant'
 import type { HexEvent, HexLocation } from '../hex/content'
@@ -61,6 +62,8 @@ export interface MapSnapshot {
   locations: readonly ({ hex: HexKey } & HexLocation)[]
   /** Every caravan's crew, in the order they were taken on. */
   merchants: readonly Merchant[]
+  /** The DM's changes to the services catalog, in the order they were first made. */
+  catalogOverrides: readonly CatalogOverride[]
   /** Listed in the order they were placed. */
   resources: readonly Resource[]
   resourceChances: ResourceChances
@@ -271,6 +274,18 @@ export function saveSnapshot(db: Database, snapshot: MapSnapshot): void {
       merchant.finalize()
     }
 
+    db.exec('DELETE FROM catalog_override')
+    const catalogOverride = db.prepare(
+      'INSERT INTO catalog_override (id, ord, payload) VALUES (?, ?, ?)',
+    )
+    try {
+      snapshot.catalogOverrides.forEach(({ id, ...rest }, index) => {
+        catalogOverride.bind([id, index, JSON.stringify(rest)]).stepReset()
+      })
+    } finally {
+      catalogOverride.finalize()
+    }
+
     db.exec('DELETE FROM resource')
     const resource = db.prepare(
       'INSERT INTO resource (id, hex, ord, type, origin) VALUES (?, ?, ?, ?, ?)',
@@ -302,13 +317,15 @@ export function saveSnapshot(db: Database, snapshot: MapSnapshot): void {
     }
 
     db.exec('DELETE FROM encounter_override')
-    const override = db.prepare('INSERT INTO encounter_override (ord, payload) VALUES (?, ?)')
+    const encounterOverride = db.prepare(
+      'INSERT INTO encounter_override (ord, payload) VALUES (?, ?)',
+    )
     try {
       snapshot.encounterOverrides.forEach((one, index) => {
-        override.bind([index, JSON.stringify(one)]).stepReset()
+        encounterOverride.bind([index, JSON.stringify(one)]).stepReset()
       })
     } finally {
-      override.finalize()
+      encounterOverride.finalize()
     }
   })
 }
@@ -399,6 +416,13 @@ export function loadSnapshot(db: Database): MapSnapshot | null {
       type: String(one.type) as MerchantType,
       level: Number(one.level),
     })),
+    catalogOverrides: db.selectObjects('SELECT * FROM catalog_override ORDER BY ord').map(
+      (one) =>
+        ({
+          ...(JSON.parse(String(one.payload)) as object),
+          id: String(one.id),
+        }) as CatalogOverride,
+    ),
     resources: db.selectObjects('SELECT * FROM resource ORDER BY ord').map((one) => ({
       id: String(one.id),
       hex: String(one.hex) as HexKey,

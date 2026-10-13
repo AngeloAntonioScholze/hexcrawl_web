@@ -1,11 +1,17 @@
 import { describe, expect, it } from 'vitest'
-import { RESOURCE_TYPES } from '../terrain/resources'
+import { RESOURCE_TYPES, type ResourceType } from '../terrain/resources'
 import {
+  applyCatalogOverrides,
   catalogFor,
+  customEntry,
   DEFAULT_CATALOG,
+  editOverride,
   nextUnlocks,
+  removeOverride,
+  resetOverride,
   unlockedServices,
   type CatalogEntry,
+  type CatalogOverride,
 } from './catalog'
 import { MERCHANT_LEVELS, MERCHANT_TYPES } from './merchant'
 
@@ -107,5 +113,91 @@ describe('nextUnlocks', () => {
   it('is empty once nothing is left to unlock', () => {
     expect(nextUnlocks('smith', 9, catalog)).toEqual([])
     expect(nextUnlocks('smith', MERCHANT_LEVELS.max)).toEqual([])
+  })
+})
+
+describe('catalog overrides', () => {
+  const defaults = [entry('a', 1, 'Alpha'), entry('b', 3, 'Beta')]
+  const byId = (catalog: readonly CatalogEntry[], id: string): CatalogEntry | undefined =>
+    catalog.find((one) => one.id === id)
+
+  it('rewrites, strikes off and adds entries, defaults first', () => {
+    const made: CatalogEntry = { ...entry('custom-1', 2, 'Gamma'), materials: ['iron'] }
+    const merged = applyCatalogOverrides(defaults, [
+      { id: 'smith.b', op: 'remove' },
+      { id: 'smith.custom-1', op: 'add', entry: made },
+      { id: 'smith.a', op: 'edit', patch: { price: '3 gp', level: 4 } },
+    ])
+
+    expect(merged.map((one) => one.id)).toEqual(['smith.a', 'smith.custom-1'])
+    expect(byId(merged, 'smith.a')).toMatchObject({ name: 'Alpha', price: '3 gp', level: 4 })
+    expect(byId(merged, 'smith.custom-1')).toEqual(made)
+  })
+
+  it('keeps unlock levels within 1 to 10 and ignores changes to entries it does not have', () => {
+    const merged = applyCatalogOverrides(defaults, [
+      { id: 'smith.a', op: 'edit', patch: { level: 40 } },
+      { id: 'smith.gone', op: 'remove' },
+      { id: 'smith.b', op: 'add', entry: entry('b', 2, 'Impostor') },
+    ])
+    expect(merged.map((one) => [one.id, one.level, one.name])).toEqual([
+      ['smith.a', MERCHANT_LEVELS.max, 'Alpha'],
+      ['smith.b', 3, 'Beta'],
+    ])
+  })
+
+  it('folds edits into one patch holding only what differs from the default', () => {
+    let overrides = editOverride([], 'smith.a', { price: '3 gp' }, defaults)
+    overrides = editOverride(overrides, 'smith.a', { level: 0 }, defaults)
+    expect(overrides).toEqual([{ id: 'smith.a', op: 'edit', patch: { price: '3 gp' } }])
+
+    overrides = editOverride(overrides, 'smith.a', { level: 5, name: '  ' }, defaults)
+    expect(overrides).toEqual([{ id: 'smith.a', op: 'edit', patch: { price: '3 gp', level: 5 } }])
+
+    overrides = editOverride(overrides, 'smith.a', { price: '', level: 1 }, defaults)
+    expect(overrides).toEqual([])
+  })
+
+  it('hands the same list back when an edit changes nothing', () => {
+    const overrides = editOverride([], 'smith.a', { price: '3 gp' }, defaults)
+    expect(editOverride(overrides, 'smith.a', { price: '3 gp' }, defaults)).toBe(overrides)
+    expect(editOverride(overrides, 'smith.nope', { price: '1 gp' }, defaults)).toBe(overrides)
+  })
+
+  it('leaves resources the world does not have out of an edit', () => {
+    const materials = ['iron', 'mithril', 'iron'] as ResourceType[]
+    const overrides = editOverride([], 'smith.a', { materials }, defaults)
+    expect(byId(applyCatalogOverrides(defaults, overrides), 'smith.a')?.materials).toEqual(['iron'])
+  })
+
+  it('restores the default once its override is reset', () => {
+    let overrides = editOverride([], 'smith.a', { name: 'Renamed' }, defaults)
+    overrides = removeOverride(overrides, 'smith.b', defaults)
+    expect(applyCatalogOverrides(defaults, overrides).map((one) => one.name)).toEqual(['Renamed'])
+
+    overrides = resetOverride(resetOverride(overrides, 'smith.a'), 'smith.b')
+    expect(overrides).toEqual([])
+    expect(applyCatalogOverrides(defaults, overrides)).toEqual(defaults)
+  })
+
+  it('edits and removes an entry the DM made, which a reset leaves alone', () => {
+    const made = customEntry('smith', { name: 'Gamma', level: 12 })
+    expect(made.id).toMatch(/^smith\.custom-[0-9a-f]{8}$/)
+    expect(made.level).toBe(MERCHANT_LEVELS.max)
+
+    let overrides: readonly CatalogOverride[] = [{ id: made.id, op: 'add', entry: made }]
+    overrides = editOverride(overrides, made.id, { price: '9 gp' }, defaults)
+    expect(byId(applyCatalogOverrides(defaults, overrides), made.id)?.price).toBe('9 gp')
+    expect(resetOverride(overrides, made.id)).toBe(overrides)
+    expect(removeOverride(overrides, made.id, defaults)).toEqual([])
+  })
+
+  it('feeds the merged catalog to what a merchant offers', () => {
+    const merged = applyCatalogOverrides(
+      DEFAULT_CATALOG,
+      editOverride([], 'smith.sharpen', { level: 1 }),
+    )
+    expect(unlockedServices('smith', 1, merged).map((one) => one.id)).toContain('smith.sharpen')
+    expect(unlockedServices('smith', 1).map((one) => one.id)).not.toContain('smith.sharpen')
   })
 })

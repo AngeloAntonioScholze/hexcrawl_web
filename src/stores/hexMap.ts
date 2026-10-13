@@ -11,6 +11,17 @@ import {
   type Owner,
 } from '../entities/entity'
 import {
+  applyCatalogOverrides,
+  customEntry,
+  DEFAULT_CATALOG,
+  editOverride,
+  removeOverride,
+  resetOverride,
+  type CatalogEntry,
+  type CatalogOverride,
+  type CatalogPatch,
+} from '../entities/catalog'
+import {
   clampLevel,
   MERCHANT_INFO,
   newMerchant,
@@ -213,6 +224,12 @@ export const useHexMapStore = defineStore('hexMap', () => {
   /** Every caravan's crew, in the order they were taken on. */
   const merchants = shallowRef<readonly Merchant[]>([])
 
+  /** The DM's changes to what merchants offer; like the crews, a new world keeps them. */
+  const catalogOverrides = shallowRef<readonly CatalogOverride[]>([])
+  const catalog = computed<readonly CatalogEntry[]>(() =>
+    applyCatalogOverrides(DEFAULT_CATALOG, catalogOverrides.value),
+  )
+
   /** Every resource on the map, in the order they were placed. */
   const resources = shallowRef<readonly Resource[]>([])
   const resourceChances = shallowRef<ResourceChances>(defaultResourceChances())
@@ -266,6 +283,7 @@ export const useHexMapStore = defineStore('hexMap', () => {
     events: slotOf(events),
     locations: slotOf(locations),
     merchants: slotOf(merchants),
+    catalogOverrides: slotOf(catalogOverrides),
     resources: slotOf(resources),
     resourceChances: slotOf(resourceChances),
     resourceSpacing: slotOf(resourceSpacing),
@@ -552,6 +570,24 @@ export const useHexMapStore = defineStore('hexMap', () => {
 
   const setMerchantLevel = (id: string, level: number): void => {
     patchMerchant(id, { level: clampLevel(level) })
+  }
+
+  const editCatalogEntry = (id: string, patch: CatalogPatch): void => {
+    catalogOverrides.value = editOverride(catalogOverrides.value, id, patch)
+  }
+
+  const removeCatalogEntry = (id: string): void => {
+    catalogOverrides.value = removeOverride(catalogOverrides.value, id)
+  }
+
+  const resetCatalogEntry = (id: string): void => {
+    catalogOverrides.value = resetOverride(catalogOverrides.value, id)
+  }
+
+  const addCatalogEntry = (merchant: MerchantType, fields?: CatalogPatch): CatalogEntry => {
+    const entry = customEntry(merchant, fields)
+    catalogOverrides.value = [...catalogOverrides.value, { id: entry.id, op: 'add', entry }]
+    return entry
   }
 
   const resourcesOn = (hex: HexKey): readonly Resource[] => resourcesByHex.value.get(hex) ?? []
@@ -1187,6 +1223,7 @@ export const useHexMapStore = defineStore('hexMap', () => {
     events: [...events.value].flatMap(([hex, list]) => list.map((one) => ({ hex, ...one }))),
     locations: [...locations.value].flatMap(([hex, list]) => list.map((one) => ({ hex, ...one }))),
     merchants: merchants.value,
+    catalogOverrides: catalogOverrides.value,
     resources: resources.value,
     resourceChances: resourceChances.value,
     resourceSpacing: resourceSpacing.value,
@@ -1242,6 +1279,7 @@ export const useHexMapStore = defineStore('hexMap', () => {
     events.value = grouped<HexEvent>(saved.events)
     locations.value = grouped<HexLocation>(saved.locations)
     merchants.value = saved.merchants.map((one) => ({ ...one }))
+    catalogOverrides.value = saved.catalogOverrides.map((one) => ({ ...one }))
     resources.value = saved.resources.map((one) => ({ ...one }))
     resourceChances.value = { ...saved.resourceChances }
     resourceSpacing.value = saved.resourceSpacing
@@ -1386,6 +1424,12 @@ export const useHexMapStore = defineStore('hexMap', () => {
     removeMerchant: history.track(removeMerchant),
     renameMerchant: history.track(renameMerchant, (id) => `merchant-name:${id}`),
     setMerchantLevel: history.track(setMerchantLevel, (id) => `merchant-level:${id}`),
+    catalogOverrides,
+    catalog,
+    editCatalogEntry: history.track(editCatalogEntry, (id) => `catalog:${id}`),
+    removeCatalogEntry: history.track(removeCatalogEntry),
+    addCatalogEntry: history.track(addCatalogEntry),
+    resetCatalogEntry: history.track(resetCatalogEntry),
     resources,
     resourcesOn,
     addResource: history.track(addResource),

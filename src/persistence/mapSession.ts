@@ -41,6 +41,7 @@ const plain = (snapshot: MapSnapshot): MapSnapshot => ({
   events: snapshot.events.map((one) => ({ ...one })),
   locations: snapshot.locations.map((one) => ({ ...one })),
   merchants: snapshot.merchants.map((one) => ({ ...one })),
+  catalogOverrides: snapshot.catalogOverrides.map((one) => JSON.parse(JSON.stringify(one))),
   resources: snapshot.resources.map((one) => ({ ...one })),
   resourceChances: { ...snapshot.resourceChances },
   resourceSpacing: snapshot.resourceSpacing,

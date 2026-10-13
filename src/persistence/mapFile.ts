@@ -6,6 +6,7 @@ import {
   type EncounterWhen,
 } from '../encounters/tables'
 import type { Action, ActionKind, ActionRecord } from '../entities/action'
+import type { CatalogEntry, CatalogKind, CatalogOverride, CatalogPatch } from '../entities/catalog'
 import type { Entity, EntityKind, Owner } from '../entities/entity'
 import {
   MERCHANT_LEVELS,
@@ -17,6 +18,7 @@ import type { HexKey } from '../hex/coords'
 import type { TerrainControls } from '../stores/hexMap'
 import {
   defaultResourceChances,
+  RESOURCE_TYPES,
   TERRAIN_RESOURCES,
   type Resource,
   type ResourceChances,
@@ -119,6 +121,53 @@ const isEncounterOverride: Guard<EncounterOverride> = (value): value is Encounte
       ? isString(value.id)
       : value.kind === 'change' && isString(value.id) && isEncounterChange(value.change))
 
+const isMaterials = listOf(oneOf<ResourceType>(...RESOURCE_TYPES))
+
+const isCatalogKind = oneOf<CatalogKind>('trade', 'service')
+
+const PATCH_FIELDS: { [K in keyof CatalogPatch]-?: Guard<NonNullable<CatalogPatch[K]>> } = {
+  name: isString,
+  description: isString,
+  price: isString,
+  level: isLevel,
+  kind: isCatalogKind,
+  materials: isMaterials,
+}
+
+const isCatalogPatch: Guard<CatalogPatch> = (value): value is CatalogPatch =>
+  isObject(value) &&
+  Object.entries(value).every(
+    ([key, field]) =>
+      Object.hasOwn(PATCH_FIELDS, key) &&
+      (PATCH_FIELDS[key as keyof CatalogPatch] as Guard<unknown>)(field),
+  )
+
+const isCatalogEntry = shape<CatalogEntry>({
+  id: isString,
+  merchant: oneOf<MerchantType>(...MERCHANT_TYPES),
+  level: isLevel,
+  kind: isCatalogKind,
+  name: isString,
+  description: isString,
+  price: isString,
+  materials: (value): value is readonly ResourceType[] | undefined =>
+    value === undefined || isMaterials(value),
+})
+
+const isCatalogOverride: Guard<CatalogOverride> = (value): value is CatalogOverride => {
+  if (!isObject(value) || !isString(value.id)) return false
+  if (value.op === 'remove') return true
+  if (value.op === 'edit') return isCatalogPatch(value.patch)
+  return value.op === 'add' && isCatalogEntry(value.entry) && value.entry.id === value.id
+}
+
+// The overrides are keyed by entry id, so two for one entry would leave which
+// one counts up to the order they happen to be read in.
+const isCatalogOverrides: Guard<readonly CatalogOverride[]> = (
+  value,
+): value is readonly CatalogOverride[] =>
+  listOf(isCatalogOverride)(value) && new Set(value.map((one) => one.id)).size === value.length
+
 /** One check per snapshot field; a new field is one new line here. */
 const SNAPSHOT_FIELDS: { [K in keyof MapSnapshot]-?: Guard<MapSnapshot[K]> } = {
   terrain: shape<TerrainControls>({
@@ -198,6 +247,7 @@ const SNAPSHOT_FIELDS: { [K in keyof MapSnapshot]-?: Guard<MapSnapshot[K]> } = {
       level: isLevel,
     }),
   ),
+  catalogOverrides: isCatalogOverrides,
   resources: listOf(
     shape<Resource>({
       id: isString,

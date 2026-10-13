@@ -86,6 +86,24 @@ const snapshot = (): MapSnapshot => ({
     { hex: '0,0' as HexKey, id: 'loc-1', name: 'Oakvale', kind: 'village', description: '' },
   ],
   merchants: [{ id: 'merchant-1', caravanId: 'party-1', name: 'Bram', type: 'smith', level: 4 }],
+  catalogOverrides: [
+    { id: 'smith.sharpen', op: 'edit', patch: { price: '12 gp', materials: [] } },
+    { id: 'smith.armour', op: 'remove' },
+    {
+      id: 'cook.custom-1a2b3c4d',
+      op: 'add',
+      entry: {
+        id: 'cook.custom-1a2b3c4d',
+        merchant: 'cook',
+        level: 2,
+        kind: 'trade',
+        name: 'Pickled eel',
+        description: 'Keeps a month.',
+        price: '2 sp',
+        materials: ['fish'],
+      },
+    },
+  ],
   resources: [{ id: 'res-1', hex: '2,-1' as HexKey, type: 'iron', origin: 'generated' }],
   resourceChances: { ...defaultResourceChances(), forest: 0.2 },
   resourceSpacing: 10,
@@ -183,6 +201,36 @@ describe('parseMapFile', () => {
     ['a null location', (map) => (map.locations[0] = null), 'locations'],
     ['an unknown merchant type', (map) => (map.merchants[0].type = 'jester'), 'merchants'],
     ['a merchant level past 10', (map) => (map.merchants[0].level = 11), 'merchants'],
+    [
+      'an unknown catalog change',
+      (map) => (map.catalogOverrides[1].op = 'hide'),
+      'catalogOverrides',
+    ],
+    [
+      'a catalog edit to a field there is none of',
+      (map) => (map.catalogOverrides[0].patch.colour = 'red'),
+      'catalogOverrides',
+    ],
+    [
+      'a catalog unlock past 10',
+      (map) => (map.catalogOverrides[0].patch.level = 11),
+      'catalogOverrides',
+    ],
+    [
+      'an added entry under another id',
+      (map) => (map.catalogOverrides[2].entry.id = 'cook.other'),
+      'catalogOverrides',
+    ],
+    [
+      'an added entry needing an unknown resource',
+      (map) => (map.catalogOverrides[2].entry.materials = ['mithril']),
+      'catalogOverrides',
+    ],
+    [
+      'two changes to one entry',
+      (map) => (map.catalogOverrides[1].id = 'smith.sharpen'),
+      'catalogOverrides',
+    ],
     ['an unknown resource', (map) => (map.resources[0].type = 'mithril'), 'resources'],
     ['odds above certainty', (map) => (map.resourceChances.forest = 2), 'resourceChances'],
     ['a terrain with no odds', (map) => delete map.resourceChances.peaks, 'resourceChances'],
@@ -263,6 +311,9 @@ describe('a map carried out and back in', () => {
       title: 'Sphinx',
       description: '',
     })
+    store.editCatalogEntry('smith.sharpen', { price: '12 gp', level: 5 })
+    store.removeCatalogEntry('smith.armour')
+    store.addCatalogEntry('cook', { name: 'Pickled eel', materials: ['fish'] })
     store.fog = true
     store.dmView = true
     expect(store.snapshot.fogEdits.length).toBeGreaterThan(0)
@@ -277,6 +328,7 @@ describe('a map carried out and back in', () => {
     fresh.restore(result.snapshot)
 
     expect(fresh.snapshot).toEqual(store.snapshot)
+    expect(fresh.catalog).toEqual(store.catalog)
     expect(serialiseMap(fresh.snapshot)).toBe(exported)
   })
 
