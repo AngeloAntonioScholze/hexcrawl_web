@@ -20,7 +20,7 @@ import {
 import { resolveTurn } from '../entities/resolve'
 import type { TokenShape } from '../engine/partyToken'
 import type { HexEvent, HexLocation } from '../hex/content'
-import { hexKey, parseKey, type Axial, type HexKey } from '../hex/coords'
+import { hexKey, parseKey, range, type Axial, type HexKey } from '../hex/coords'
 import type { VisionOptions } from '../hex/vision'
 import type { MapSnapshot } from '../persistence/mapState'
 import { fieldFromTiles, type TerrainField } from '../terrain/field'
@@ -117,6 +117,17 @@ export const TERRAIN_LIMITS = {
 } as const
 
 export const PACE_LIMITS = { min: 0.5, max: 3, step: 0.5 } as const
+
+/** What a click on the map does in DM view: look at a hex, or work the ground. */
+export type DmTool = 'select' | 'paint' | 'fog' | 'road'
+
+export const DM_TOOLS: readonly DmTool[] = ['select', 'paint', 'fog', 'road']
+
+/** Tools that work every hex within the brush radius rather than one hex. */
+export const BRUSH_TOOLS: ReadonlySet<DmTool> = new Set(['paint', 'fog'])
+
+/** Brush radius in hexes: 0 is the hex clicked alone. */
+export const BRUSH_LIMITS = { min: 0, max: 5, step: 1 } as const
 
 /**
  * How far the world runs from the middle, in hexes. Only the window is ever
@@ -398,6 +409,24 @@ export const useHexMapStore = defineStore('hexMap', () => {
     selectedHex.value = hex ? hexKey(hex) : null
   }
 
+  /** The DM's tool in hand; view state, never saved. */
+  const dmTool = ref<DmTool>('select')
+  const brushSize = ref(1)
+
+  const setDmTool = (tool: DmTool): void => {
+    dmTool.value = tool
+  }
+
+  const setBrushSize = (radius: number): void => {
+    if (!Number.isFinite(radius)) return
+    brushSize.value = Math.max(BRUSH_LIMITS.min, Math.min(BRUSH_LIMITS.max, Math.round(radius)))
+  }
+
+  const brushHexes = (center: Axial): HexKey[] =>
+    (BRUSH_TOOLS.has(dmTool.value) ? range(center, brushSize.value) : [center])
+      .filter((hex) => field.value.at(hex) !== undefined)
+      .map(hexKey)
+
   /** Which side panels are expanded; view state, never saved. */
   const panelsOpen = ref<Record<SidePanel, boolean>>({ world: true, entities: true, details: true })
 
@@ -641,14 +670,23 @@ export const useHexMapStore = defineStore('hexMap', () => {
   }
 
   /**
-   * A click on the map: the DM picks a hex to look at, a player gives an order.
+   * What each DM tool does to the hexes under the brush. A tool with no entry
+   * here does nothing yet.
+   */
+  const toolHandlers: { [T in Exclude<DmTool, 'select'>]?: (hexes: readonly HexKey[]) => void } = {}
+
+  /**
+   * A click on the map: the DM picks a hex to look at or works it with a tool, a
+   * player gives an order.
    * Clicking the picked hex again, or the goal of the order just given, takes
    * the pick back.
    */
   const click = (hex: Axial | null, append = false): void => {
     const key = hex ? hexKey(hex) : null
     if (dmView.value) {
-      selectHex(key === selectedHex.value ? null : hex)
+      const tool = dmTool.value
+      if (tool === 'select') selectHex(key === selectedHex.value ? null : hex)
+      else if (hex) toolHandlers[tool]?.(brushHexes(hex))
       return
     }
     const id = selectedId.value
@@ -1215,6 +1253,10 @@ export const useHexMapStore = defineStore('hexMap', () => {
     setHovered,
     selectedHex,
     selectHex,
+    dmTool,
+    setDmTool,
+    brushSize,
+    setBrushSize,
     panelsOpen,
     setPanelOpen,
     select: history.track(select),

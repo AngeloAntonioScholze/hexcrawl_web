@@ -9,7 +9,7 @@ import {
 } from '../terrain/resources'
 import { TERRAIN_DEFAULTS, type TerrainTile } from '../terrain/terrain'
 import { TURNS_PER_PHASE } from '../time/clock'
-import { MAX_SIGHT, MIN_SIGHT, TERRAIN_LIMITS, useHexMapStore } from './hexMap'
+import { BRUSH_LIMITS, MAX_SIGHT, MIN_SIGHT, TERRAIN_LIMITS, useHexMapStore } from './hexMap'
 
 // The number is the mechanical level; sight and climbs read that, and the
 // rendered height only trails along behind it.
@@ -103,6 +103,33 @@ describe('giving orders', () => {
 
     store.advanceTurn()
     expect(store.start).toBe('1,0')
+  })
+})
+
+describe('DM tools', () => {
+  it('starts on select, with a brush clamped to whole hexes', () => {
+    const store = setup()
+    expect(store.dmTool).toBe('select')
+
+    store.setBrushSize(2.4)
+    expect(store.brushSize).toBe(2)
+    store.setBrushSize(99)
+    expect(store.brushSize).toBe(BRUSH_LIMITS.max)
+    store.setBrushSize(-3)
+    expect(store.brushSize).toBe(BRUSH_LIMITS.min)
+  })
+
+  it('works the ground instead of selecting while a tool is in hand', () => {
+    const store = setup()
+    store.setDmTool('paint')
+
+    store.click({ q: 2, r: 0 })
+    expect(store.selectedHex).toBeNull()
+    expect(store.canUndo).toBe(false)
+
+    store.setDmTool('select')
+    store.click({ q: 2, r: 0 })
+    expect(store.selectedHex).toBe('2,0')
   })
 })
 

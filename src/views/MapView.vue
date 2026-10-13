@@ -1,6 +1,7 @@
 <script setup lang="ts">
 import { computed, ref } from 'vue'
 import DayNightDial from '../components/DayNightDial.vue'
+import DmToolbar from '../components/DmToolbar.vue'
 import HexCanvas from '../components/HexCanvas.vue'
 import HexDetails from '../components/HexDetails.vue'
 import ViewToggle from '../components/ViewToggle.vue'
@@ -144,6 +145,7 @@ const olderTurns = computed(() => Math.max(0, store.journey.length - TURNS_SHOWN
     <HexCanvas />
     <DayNightDial />
     <ViewToggle />
+    <DmToolbar />
     <HexDetails />
     <div class="panels">
       <aside class="panel" :class="{ collapsed: worldCollapsed }">
