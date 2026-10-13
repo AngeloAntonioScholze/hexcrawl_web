@@ -42,6 +42,7 @@ import {
   type EncounterOverride,
   type EncounterRoll,
 } from '../encounters/tables'
+import { encountersMet, encountersUpTo, interleave, type LogEntry } from '../encounters/log'
 import { resolveTurn } from '../entities/resolve'
 import type { TokenShape } from '../engine/partyToken'
 import type { HexEvent, HexLocation } from '../hex/content'
@@ -700,7 +701,7 @@ export const useHexMapStore = defineStore('hexMap', () => {
   }
 
   const acceptEncounter = (hex: HexKey, entry: EncounterEntry): string =>
-    addEvent(hex, { title: entry.title, description: entry.description })
+    addEvent(hex, { title: entry.title, description: entry.description, turn: turn.value })
 
   const setOverrides = (next: EncounterOverride[]): void => {
     const now = encounterOverrides.value
@@ -739,10 +740,12 @@ export const useHexMapStore = defineStore('hexMap', () => {
 
   /**
    * A recorded future the entities turned away from never happened: giving an
-   * order or putting somebody down after a rewind cuts the record off here.
+   * order or putting somebody down after a rewind cuts the record off here,
+   * and the encounters met further on go with it.
    */
   const truncate = (): void => {
     if (frames.value.length > turn.value) setFrames(frames.value.slice(0, turn.value))
+    events.value = encountersUpTo(events.value, turn.value)
   }
 
   const queueAction = (id: string, action: Action): void => {
@@ -1004,11 +1007,13 @@ export const useHexMapStore = defineStore('hexMap', () => {
   /**
    * Wipes the crawl: every record, every order and everybody's place on the map
    * go, and the clock starts again at the first turn of the first day. The
-   * world under it is left standing.
+   * world under it is left standing, and so are the events the DM wrote by hand;
+   * the encounters met were part of the crawl.
    */
   const clearHistory = (): void => {
     turn.value = 0
     setFrames([])
+    events.value = encountersUpTo(events.value, -1)
     origins.value = new Map()
     queue.value = new Map()
     history.clear()
@@ -1104,6 +1109,11 @@ export const useHexMapStore = defineStore('hexMap', () => {
       entered: record.entered.length,
       spent: record.turn < turn.value,
     })),
+  )
+
+  /** The journey with the encounters met along it, kept like the turns over a rewind. */
+  const adventureLog = computed<LogEntry<JourneyRow>[]>(() =>
+    interleave(journey.value, encountersMet(events.value)),
   )
 
   const hexesWalked = computed(() =>
@@ -1530,6 +1540,7 @@ export const useHexMapStore = defineStore('hexMap', () => {
     skipPhase,
     canRewind,
     journey,
+    adventureLog,
     shownEntities,
     tokens,
     positionsAt,

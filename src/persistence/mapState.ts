@@ -245,11 +245,13 @@ export function saveSnapshot(db: Database, snapshot: MapSnapshot): void {
 
     db.exec('DELETE FROM hex_event')
     const event = db.prepare(
-      'INSERT INTO hex_event (id, hex, ord, title, description) VALUES (?, ?, ?, ?, ?)',
+      'INSERT INTO hex_event (id, hex, ord, title, description, turn) VALUES (?, ?, ?, ?, ?, ?)',
     )
     try {
       snapshot.events.forEach((one, index) => {
-        event.bind([one.id, one.hex, index, one.title, one.description]).stepReset()
+        event
+          .bind([one.id, one.hex, index, one.title, one.description, one.turn ?? null])
+          .stepReset()
       })
     } finally {
       event.finalize()
@@ -422,6 +424,7 @@ export function loadSnapshot(db: Database): MapSnapshot | null {
       id: String(one.id),
       title: String(one.title),
       description: String(one.description),
+      ...(one.turn === null ? {} : { turn: Number(one.turn) }),
     })),
     locations: db.selectObjects('SELECT * FROM hex_location ORDER BY ord').map((one) => ({
       hex: String(one.hex) as HexKey,

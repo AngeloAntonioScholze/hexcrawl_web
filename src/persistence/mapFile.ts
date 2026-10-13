@@ -228,6 +228,7 @@ const SNAPSHOT_FIELDS: { [K in keyof MapSnapshot]-?: Guard<MapSnapshot[K]> } = {
       id: isString,
       title: isString,
       description: isString,
+      turn: (value): value is number | undefined => value === undefined || isTurn(value),
     }),
   ),
   locations: listOf(

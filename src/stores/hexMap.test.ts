@@ -1960,11 +1960,78 @@ describe('encounter tables', () => {
 
     store.acceptEncounter('0,0', entry)
     expect(store.events.get('0,0')).toEqual([
-      { id: expect.any(String), title: entry.title, description: entry.description },
+      { id: expect.any(String), title: entry.title, description: entry.description, turn: 0 },
     ])
 
     store.undo()
     expect(store.events.has('0,0')).toBe(false)
+  })
+
+  const encountersInLog = (store: Store): string[] =>
+    store.adventureLog.flatMap((one) =>
+      one.kind === 'encounter' ? [`${one.encounter.turn}:${one.encounter.title}`] : [],
+    )
+
+  it('logs an accepted encounter at the turn the crawl stands on', () => {
+    const store = setup()
+    sendEast(store, 3)
+    store.advanceTurn()
+    store.advanceTurn()
+    const { entry } = store.rollEncounterOn('2,0', () => 0)!
+
+    const id = store.acceptEncounter('2,0', entry)
+
+    expect(store.events.get('2,0')?.[0]).toMatchObject({ id, turn: 2 })
+    expect(
+      store.adventureLog.map((one) => (one.kind === 'turn' ? one.row.turn : one.encounter.id)),
+    ).toEqual([0, 1, id])
+    store.addEvent('2,0', { title: 'a shrine', description: '' })
+    expect(encountersInLog(store)).toEqual([`2:${entry.title}`])
+  })
+
+  it('keeps an encounter over a rewind, and cuts it when the crawl goes another way', () => {
+    const store = setup()
+    sendEast(store, 3)
+    store.advanceTurn()
+    store.advanceTurn()
+    const { entry } = store.rollEncounterOn('2,0', () => 0)!
+    store.acceptEncounter('2,0', entry)
+
+    store.rewindTurn()
+    expect(encountersInLog(store)).toEqual([`2:${entry.title}`])
+    store.goToTurn(2)
+    expect(encountersInLog(store)).toEqual([`2:${entry.title}`])
+
+    store.goToTurn(1)
+    store.advanceTurn()
+    expect(encountersInLog(store)).toEqual([])
+    expect(store.events.has('2,0')).toBe(false)
+  })
+
+  it('keeps an encounter met on the turn a new order is given from', () => {
+    const store = setup()
+    sendEast(store, 3)
+    store.advanceTurn()
+    store.advanceTurn()
+    const { entry } = store.rollEncounterOn('2,0', () => 0)!
+    store.acceptEncounter('2,0', entry)
+
+    store.select({ q: -2, r: 0 })
+    store.advanceTurn()
+
+    expect(encountersInLog(store)).toEqual([`2:${entry.title}`])
+  })
+
+  it('wipes the encounters met with the history, keeping the DM’s own events', () => {
+    const store = setup()
+    const { entry } = store.rollEncounterOn('0,0', () => 0)!
+    store.acceptEncounter('0,0', entry)
+    store.addEvent('0,0', { title: 'a shrine', description: '' })
+
+    store.clearHistory()
+
+    expect(store.events.get('0,0')?.map((one) => one.title)).toEqual(['a shrine'])
+    expect(store.adventureLog).toEqual([])
   })
 
   it('comes back from a snapshot with the overrides it was saved with', () => {

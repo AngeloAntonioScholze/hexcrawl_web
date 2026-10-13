@@ -28,9 +28,16 @@ const add = (): void => {
     <h2>events</h2>
 
     <ul v-if="events.length" class="list">
-      <li v-for="event in events" :key="event.id">
+      <li
+        v-for="event in events"
+        :key="event.id"
+        :class="{ ahead: event.turn !== undefined && event.turn > store.turn }"
+      >
         <div class="head">
-          <span class="title">{{ event.title }}</span>
+          <span class="title">
+            {{ event.title }}
+            <span v-if="event.turn !== undefined" class="met">turn {{ event.turn }}</span>
+          </span>
           <button
             type="button"
             class="drop"
@@ -94,6 +101,17 @@ h2 {
 
 .title {
   overflow-wrap: anywhere;
+}
+
+.met {
+  color: var(--ink-dim);
+  font-size: 0.72rem;
+  font-variant-numeric: tabular-nums;
+}
+
+/* Met on a turn the crawl has been wound back past: still recorded, not yet lived. */
+.list li.ahead {
+  color: var(--ink-dim);
 }
 
 .description {

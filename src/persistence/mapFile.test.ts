@@ -81,7 +81,10 @@ const snapshot = (): MapSnapshot => ({
     { entityId: 'ship-1', action: { kind: 'camp' } },
   ],
   notes: [{ hex: '-3,2' as HexKey, text: 'ruined watchtower' }],
-  events: [{ hex: '1,0' as HexKey, id: 'event-1', title: 'ambush', description: 'goblins' }],
+  events: [
+    { hex: '1,0' as HexKey, id: 'event-1', title: 'ambush', description: 'goblins' },
+    { hex: '0,0' as HexKey, id: 'event-2', title: 'wolves', description: '', turn: 3 },
+  ],
   locations: [
     { hex: '0,0' as HexKey, id: 'loc-1', name: 'Oakvale', kind: 'village', description: '' },
   ],
@@ -204,6 +207,7 @@ describe('parseMapFile', () => {
     ['a move with no route', (map) => delete map.queue[0].action.route, 'queue'],
     ['a rider that is not an id', (map) => (map.states[0].riding = 3), 'states'],
     ['an event without a title', (map) => delete map.events[0].title, 'events'],
+    ['an encounter met on no turn', (map) => (map.events[1].turn = 'dusk'), 'events'],
     ['a null location', (map) => (map.locations[0] = null), 'locations'],
     ['an unknown merchant type', (map) => (map.merchants[0].type = 'jester'), 'merchants'],
     ['a merchant level past 10', (map) => (map.merchants[0].level = 11), 'merchants'],

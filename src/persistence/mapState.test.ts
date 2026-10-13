@@ -100,6 +100,7 @@ const snapshot = (patch: Partial<MapSnapshot> = {}): MapSnapshot => ({
     { hex: '1,0' as HexKey, id: 'event-2', title: 'ambush', description: 'goblins' },
     { hex: '1,0' as HexKey, id: 'event-1', title: 'storm', description: 'a long night' },
     { hex: '0,0' as HexKey, id: 'event-3', title: 'omen', description: '' },
+    { hex: '0,0' as HexKey, id: 'event-4', title: 'wolves', description: 'a pack', turn: 2 },
   ],
   locations: [
     { hex: '0,0' as HexKey, id: 'loc-b', name: 'Oakvale', kind: 'village', description: 'quiet' },

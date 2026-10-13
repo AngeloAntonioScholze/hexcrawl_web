@@ -141,11 +141,11 @@ const TURNS_SHOWN = 40
 
 // Newest first: the last turn is the one anybody is looking for.
 const recentTurns = computed(() => {
-  const from = Math.max(0, store.journey.length - TURNS_SHOWN)
-  return store.journey.slice(from).reverse()
+  const from = Math.max(0, store.adventureLog.length - TURNS_SHOWN)
+  return store.adventureLog.slice(from).reverse()
 })
 
-const olderTurns = computed(() => Math.max(0, store.journey.length - TURNS_SHOWN))
+const olderTurns = computed(() => Math.max(0, store.adventureLog.length - TURNS_SHOWN))
 </script>
 
 <template>
@@ -502,7 +502,7 @@ const olderTurns = computed(() => Math.max(0, store.journey.length - TURNS_SHOWN
             <span>show all entities paths</span>
           </label>
 
-          <div v-if="store.journey.length" class="control stack">
+          <div v-if="store.adventureLog.length" class="control stack">
             <div class="row">
               <span>adventure log</span>
               <span class="value">{{ store.travelledKm }} km</span>
@@ -513,19 +513,38 @@ const olderTurns = computed(() => Math.max(0, store.journey.length - TURNS_SHOWN
             </div>
 
             <ol class="journey">
-              <li v-for="row in recentTurns" :key="row.turn">
+              <li
+                v-for="entry in recentTurns"
+                :key="entry.kind === 'turn' ? `turn:${entry.row.turn}` : entry.encounter.id"
+              >
                 <button
+                  v-if="entry.kind === 'turn'"
                   type="button"
-                  :class="{ here: row.turn === store.turn - 1, ahead: !row.spent }"
-                  :title="`put the crawl back as it stood at the end of turn ${row.turn}`"
-                  @click="store.goToTurn(row.turn + 1)"
+                  :class="{ here: entry.row.turn === store.turn - 1, ahead: !entry.row.spent }"
+                  :title="`put the crawl back as it stood at the end of turn ${entry.row.turn}`"
+                  @click="store.goToTurn(entry.row.turn + 1)"
                 >
-                  <span class="dim">{{ row.turn }}</span>
-                  <span>{{ row.hex }}</span>
-                  <span class="dim">{{ row.terrain }}</span>
+                  <span class="dim">{{ entry.row.turn }}</span>
+                  <span>{{ entry.row.hex }}</span>
+                  <span class="dim">{{ entry.row.terrain }}</span>
                   <span class="value">{{
-                    row.entered === 0 ? row.kind : `${row.entered} hex`
+                    entry.row.entered === 0 ? entry.row.kind : `${entry.row.entered} hex`
                   }}</span>
+                </button>
+                <button
+                  v-else
+                  type="button"
+                  class="met"
+                  :class="{
+                    here: entry.encounter.turn === store.turn,
+                    ahead: entry.encounter.turn > store.turn,
+                  }"
+                  :title="`put the crawl back to turn ${entry.encounter.turn}, when this was met`"
+                  @click="store.goToTurn(entry.encounter.turn)"
+                >
+                  <span class="dim">!</span>
+                  <span class="encounter">{{ entry.encounter.title }}</span>
+                  <span class="dim">{{ entry.encounter.hex }}</span>
                 </button>
               </li>
             </ol>
@@ -603,6 +622,18 @@ aside:where(.panel) {
   font-variant-numeric: tabular-nums;
   text-align: left;
   cursor: pointer;
+}
+
+.journey li button.met {
+  grid-template-columns: 1.75rem 1fr auto;
+  font-style: italic;
+}
+
+.journey .encounter {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
 .journey li button:hover {

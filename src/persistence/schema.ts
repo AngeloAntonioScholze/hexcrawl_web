@@ -204,6 +204,9 @@ const MIGRATIONS: readonly string[] = [
     terrain TEXT NOT NULL
   ) WITHOUT ROWID;
   `,
+  `
+  ALTER TABLE hex_event ADD COLUMN turn INTEGER;
+  `,
 ]
 
 export const SCHEMA_VERSION = MIGRATIONS.length
