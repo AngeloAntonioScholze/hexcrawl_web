@@ -2,7 +2,7 @@
 import { computed } from 'vue'
 import sunAndMoon from '../assets/sun-and-moon.png'
 import { useHexMapStore } from '../stores/hexMap'
-import { TURNS_PER_PHASE } from '../time/clock'
+import { clockLabel, TURNS_PER_PHASE, widestClockLabels } from '../time/clock'
 
 const store = useHexMapStore()
 
@@ -19,6 +19,8 @@ const STEPS = TURNS_PER_PHASE - 1
 
 /** The near horizon, then the end of each of the first three turns. */
 const SLASHES = [0, 1, 2, 3].map((n) => n / STEPS)
+
+const SIZERS = widestClockLabels(3)
 
 const onArc = (fraction: number, reach: number): { x: number; y: number } => {
   const angle = Math.PI - fraction * Math.PI
@@ -113,7 +115,12 @@ const dome = [
           <span class="sr">wind the clock back a turn</span>
         </button>
 
-        <strong>{{ store.clock.phase }} {{ store.clock.day }}</strong>
+        <span class="label">
+          <strong>{{ clockLabel(store.clock) }}</strong>
+          <strong v-for="sizer in SIZERS" :key="sizer" class="sizer" aria-hidden="true">
+            {{ sizer }}
+          </strong>
+        </span>
 
         <button
           v-if="store.dmView"
@@ -215,6 +222,24 @@ svg {
   font-weight: 600;
   text-transform: uppercase;
   letter-spacing: 0.1em;
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+}
+
+/* Every label shares one cell with invisible copies of the widest ones, so the
+   cell is as wide as the longest label in whatever font the dial is drawn in
+   and the arrows either side of it never shift as the text changes. */
+.label {
+  display: grid;
+  justify-items: center;
+}
+
+.label > * {
+  grid-area: 1 / 1;
+}
+
+.sizer {
+  visibility: hidden;
 }
 
 /* The dial itself is inert so it never eats a click meant for the map; only

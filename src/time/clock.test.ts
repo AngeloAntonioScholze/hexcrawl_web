@@ -1,5 +1,14 @@
 import { describe, expect, it } from 'vitest'
-import { clockAt, isNight, nextPhaseTurn, TURNS_PER_DAY, TURNS_PER_PHASE } from './clock'
+import {
+  clockAt,
+  clockLabel,
+  isNight,
+  nextPhaseTurn,
+  PHASES,
+  TURNS_PER_DAY,
+  TURNS_PER_PHASE,
+  widestClockLabels,
+} from './clock'
 
 describe('the clock', () => {
   it('starts at first light on the first day', () => {
@@ -47,5 +56,24 @@ describe('the clock', () => {
     expect(nextPhaseTurn(TURNS_PER_PHASE - 1)).toBe(TURNS_PER_PHASE)
     expect(nextPhaseTurn(TURNS_PER_PHASE)).toBe(TURNS_PER_DAY)
     expect(clockAt(nextPhaseTurn(1)).index).toBe(0)
+  })
+})
+
+describe('the clock label', () => {
+  it('reads the phase then the day', () => {
+    expect(clockLabel(clockAt(TURNS_PER_PHASE))).toBe('night 1')
+  })
+
+  it('is never longer than the widest labels while the day fits the digits', () => {
+    const widest = Math.max(...widestClockLabels(3).map((label) => label.length))
+    for (let turn = 0; turn < 999 * TURNS_PER_DAY; turn += 1) {
+      expect(clockLabel(clockAt(turn)).length).toBeLessThanOrEqual(widest)
+    }
+  })
+
+  it('sizes for every phase the clock can be in', () => {
+    const phases = new Set(Array.from({ length: TURNS_PER_DAY }, (_, turn) => clockAt(turn).phase))
+    expect([...phases].sort()).toEqual([...PHASES].sort())
+    expect(widestClockLabels(3)).toEqual(['day 888', 'night 888'])
   })
 })

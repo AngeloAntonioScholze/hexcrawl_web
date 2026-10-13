@@ -6,7 +6,9 @@ export const TURNS_PER_PHASE = 4
 
 export const TURNS_PER_DAY = TURNS_PER_PHASE * 2
 
-export type Phase = 'day' | 'night'
+export const PHASES = ['day', 'night'] as const
+
+export type Phase = (typeof PHASES)[number]
 
 export interface Clock {
   /** Whole turns since the crawl began; everything else is read off this. */
@@ -37,3 +39,13 @@ export function nextPhaseTurn(turn: number): number {
   const whole = Math.max(0, Math.floor(turn))
   return whole + (TURNS_PER_PHASE - (whole % TURNS_PER_PHASE))
 }
+
+export const clockLabel = ({ phase, day }: Pick<Clock, 'phase' | 'day'>): string =>
+  `${phase} ${day}`
+
+/**
+ * One label per phase with the day padded to the widest digits, so a box laid
+ * out to fit all of them never has to grow while the clock runs.
+ */
+export const widestClockLabels = (dayDigits: number): string[] =>
+  PHASES.map((phase) => clockLabel({ phase, day: Number('8'.repeat(dayDigits)) }))
