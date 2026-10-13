@@ -65,6 +65,8 @@ export interface MapSnapshot {
   resourceChances: ResourceChances
   /** The fewest hexes allowed between any two resources. */
   resourceSpacing: number
+  /** Hexes the DM revealed to the players or hid from them, whatever the crawl saw. */
+  fogEdits: readonly { hex: HexKey; revealed: boolean }[]
 }
 
 const SAVE_MAP = `
@@ -287,6 +289,14 @@ export function saveSnapshot(db: Database, snapshot: MapSnapshot): void {
     } finally {
       chance.finalize()
     }
+
+    db.exec('DELETE FROM fog_edit')
+    const fogEdit = db.prepare('INSERT INTO fog_edit (hex, revealed) VALUES (?, ?)')
+    try {
+      for (const one of snapshot.fogEdits) fogEdit.bind([one.hex, flag(one.revealed)]).stepReset()
+    } finally {
+      fogEdit.finalize()
+    }
   })
 }
 
@@ -393,5 +403,9 @@ export function loadSnapshot(db: Database): MapSnapshot | null {
       ),
     },
     resourceSpacing: Number(row.resource_spacing),
+    fogEdits: db.selectObjects('SELECT * FROM fog_edit').map((one) => ({
+      hex: String(one.hex) as HexKey,
+      revealed: Number(one.revealed) === 1,
+    })),
   }
 }

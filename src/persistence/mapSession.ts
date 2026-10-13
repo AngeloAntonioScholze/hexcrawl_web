@@ -44,6 +44,7 @@ const plain = (snapshot: MapSnapshot): MapSnapshot => ({
   resources: snapshot.resources.map((one) => ({ ...one })),
   resourceChances: { ...snapshot.resourceChances },
   resourceSpacing: snapshot.resourceSpacing,
+  fogEdits: snapshot.fogEdits.map((one) => ({ ...one })),
 })
 
 interface Pending {

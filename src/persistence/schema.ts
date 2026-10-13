@@ -172,6 +172,12 @@ const MIGRATIONS: readonly string[] = [
   `
   UPDATE map SET resource_spacing = 5 WHERE resource_spacing = 10;
   `,
+  `
+  CREATE TABLE fog_edit (
+    hex TEXT PRIMARY KEY,
+    revealed INTEGER NOT NULL
+  ) WITHOUT ROWID;
+  `,
 ]
 
 export const SCHEMA_VERSION = MIGRATIONS.length

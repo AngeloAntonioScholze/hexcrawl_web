@@ -89,6 +89,7 @@ const snapshot = (): MapSnapshot => ({
   resources: [{ id: 'res-1', hex: '2,-1' as HexKey, type: 'iron', origin: 'generated' }],
   resourceChances: { ...defaultResourceChances(), forest: 0.2 },
   resourceSpacing: 10,
+  fogEdits: [{ hex: '3,3' as HexKey, revealed: true }],
 })
 
 // Breaking the file in every way it can be broken is the point, so the edits
@@ -171,6 +172,8 @@ describe('parseMapFile', () => {
     ['odds above certainty', (map) => (map.resourceChances.forest = 2), 'resourceChances'],
     ['a terrain with no odds', (map) => delete map.resourceChances.peaks, 'resourceChances'],
     ['a fractional spacing', (map) => (map.resourceSpacing = 2.5), 'resourceSpacing'],
+    ['a fog edit with no side', (map) => (map.fogEdits[0].revealed = 1), 'fogEdits'],
+    ['no fog edits at all', (map) => delete map.fogEdits, 'fogEdits'],
   ])('turns away %s, naming the field', (_, edit, field) => {
     expect(rejected(tampered((file) => edit(file.map)))).toContain(`"${field}"`)
   })
@@ -202,8 +205,12 @@ describe('a map carried out and back in', () => {
     store.setNote('1,0' as HexKey, 'smells of smoke')
     store.addEvent('2,0' as HexKey, { title: 'ambush', description: 'goblins' })
     store.addLocation('0,0' as HexKey, { name: 'Oakvale', kind: 'village', description: '' })
+    store.setDmTool('fog')
+    store.setFogMode('hide')
+    store.click({ q: 0, r: 0 })
     store.fog = true
     store.dmView = true
+    expect(store.snapshot.fogEdits.length).toBeGreaterThan(0)
     expect(store.snapshot.record.length).toBeGreaterThan(0)
     const exported = serialiseMap(store.snapshot)
 

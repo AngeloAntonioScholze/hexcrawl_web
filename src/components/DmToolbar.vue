@@ -1,4 +1,5 @@
 <script setup lang="ts">
+import type { FogMode } from '../hex/fogEdits'
 import { BRUSH_LIMITS, BRUSH_TOOLS, DM_TOOLS, useHexMapStore, type DmTool } from '../stores/hexMap'
 
 const store = useHexMapStore()
@@ -9,6 +10,8 @@ const TOOL_LABELS: Readonly<Record<DmTool, string>> = {
   fog: 'fog',
   road: 'road',
 }
+
+const FOG_MODES: readonly FogMode[] = ['reveal', 'hide']
 
 const onBrush = (event: Event): void => {
   store.setBrushSize(Number((event.target as HTMLInputElement).value))
@@ -42,6 +45,19 @@ const onBrush = (event: Event): void => {
       />
       <span class="value">{{ store.brushSize }}</span>
     </label>
+
+    <div v-if="store.dmTool === 'fog'" class="fog-modes" role="group" aria-label="fog brush">
+      <button
+        v-for="mode in FOG_MODES"
+        :key="mode"
+        type="button"
+        :class="{ here: store.fogMode === mode }"
+        :aria-pressed="store.fogMode === mode"
+        @click="store.setFogMode(mode)"
+      >
+        {{ mode }}
+      </button>
+    </div>
   </div>
 </template>
 
@@ -92,6 +108,11 @@ button.here {
   display: flex;
   gap: 8px;
   align-items: center;
+}
+
+.fog-modes {
+  display: flex;
+  gap: 4px;
 }
 
 .value {

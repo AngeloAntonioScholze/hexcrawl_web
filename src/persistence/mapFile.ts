@@ -175,6 +175,7 @@ const SNAPSHOT_FIELDS: { [K in keyof MapSnapshot]-?: Guard<MapSnapshot[K]> } = {
     ) as { [K in TerrainId]: Guard<number> },
   ),
   resourceSpacing: isTurn,
+  fogEdits: listOf(shape<MapSnapshot['fogEdits'][number]>({ hex: isHex, revealed: isBoolean })),
 }
 
 export function serialiseMap(snapshot: MapSnapshot): string {

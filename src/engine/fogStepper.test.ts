@@ -79,6 +79,22 @@ describe('createFogStepper', () => {
     expect(grid.last()).toEqual({ kind: 'update', map: new Map([[K.f, REMEMBERED]]) })
   })
 
+  it('buries ground the players were made to forget, in sight or not', () => {
+    const { stepper, grid, next } = stepped()
+    stepper.paint(grid.target, {
+      ...next,
+      visible: keys('b'),
+      explored: { seen: keys('b'), added: new Set(), lost: keys('a', 'c'), version: 3 },
+    })
+    expect(grid.last()).toEqual({
+      kind: 'update',
+      map: new Map([
+        [K.c, 0],
+        [K.a, 0],
+      ]),
+    })
+  })
+
   it('draws nothing when a step changes nothing', () => {
     const { stepper, grid, next } = stepped()
     stepper.paint(grid.target, {

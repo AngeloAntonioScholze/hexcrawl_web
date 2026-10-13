@@ -115,6 +115,10 @@ const snapshot = (patch: Partial<MapSnapshot> = {}): MapSnapshot => ({
   ],
   resourceChances: { ...defaultResourceChances(), forest: 0.2, peaks: 0 },
   resourceSpacing: 6,
+  fogEdits: [
+    { hex: '4,-2' as HexKey, revealed: true },
+    { hex: '0,0' as HexKey, revealed: false },
+  ],
   ...patch,
 })
 
@@ -160,6 +164,7 @@ describe('schema', () => {
     expect(loaded.resources).toEqual([])
     expect(loaded.resourceChances).toEqual(defaultResourceChances())
     expect(loaded.resourceSpacing).toBe(DEFAULT_RESOURCE_SPACING)
+    expect(loaded.fogEdits).toEqual([])
 
     saveSnapshot(old, snapshot())
     expect(loadSnapshot(old)!.turn).toBe(2)
@@ -281,6 +286,16 @@ describe('map state', () => {
     expect(loaded.resources).toEqual(saved.resources)
     expect(loaded.resourceChances).toEqual(saved.resourceChances)
     expect(loaded.resourceSpacing).toBe(6)
+  })
+
+  it("round-trips the DM's fog edits, and lets them be cleared", () => {
+    saveSnapshot(db, snapshot())
+    const loaded = loadSnapshot(db)!.fogEdits
+    expect(loaded).toHaveLength(2)
+    expect(loaded).toEqual(expect.arrayContaining([...snapshot().fogEdits]))
+
+    saveSnapshot(db, snapshot({ fogEdits: [] }))
+    expect(loadSnapshot(db)!.fogEdits).toEqual([])
   })
 
   it('lets the resources be cleared off the map', () => {

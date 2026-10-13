@@ -130,10 +130,10 @@ const fogStepper = createFogStepper()
 const paintFog = (grid: HexGrid): void =>
   fogStepper.paint(grid, {
     fog: store.fog,
-    visible: store.visible,
+    visible: store.visibleToPlayers,
     windowKeys,
     windowTick: windowTick.value,
-    explored: store.exploredState,
+    explored: store.knownState,
   })
 
 watch(overlay, (next) => hexScene.value?.grid.setOverlay(next))
@@ -173,7 +173,7 @@ const marks = computed(() =>
   resourceMarks(store.resources, {
     dmView: store.dmView,
     fog: store.fog,
-    explored: store.explored,
+    explored: store.known,
   }),
 )
 

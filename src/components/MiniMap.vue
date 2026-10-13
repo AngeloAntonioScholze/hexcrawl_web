@@ -49,7 +49,7 @@ const resourceDots = computed<readonly Pixel[]>(() =>
   resourceMarks(store.resources, {
     dmView: store.dmView,
     fog: store.fog,
-    explored: store.explored,
+    explored: store.known,
   }).map((mark) => {
     const world = hexToWorld(props.layout, parseKey(mark.hex))
     return worldToMinimap(frame.value, world.x, world.z)

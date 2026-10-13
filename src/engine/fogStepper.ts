@@ -20,6 +20,8 @@ export interface FogInput {
   explored: {
     seen: ReadonlySet<HexKey>
     added: ReadonlySet<HexKey> | null
+    /** Ground the players were made to forget since the last answer. */
+    lost?: ReadonlySet<HexKey>
     version: number
   }
 }
@@ -67,6 +69,7 @@ export const createFogStepper = (): FogStepper => {
     visible: ReadonlySet<HexKey>,
     explored: ReadonlySet<HexKey>,
     gained: ReadonlySet<HexKey>,
+    lost: ReadonlySet<HexKey>,
   ): Map<HexKey, number> => {
     const changed = new Map<HexKey, number>()
     const held = (key: HexKey): boolean => target.indexOf(key) !== undefined
@@ -84,6 +87,11 @@ export const createFogStepper = (): FogStepper => {
       changed.set(key, REMEMBERED)
     }
 
+    for (const key of lost) {
+      if (visible.has(key) || !held(key) || applied.get(key) === 0) continue
+      changed.set(key, 0)
+    }
+
     return changed
   }
 
@@ -95,7 +103,7 @@ export const createFogStepper = (): FogStepper => {
    */
   const paint = (target: FogTarget, input: FogInput): void => {
     const { fog, visible, windowTick } = input
-    const { seen, added, version } = input.explored
+    const { seen, added, lost, version } = input.explored
     const stepping =
       fog &&
       fog === paintedFog &&
@@ -104,7 +112,7 @@ export const createFogStepper = (): FogStepper => {
       windowTick === paintedWindow
 
     if (stepping) {
-      const changed = fogStep(target, visible, seen, added)
+      const changed = fogStep(target, visible, seen, added, lost ?? new Set())
       if (changed.size > 0) target.updateFog(changed)
       for (const [key, fade] of changed) {
         if (fade === 1) applied.delete(key)

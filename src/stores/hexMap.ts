@@ -20,6 +20,15 @@ import {
 import { resolveTurn } from '../entities/resolve'
 import type { TokenShape } from '../engine/partyToken'
 import type { HexEvent, HexLocation } from '../hex/content'
+import {
+  createKnowledge,
+  editFog,
+  NO_FOG_EDITS,
+  withoutHidden,
+  type FogEdits,
+  type FogMode,
+  type Knowledge,
+} from '../hex/fogEdits'
 import { hexKey, parseKey, range, type Axial, type HexKey } from '../hex/coords'
 import type { VisionOptions } from '../hex/vision'
 import type { MapSnapshot } from '../persistence/mapState'
@@ -204,6 +213,8 @@ export const useHexMapStore = defineStore('hexMap', () => {
   })
 
   const fog = ref(true)
+  /** Hexes the DM has revealed to or hidden from the players by hand. */
+  const fogEdits = shallowRef<FogEdits>(NO_FOG_EDITS)
   const showSight = ref(false)
   const showHistory = ref(false)
   const showAllPaths = ref(false)
@@ -239,6 +250,7 @@ export const useHexMapStore = defineStore('hexMap', () => {
     resources: slotOf(resources),
     resourceChances: slotOf(resourceChances),
     resourceSpacing: slotOf(resourceSpacing),
+    fogEdits: slotOf(fogEdits),
   })
 
   /**
@@ -675,6 +687,17 @@ export const useHexMapStore = defineStore('hexMap', () => {
    */
   const toolHandlers: { [T in Exclude<DmTool, 'select'>]?: (hexes: readonly HexKey[]) => void } = {}
 
+  /** Whether the fog brush reveals ground to the players or hides it; view state, never saved. */
+  const fogMode = ref<FogMode>('reveal')
+
+  const setFogMode = (mode: FogMode): void => {
+    fogMode.value = mode
+  }
+
+  toolHandlers.fog = (hexes) => {
+    fogEdits.value = editFog(fogEdits.value, hexes, fogMode.value)
+  }
+
   /**
    * A click on the map: the DM picks a hex to look at or works it with a tool, a
    * player gives an order.
@@ -1001,6 +1024,17 @@ export const useHexMapStore = defineStore('hexMap', () => {
 
   const explored = computed<ReadonlySet<HexKey>>(() => exploredState.value.seen)
 
+  const knowledge = createKnowledge()
+
+  /** What the players know: the explored set with the DM's fog edits laid over it. */
+  const knownState = computed<Knowledge>(() => knowledge(exploredState.value, fogEdits.value))
+  const known = computed<ReadonlySet<HexKey>>(() => knownState.value.seen)
+
+  /** What the fog leaves clear around the parties: their sight, less what the DM hid. */
+  const visibleToPlayers = computed<ReadonlySet<HexKey>>(() =>
+    withoutHidden(visible.value, fogEdits.value.hidden),
+  )
+
   /** Where one entity has been up to this turn, in the order it went. */
   const trailOf = (id: string): Axial[] => {
     const walked: Axial[] = []
@@ -1098,6 +1132,10 @@ export const useHexMapStore = defineStore('hexMap', () => {
     resources: resources.value,
     resourceChances: resourceChances.value,
     resourceSpacing: resourceSpacing.value,
+    fogEdits: [
+      ...[...fogEdits.value.revealed].map((hex) => ({ hex, revealed: true })),
+      ...[...fogEdits.value.hidden].map((hex) => ({ hex, revealed: false })),
+    ],
   }))
 
   // Terrain goes in first: laying down a new world is what wipes the map, so
@@ -1148,6 +1186,10 @@ export const useHexMapStore = defineStore('hexMap', () => {
     resources.value = saved.resources.map((one) => ({ ...one }))
     resourceChances.value = { ...saved.resourceChances }
     resourceSpacing.value = saved.resourceSpacing
+    fogEdits.value = {
+      revealed: new Set(saved.fogEdits.filter((one) => one.revealed).map((one) => one.hex)),
+      hidden: new Set(saved.fogEdits.filter((one) => !one.revealed).map((one) => one.hex)),
+    }
     history.clear()
   }
 
@@ -1166,6 +1208,7 @@ export const useHexMapStore = defineStore('hexMap', () => {
       events.value = new Map()
       locations.value = new Map()
       resources.value = []
+      fogEdits.value = NO_FOG_EDITS
       history.clear()
     },
     { flush: 'sync' },
@@ -1244,7 +1287,12 @@ export const useHexMapStore = defineStore('hexMap', () => {
     visible,
     blocked,
     explored,
-    exploredState,
+    known,
+    knownState,
+    visibleToPlayers,
+    fogEdits,
+    fogMode,
+    setFogMode,
     carrierOf,
     riders,
     ridersOf,

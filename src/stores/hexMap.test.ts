@@ -133,6 +133,100 @@ describe('DM tools', () => {
   })
 })
 
+describe('the fog tool', () => {
+  const fogTool = (store: Store, mode: 'reveal' | 'hide', brush = 0): void => {
+    store.setDmTool('fog')
+    store.setFogMode(mode)
+    store.setBrushSize(brush)
+  }
+
+  it('reveals every hex under the brush to the players without touching what was explored', () => {
+    const store = setup()
+    fogTool(store, 'reveal', 1)
+
+    store.click({ q: -4, r: 0 })
+
+    expect(store.known.has('-4,0')).toBe(true)
+    expect(store.known.has('-3,0')).toBe(true)
+    expect(store.explored.has('-4,0')).toBe(false)
+  })
+
+  it('hides ground the party saw, and ground it has in sight', () => {
+    const store = setup()
+    store.setSight(2)
+    sendEast(store, 4)
+    store.advanceTurn()
+    expect(store.known.has('0,0')).toBe(true)
+    fogTool(store, 'hide')
+
+    store.click({ q: 0, r: 0 })
+
+    expect(store.explored.has('0,0')).toBe(true)
+    expect(store.known.has('0,0')).toBe(false)
+    expect(store.visible.has('0,0')).toBe(true)
+    expect(store.visibleToPlayers.has('0,0')).toBe(false)
+  })
+
+  it('takes a tap back in one undo', () => {
+    const store = setup()
+    fogTool(store, 'reveal', 2)
+    store.click({ q: 3, r: 0 })
+    expect(store.known.size).toBeGreaterThan(1)
+
+    store.undo()
+
+    expect(store.known.size).toBe(0)
+    expect(store.canUndo).toBe(false)
+  })
+
+  it('keeps the edits over a rewind', () => {
+    const store = setup()
+    store.setSight(1)
+    sendEast(store, 4)
+    for (let i = 0; i < 3; i++) store.advanceTurn()
+    fogTool(store, 'reveal')
+    store.click({ q: -5, r: 0 })
+    fogTool(store, 'hide')
+    store.click({ q: 0, r: 0 })
+
+    store.goToTurn(1)
+
+    expect(store.known.has('-5,0')).toBe(true)
+    expect(store.known.has('0,0')).toBe(false)
+  })
+
+  it('forgets the edits on a new world', () => {
+    const store = setup()
+    fogTool(store, 'reveal')
+    store.click({ q: 1, r: 0 })
+
+    store.setTerrain({ seed: 99 })
+
+    expect(store.fogEdits.revealed.size).toBe(0)
+    expect(store.snapshot.fogEdits).toEqual([])
+  })
+
+  it('saves the edits and hands them back on restore', () => {
+    const store = setup()
+    fogTool(store, 'reveal')
+    store.click({ q: 1, r: 0 })
+    fogTool(store, 'hide')
+    store.click({ q: 2, r: 0 })
+    const saved = store.snapshot
+    expect(saved.fogEdits).toEqual([
+      { hex: '1,0', revealed: true },
+      { hex: '2,0', revealed: false },
+    ])
+
+    setActivePinia(createPinia())
+    const fresh = setup()
+    fresh.restore(saved)
+
+    expect(fresh.known.has('1,0')).toBe(true)
+    expect(fresh.fogEdits.hidden.has('2,0')).toBe(true)
+  })
+})
+
 describe('clicking the map', () => {
   it('selects the hex in DM view and gives no order', () => {
     const store = setup()
