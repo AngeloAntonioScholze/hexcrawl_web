@@ -4,6 +4,7 @@ import { parseKey } from '../hex'
 import { useHexMapStore } from '../stores/hexMap'
 import HexEvents from './HexEvents.vue'
 import HexLocations from './HexLocations.vue'
+import HexResources from './HexResources.vue'
 
 const store = useHexMapStore()
 
@@ -77,6 +78,7 @@ const onNote = (event: Event): void => {
 
       <HexEvents :hex="hex" />
       <HexLocations :hex="hex" />
+      <HexResources :hex="hex" />
     </div>
   </aside>
 </template>

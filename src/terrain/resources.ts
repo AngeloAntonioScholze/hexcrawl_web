@@ -1,4 +1,4 @@
-import type { HexKey } from '../hex/coords'
+import { distance, parseKey, type HexKey } from '../hex/coords'
 import type { TerrainId } from './terrain'
 
 export type ResourceType =
@@ -16,6 +16,25 @@ export type ResourceType =
   | 'fish'
   | 'pearls'
   | 'whales'
+
+export const RESOURCE_LABELS: Readonly<Record<ResourceType, string>> = {
+  timber: 'Timber',
+  herbs: 'Herbs',
+  game: 'Game',
+  clay: 'Clay',
+  iron: 'Iron',
+  stone: 'Stone',
+  gems: 'Gems',
+  rareOre: 'Rare ore',
+  crystal: 'Crystal',
+  salt: 'Salt',
+  glassSand: 'Glass sand',
+  fish: 'Fish',
+  pearls: 'Pearls',
+  whales: 'Whales',
+}
+
+export const RESOURCE_TYPES = Object.keys(RESOURCE_LABELS) as readonly ResourceType[]
 
 /** Whether the generator laid it down or the DM placed it by hand. */
 export type ResourceOrigin = 'generated' | 'manual'
@@ -37,6 +56,27 @@ export const TERRAIN_RESOURCES: Readonly<Record<TerrainId, readonly ResourceType
   forest: ['timber', 'herbs', 'game'],
   mountains: ['iron', 'stone', 'gems'],
   peaks: ['rareOre', 'crystal'],
+}
+
+export interface NearbyResource {
+  resource: Resource
+  distance: number
+}
+
+/** The closest resource standing nearer than `spacing` hexes, the hex itself included. */
+export function nearestWithin(
+  hex: HexKey,
+  resources: readonly Resource[],
+  spacing: number,
+): NearbyResource | null {
+  const at = parseKey(hex)
+  let nearest: NearbyResource | null = null
+  for (const resource of resources) {
+    const away = distance(at, parseKey(resource.hex))
+    if (away < spacing && (!nearest || away < nearest.distance))
+      nearest = { resource, distance: away }
+  }
+  return nearest
 }
 
 /** The odds a hex of a terrain holds a resource, before spacing thins them out. */
