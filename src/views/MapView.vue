@@ -5,6 +5,7 @@ import HexCanvas from '../components/HexCanvas.vue'
 import HexDetails from '../components/HexDetails.vue'
 import ViewToggle from '../components/ViewToggle.vue'
 import type { EntityKind } from '../entities/entity'
+import { MAP_FILE_EXTENSION, parseMapFile, serialiseMap } from '../persistence/mapFile'
 import {
   MAX_SIGHT,
   MIN_SIGHT,
@@ -46,6 +47,37 @@ const onTerrain = (key: 'scale' | 'seaLevel' | 'relief', event: Event): void => 
 }
 
 const addKind = ref<EntityKind>('caravan')
+
+const exportMap = (): void => {
+  const blob = new Blob([serialiseMap(store.snapshot)], { type: 'application/json' })
+  const url = URL.createObjectURL(blob)
+  const link = document.createElement('a')
+  link.href = url
+  link.download = `hexcrawl-${store.terrain.seed}${MAP_FILE_EXTENSION}`
+  link.click()
+  // Revoked a tick later: some browsers start the download only after click returns.
+  setTimeout(() => URL.revokeObjectURL(url), 0)
+}
+
+const importInput = ref<HTMLInputElement | null>(null)
+const importError = ref<string | null>(null)
+
+const importMap = async (event: Event): Promise<void> => {
+  const input = event.target as HTMLInputElement
+  const file = input.files?.[0]
+  // Cleared so picking the same file again still fires a change.
+  input.value = ''
+  if (!file) return
+
+  const result = parseMapFile(await file.text())
+  if (!result.ok) {
+    importError.value = result.error
+    return
+  }
+  importError.value = null
+  if (!window.confirm(`Replace the current map with ${file.name}? This cannot be undone.`)) return
+  store.restore(result.snapshot)
+}
 
 const worldSizes = Object.keys(WORLD_SIZES) as WorldSize[]
 
@@ -121,6 +153,18 @@ const olderTurns = computed(() => Math.max(0, store.journey.length - TURNS_SHOWN
               <span class="value">{{ store.terrain.seed }}</span>
             </div>
             <button type="button" @click="store.reseed">roll a new world</button>
+            <div class="row">
+              <button type="button" @click="exportMap">export map</button>
+              <button type="button" @click="importInput?.click()">import map</button>
+            </div>
+            <input
+              ref="importInput"
+              type="file"
+              :accept="`${MAP_FILE_EXTENSION},application/json`"
+              hidden
+              @change="importMap"
+            />
+            <p v-if="importError" class="error" role="alert">{{ importError }}</p>
 
             <div class="row">
               <span>world size</span>
@@ -664,6 +708,11 @@ dd {
 
 .dim {
   color: var(--ink-dim);
+}
+
+.error {
+  margin: 0;
+  color: #e07a6a;
 }
 
 p {
