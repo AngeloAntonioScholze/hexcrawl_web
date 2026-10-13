@@ -14,6 +14,7 @@ import {
   type Merchant,
   type MerchantType,
 } from '../entities/merchant'
+import { SUPPLY_LIMITS, type Supply } from '../entities/supplies'
 import type { HexKey } from '../hex/coords'
 import type { TerrainControls } from '../stores/hexMap'
 import { isRoadEdge, type RoadEdge } from '../terrain/roads'
@@ -27,7 +28,7 @@ import {
   type ResourceType,
 } from '../terrain/resources'
 import { TERRAIN_IDS, type TerrainId } from '../terrain/terrain'
-import type { MapSnapshot, SavedAction, SavedOrigin, SavedState } from './mapState'
+import type { MapSnapshot, SavedAction, SavedOrigin, SavedState, SavedSupply } from './mapState'
 
 export const MAP_FILE_FORMAT = 'hexcrawl-map'
 export const MAP_FILE_VERSION = 1
@@ -51,6 +52,13 @@ const isLevel: Guard<number> = (value): value is number =>
   Number.isInteger(value) &&
   (value as number) >= MERCHANT_LEVELS.min &&
   (value as number) <= MERCHANT_LEVELS.max
+
+const isSupply =
+  (supply: Supply): Guard<number> =>
+  (value): value is number =>
+    Number.isInteger(value) &&
+    (value as number) >= 0 &&
+    (value as number) <= SUPPLY_LIMITS[supply].max
 
 const isChance: Guard<number> = (value): value is number =>
   isNumber(value) && value >= 0 && value <= 1
@@ -221,6 +229,14 @@ const SNAPSHOT_FIELDS: { [K in keyof MapSnapshot]-?: Guard<MapSnapshot[K]> } = {
     }),
   ),
   queue: listOf(shape<SavedAction>({ entityId: isString, action: isAction })),
+  supplies: listOf(
+    shape<SavedSupply>({
+      entityId: isString,
+      turn: isTurn,
+      food: isSupply('food'),
+      gold: isSupply('gold'),
+    }),
+  ),
   notes: listOf(shape<MapSnapshot['notes'][number]>({ hex: isHex, text: isString })),
   events: listOf(
     shape<MapSnapshot['events'][number]>({
@@ -313,6 +329,7 @@ const ADDED_FIELD_DEFAULTS: {
   catalogOverrides: () => [],
   roads: () => [],
   terrainOverrides: () => [],
+  supplies: () => [],
 }
 
 const withDefault = (key: string, value: unknown): unknown => {

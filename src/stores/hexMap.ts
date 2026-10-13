@@ -29,6 +29,16 @@ import {
   type MerchantType,
 } from '../entities/merchant'
 import {
+  carriesSupplies,
+  cutSupplies,
+  editSupply,
+  suppliesAt,
+  type Supplies,
+  type Supply,
+  type SupplyEntry,
+  type SupplyLedger,
+} from '../entities/supplies'
+import {
   changeEncounter,
   DEFAULT_ENCOUNTERS,
   mergeTables,
@@ -244,6 +254,9 @@ export const useHexMapStore = defineStore('hexMap', () => {
   /** Every caravan's crew, in the order they were taken on. */
   const merchants = shallowRef<readonly Merchant[]>([])
 
+  /** What each caravan's wagons hold, turn by turn, as the DM has set it. */
+  const supplies = shallowRef<SupplyLedger>(new Map())
+
   /** The DM's changes to what merchants offer; like the crews, a new world keeps them. */
   const catalogOverrides = shallowRef<readonly CatalogOverride[]>([])
   const catalog = computed<readonly CatalogEntry[]>(() =>
@@ -318,6 +331,7 @@ export const useHexMapStore = defineStore('hexMap', () => {
     events: slotOf(events),
     locations: slotOf(locations),
     merchants: slotOf(merchants),
+    supplies: slotOf(supplies),
     catalogOverrides: slotOf(catalogOverrides),
     resources: slotOf(resources),
     resourceChances: slotOf(resourceChances),
@@ -441,6 +455,12 @@ export const useHexMapStore = defineStore('hexMap', () => {
     queue.value = orders
 
     merchants.value = merchants.value.filter((one) => one.caravanId !== id)
+
+    if (supplies.value.has(id)) {
+      const stores = new Map(supplies.value)
+      stores.delete(id)
+      supplies.value = stores
+    }
   }
 
   const renameEntity = (id: string, name: string): void => {
@@ -625,6 +645,19 @@ export const useHexMapStore = defineStore('hexMap', () => {
     patchMerchant(id, { level: clampLevel(level) })
   }
 
+  /** What a caravan's wagons hold on the turn the crawl stands on. */
+  const suppliesOf = (id: string): Supplies => suppliesAt(supplies.value, id, turn.value)
+
+  /**
+   * The DM's word on a caravan's stores from this turn on. Nothing is eaten or
+   * spent by the clock; a rewind reads back whatever was set for that turn.
+   */
+  const setSupply = (id: string, supply: Supply, value: number): void => {
+    const kind = entities.value.find((one) => one.id === id)?.kind
+    if (!kind || !carriesSupplies(kind)) return
+    supplies.value = editSupply(supplies.value, id, turn.value, supply, value)
+  }
+
   const editCatalogEntry = (id: string, patch: CatalogPatch): void => {
     catalogOverrides.value = editOverride(catalogOverrides.value, id, patch)
   }
@@ -746,6 +779,7 @@ export const useHexMapStore = defineStore('hexMap', () => {
   const truncate = (): void => {
     if (frames.value.length > turn.value) setFrames(frames.value.slice(0, turn.value))
     events.value = encountersUpTo(events.value, turn.value)
+    supplies.value = cutSupplies(supplies.value, turn.value)
   }
 
   const queueAction = (id: string, action: Action): void => {
@@ -1016,6 +1050,7 @@ export const useHexMapStore = defineStore('hexMap', () => {
     events.value = encountersUpTo(events.value, -1)
     origins.value = new Map()
     queue.value = new Map()
+    supplies.value = new Map()
     history.clear()
   }
 
@@ -1377,6 +1412,9 @@ export const useHexMapStore = defineStore('hexMap', () => {
     events: [...events.value].flatMap(([hex, list]) => list.map((one) => ({ hex, ...one }))),
     locations: [...locations.value].flatMap(([hex, list]) => list.map((one) => ({ hex, ...one }))),
     merchants: merchants.value,
+    supplies: [...supplies.value].flatMap(([entityId, entries]) =>
+      entries.map((entry) => ({ entityId, ...entry })),
+    ),
     catalogOverrides: catalogOverrides.value,
     resources: resources.value,
     resourceChances: resourceChances.value,
@@ -1438,6 +1476,12 @@ export const useHexMapStore = defineStore('hexMap', () => {
     events.value = grouped<HexEvent>(saved.events)
     locations.value = grouped<HexLocation>(saved.locations)
     merchants.value = saved.merchants.map((one) => ({ ...one }))
+    const stores = new Map<string, SupplyEntry[]>()
+    for (const { entityId, ...entry } of saved.supplies) {
+      stores.set(entityId, [...(stores.get(entityId) ?? []), entry])
+    }
+    for (const entries of stores.values()) entries.sort((a, b) => a.turn - b.turn)
+    supplies.value = stores
     catalogOverrides.value = saved.catalogOverrides.map((one) => ({ ...one }))
     resources.value = saved.resources.map((one) => ({ ...one }))
     resourceChances.value = { ...saved.resourceChances }
@@ -1465,6 +1509,7 @@ export const useHexMapStore = defineStore('hexMap', () => {
       setFrames([])
       origins.value = new Map()
       queue.value = new Map()
+      supplies.value = new Map()
       selectedHex.value = null
       notes.value = new Map()
       events.value = new Map()
@@ -1606,6 +1651,9 @@ export const useHexMapStore = defineStore('hexMap', () => {
     removeMerchant: history.track(removeMerchant),
     renameMerchant: history.track(renameMerchant, (id) => `merchant-name:${id}`),
     setMerchantLevel: history.track(setMerchantLevel, (id) => `merchant-level:${id}`),
+    supplies,
+    suppliesOf,
+    setSupply: history.track(setSupply, (id, supply) => `supply:${id}:${supply}`),
     catalogOverrides,
     catalog,
     editCatalogEntry: history.track(editCatalogEntry, (id) => `catalog:${id}`),

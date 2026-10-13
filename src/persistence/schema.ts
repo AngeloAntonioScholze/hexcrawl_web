@@ -207,6 +207,15 @@ const MIGRATIONS: readonly string[] = [
   `
   ALTER TABLE hex_event ADD COLUMN turn INTEGER;
   `,
+  `
+  CREATE TABLE supply (
+    turn INTEGER NOT NULL,
+    entity_id TEXT NOT NULL,
+    food INTEGER NOT NULL,
+    gold INTEGER NOT NULL,
+    PRIMARY KEY (turn, entity_id)
+  );
+  `,
 ]
 
 export const SCHEMA_VERSION = MIGRATIONS.length

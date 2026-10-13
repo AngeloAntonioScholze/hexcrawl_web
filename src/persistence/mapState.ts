@@ -4,6 +4,7 @@ import type { Action, ActionKind, ActionRecord } from '../entities/action'
 import type { CatalogOverride } from '../entities/catalog'
 import type { Entity, EntityKind, EntityState, Owner } from '../entities/entity'
 import type { Merchant, MerchantType } from '../entities/merchant'
+import type { SupplyEntry } from '../entities/supplies'
 import type { HexEvent, HexLocation } from '../hex/content'
 import type { HexKey } from '../hex/coords'
 import type { Origin, TerrainControls } from '../stores/hexMap'
@@ -24,6 +25,10 @@ export interface SavedState extends EntityState {
 }
 
 export interface SavedOrigin extends Origin {
+  entityId: string
+}
+
+export interface SavedSupply extends SupplyEntry {
   entityId: string
 }
 
@@ -57,6 +62,8 @@ export interface MapSnapshot {
   states: readonly SavedState[]
   /** Orders given but not yet spent. */
   queue: readonly SavedAction[]
+  /** Every hand edit to a caravan's stores, on the turn it was made. */
+  supplies: readonly SavedSupply[]
   notes: readonly { hex: HexKey; text: string }[]
   /** Listed hex by hex, each hex's in the order they were added. */
   events: readonly ({ hex: HexKey } & HexEvent)[]
@@ -233,6 +240,18 @@ export function saveSnapshot(db: Database, snapshot: MapSnapshot): void {
       }
     } finally {
       queued.finalize()
+    }
+
+    db.exec('DELETE FROM supply')
+    const supply = db.prepare(
+      'INSERT INTO supply (turn, entity_id, food, gold) VALUES (?, ?, ?, ?)',
+    )
+    try {
+      for (const one of snapshot.supplies) {
+        supply.bind([one.turn, one.entityId, one.food, one.gold]).stepReset()
+      }
+    } finally {
+      supply.finalize()
     }
 
     db.exec('DELETE FROM hex_note')
@@ -415,6 +434,12 @@ export function loadSnapshot(db: Database): MapSnapshot | null {
           : { kind: kind as 'wait' | 'camp' }
       return { entityId: String(one.entity_id), action }
     }),
+    supplies: db.selectObjects('SELECT * FROM supply ORDER BY entity_id, turn').map((one) => ({
+      turn: Number(one.turn),
+      entityId: String(one.entity_id),
+      food: Number(one.food),
+      gold: Number(one.gold),
+    })),
     notes: db.selectObjects('SELECT * FROM hex_note').map((one) => ({
       hex: String(one.hex) as HexKey,
       text: String(one.text),

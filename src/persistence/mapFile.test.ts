@@ -80,6 +80,7 @@ const snapshot = (): MapSnapshot => ({
     },
     { entityId: 'ship-1', action: { kind: 'camp' } },
   ],
+  supplies: [{ entityId: 'party-1', turn: 1, food: 30, gold: 250 }],
   notes: [{ hex: '-3,2' as HexKey, text: 'ruined watchtower' }],
   events: [
     { hex: '1,0' as HexKey, id: 'event-1', title: 'ambush', description: 'goblins' },
@@ -276,6 +277,8 @@ describe('parseMapFile', () => {
       (map) => delete map.encounterOverrides[2].entry.title,
       'encounterOverrides',
     ],
+    ['a negative food store', (map) => (map.supplies[0].food = -1), 'supplies'],
+    ['gold past a full bar', (map) => (map.supplies[0].gold = 1e6), 'supplies'],
     ['a road end that is not a hex', (map) => (map.roads[0].b = 'east'), 'roads'],
     ['a road between hexes apart', (map) => (map.roads[0].b = '2,0'), 'roads'],
     ['a road from a hex to itself', (map) => (map.roads[0].b = '0,0'), 'roads'],
@@ -324,6 +327,7 @@ describe('parseMapFile', () => {
     ['catalogOverrides', []],
     ['roads', []],
     ['terrainOverrides', []],
+    ['supplies', []],
   ])('opens a file from before %s existed with the default', (field, fallback) => {
     const result = parseMapFile(tampered((file) => delete file.map[field]))
     expect(result).toEqual({ ok: true, snapshot: { ...snapshot(), [field]: fallback } })

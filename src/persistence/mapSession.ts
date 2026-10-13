@@ -40,6 +40,7 @@ const plain = (snapshot: MapSnapshot): MapSnapshot => ({
         ? { kind: action.kind, route: [...action.route], waypoints: [...action.waypoints] }
         : { ...action },
   })),
+  supplies: snapshot.supplies.map((one) => ({ ...one })),
   notes: snapshot.notes.map((one) => ({ ...one })),
   events: snapshot.events.map((one) => ({ ...one })),
   locations: snapshot.locations.map((one) => ({ ...one })),

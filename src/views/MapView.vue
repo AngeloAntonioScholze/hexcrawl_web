@@ -1,5 +1,6 @@
 <script setup lang="ts">
 import { computed, ref } from 'vue'
+import CaravanSupplies from '../components/CaravanSupplies.vue'
 import DayNightDial from '../components/DayNightDial.vue'
 import DmToolbar from '../components/DmToolbar.vue'
 import HexCanvas from '../components/HexCanvas.vue'
@@ -8,6 +9,7 @@ import MapList from '../components/MapList.vue'
 import ViewToggle from '../components/ViewToggle.vue'
 import { useUndoKeys } from '../composables/useUndoKeys'
 import type { EntityKind } from '../entities/entity'
+import { carriesSupplies } from '../entities/supplies'
 import { MAP_FILE_EXTENSION, parseMapFile, serialiseMap } from '../persistence/mapFile'
 import {
   MAX_SIGHT,
@@ -491,6 +493,11 @@ const olderTurns = computed(() => Math.max(0, store.adventureLog.length - TURNS_
               make camp this turn
             </button>
           </div>
+
+          <CaravanSupplies
+            v-if="store.selectedEntity && carriesSupplies(store.selectedEntity.kind)"
+            :caravan-id="store.selectedEntity.id"
+          />
 
           <label class="control">
             <input v-model="store.showHistory" type="checkbox" />

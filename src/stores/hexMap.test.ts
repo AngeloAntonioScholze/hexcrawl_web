@@ -1478,6 +1478,94 @@ describe('a caravan crew', () => {
   })
 })
 
+describe("a caravan's stores", () => {
+  it('are set by hand on a caravan and nothing else', () => {
+    const store = setup()
+    const caravan = store.addEntity('the caravan', 'caravan').id
+
+    store.setSupply(caravan, 'food', 40)
+    store.setSupply(caravan, 'gold', 120)
+    store.setSupply(store.selectedId, 'food', 10)
+
+    expect(store.suppliesOf(caravan)).toEqual({ food: 40, gold: 120 })
+    expect(store.suppliesOf(store.selectedId)).toEqual({ food: 0, gold: 0 })
+  })
+
+  it('never drain as the turns pass', () => {
+    const store = setup()
+    const caravan = store.addEntity('the caravan', 'caravan').id
+    store.setSupply(caravan, 'food', 40)
+
+    store.advanceTurn()
+    store.advanceTurn()
+
+    expect(store.suppliesOf(caravan)).toEqual({ food: 40, gold: 0 })
+  })
+
+  it('wind back exactly with the clock, and forward again', () => {
+    const store = setup()
+    const caravan = store.addEntity('the caravan', 'caravan').id
+    store.setSupply(caravan, 'food', 40)
+    store.advanceTurn()
+    store.setSupply(caravan, 'food', 25)
+    store.setSupply(caravan, 'gold', 300)
+    store.advanceTurn()
+
+    store.rewindTurn()
+    store.rewindTurn()
+    expect(store.suppliesOf(caravan)).toEqual({ food: 40, gold: 0 })
+
+    store.goToTurn(2)
+    expect(store.suppliesOf(caravan)).toEqual({ food: 25, gold: 300 })
+  })
+
+  it('forget what was set in a future an order turned away from', () => {
+    const store = setup()
+    const caravan = store.addEntity('the caravan', 'caravan').id
+    sendEast(store, 3)
+    store.advanceTurn()
+    store.setSupply(caravan, 'gold', 50)
+
+    store.rewindTurn()
+    store.queueAction(store.selectedId, { kind: 'camp' })
+    store.advanceTurn()
+
+    expect(store.suppliesOf(caravan).gold).toBe(0)
+  })
+
+  it('go with their caravan, and come back with an undo', () => {
+    const store = setup()
+    const caravan = store.addEntity('the caravan', 'caravan').id
+    store.setSupply(caravan, 'food', 40)
+
+    store.removeEntity(caravan)
+    expect(store.supplies.has(caravan)).toBe(false)
+
+    store.undo()
+    expect(store.suppliesOf(caravan).food).toBe(40)
+
+    store.undo()
+    expect(store.suppliesOf(caravan).food).toBe(0)
+  })
+
+  it('come back from a snapshot as they were saved', () => {
+    const store = setup()
+    const caravan = store.addEntity('the caravan', 'caravan').id
+    store.setSupply(caravan, 'food', 40)
+    store.advanceTurn()
+    store.setSupply(caravan, 'gold', 90)
+    const saved = store.snapshot
+
+    setActivePinia(createPinia())
+    const fresh = setup()
+    fresh.restore(saved)
+
+    expect(fresh.suppliesOf(caravan)).toEqual({ food: 40, gold: 90 })
+    fresh.rewindTurn()
+    expect(fresh.suppliesOf(caravan)).toEqual({ food: 40, gold: 0 })
+  })
+})
+
 describe('the services catalog', () => {
   const find = (store: Store, id: string) => store.catalog.find((one) => one.id === id)
 
