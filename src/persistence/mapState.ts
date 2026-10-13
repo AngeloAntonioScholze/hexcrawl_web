@@ -5,6 +5,14 @@ import type { Merchant, MerchantType } from '../entities/merchant'
 import type { HexEvent, HexLocation } from '../hex/content'
 import type { HexKey } from '../hex/coords'
 import type { Origin, TerrainControls } from '../stores/hexMap'
+import {
+  defaultResourceChances,
+  type Resource,
+  type ResourceChances,
+  type ResourceOrigin,
+  type ResourceType,
+} from '../terrain/resources'
+import type { TerrainId } from '../terrain/terrain'
 
 /** An entity's state at the end of one turn, flattened for the save file. */
 export interface SavedState extends EntityState {
@@ -52,13 +60,18 @@ export interface MapSnapshot {
   locations: readonly ({ hex: HexKey } & HexLocation)[]
   /** Every caravan's crew, in the order they were taken on. */
   merchants: readonly Merchant[]
+  /** Listed in the order they were placed. */
+  resources: readonly Resource[]
+  resourceChances: ResourceChances
+  /** The fewest hexes allowed between any two resources. */
+  resourceSpacing: number
 }
 
 const SAVE_MAP = `
   INSERT OR REPLACE INTO map
     (id, seed, scale, sea_level, relief, world_radius, fog, show_sight,
-     show_history, dm_view, turn, selected_id)
-  VALUES (1, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+     show_history, dm_view, turn, selected_id, resource_spacing)
+  VALUES (1, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
 `
 
 const flag = (value: boolean): number => (value ? 1 : 0)
@@ -94,6 +107,7 @@ export function saveSnapshot(db: Database, snapshot: MapSnapshot): void {
         flag(snapshot.dmView),
         snapshot.turn,
         snapshot.selectedId,
+        snapshot.resourceSpacing,
       ],
     })
 
@@ -251,6 +265,28 @@ export function saveSnapshot(db: Database, snapshot: MapSnapshot): void {
     } finally {
       merchant.finalize()
     }
+
+    db.exec('DELETE FROM resource')
+    const resource = db.prepare(
+      'INSERT INTO resource (id, hex, ord, type, origin) VALUES (?, ?, ?, ?, ?)',
+    )
+    try {
+      snapshot.resources.forEach((one, index) => {
+        resource.bind([one.id, one.hex, index, one.type, one.origin]).stepReset()
+      })
+    } finally {
+      resource.finalize()
+    }
+
+    db.exec('DELETE FROM resource_chance')
+    const chance = db.prepare('INSERT INTO resource_chance (terrain, chance) VALUES (?, ?)')
+    try {
+      for (const [terrain, odds] of Object.entries(snapshot.resourceChances)) {
+        chance.bind([terrain, odds]).stepReset()
+      }
+    } finally {
+      chance.finalize()
+    }
   })
 }
 
@@ -340,5 +376,22 @@ export function loadSnapshot(db: Database): MapSnapshot | null {
       type: String(one.type) as MerchantType,
       level: Number(one.level),
     })),
+    resources: db.selectObjects('SELECT * FROM resource ORDER BY ord').map((one) => ({
+      id: String(one.id),
+      hex: String(one.hex) as HexKey,
+      type: String(one.type) as ResourceType,
+      origin: String(one.origin) as ResourceOrigin,
+    })),
+    // A save from before resources has no odds written down; those terrains
+    // fall back to the default rather than to never.
+    resourceChances: {
+      ...defaultResourceChances(),
+      ...Object.fromEntries(
+        db
+          .selectObjects('SELECT * FROM resource_chance')
+          .map((one) => [String(one.terrain) as TerrainId, Number(one.chance)]),
+      ),
+    },
+    resourceSpacing: Number(row.resource_spacing),
   }
 }

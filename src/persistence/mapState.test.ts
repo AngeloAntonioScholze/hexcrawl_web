@@ -2,6 +2,7 @@ import type { Database } from '@sqlite.org/sqlite-wasm'
 import { beforeEach, describe, expect, it } from 'vitest'
 import type { Entity } from '../entities/entity'
 import type { HexKey } from '../hex/coords'
+import { DEFAULT_RESOURCE_SPACING, defaultResourceChances } from '../terrain/resources'
 import { loadSnapshot, saveSnapshot, type MapSnapshot } from './mapState'
 import { migrate, schemaVersion, SCHEMA_VERSION } from './schema'
 import { openMemoryDatabase } from './sqlite'
@@ -108,6 +109,12 @@ const snapshot = (patch: Partial<MapSnapshot> = {}): MapSnapshot => ({
     { id: 'merchant-b', caravanId: caravan.id, name: 'Bram', type: 'smith', level: 10 },
     { id: 'merchant-a', caravanId: caravan.id, name: 'Mira', type: 'doctor', level: 1 },
   ],
+  resources: [
+    { id: 'res-2', hex: '2,0' as HexKey, type: 'timber', origin: 'generated' },
+    { id: 'res-1', hex: '-3,1' as HexKey, type: 'iron', origin: 'manual' },
+  ],
+  resourceChances: { ...defaultResourceChances(), forest: 0.2, peaks: 0 },
+  resourceSpacing: 6,
   ...patch,
 })
 
@@ -150,6 +157,9 @@ describe('schema', () => {
     expect(loaded.entities).toEqual([])
     expect(loaded.record).toEqual([])
     expect(loaded.merchants).toEqual([])
+    expect(loaded.resources).toEqual([])
+    expect(loaded.resourceChances).toEqual(defaultResourceChances())
+    expect(loaded.resourceSpacing).toBe(DEFAULT_RESOURCE_SPACING)
 
     saveSnapshot(old, snapshot())
     expect(loadSnapshot(old)!.turn).toBe(2)
@@ -260,6 +270,24 @@ describe('map state', () => {
     expect(loaded.notes).toHaveLength(saved.notes.length)
     expect(loaded.events).toEqual(saved.events)
     expect(loaded.locations).toEqual(saved.locations)
+  })
+
+  it('round-trips the resources in the order they were placed, and their odds', () => {
+    const saved = snapshot()
+    saveSnapshot(db, saved)
+
+    const loaded = loadSnapshot(db)!
+
+    expect(loaded.resources).toEqual(saved.resources)
+    expect(loaded.resourceChances).toEqual(saved.resourceChances)
+    expect(loaded.resourceSpacing).toBe(6)
+  })
+
+  it('lets the resources be cleared off the map', () => {
+    saveSnapshot(db, snapshot())
+    saveSnapshot(db, snapshot({ resources: [] }))
+
+    expect(loadSnapshot(db)!.resources).toEqual([])
   })
 
   it('keeps a map with nothing written on it', () => {

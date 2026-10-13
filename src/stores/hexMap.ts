@@ -18,6 +18,14 @@ import { hexKey, parseKey, type Axial, type HexKey } from '../hex/coords'
 import type { VisionOptions } from '../hex/vision'
 import type { MapSnapshot } from '../persistence/mapState'
 import { fieldFromTiles, type TerrainField } from '../terrain/field'
+import {
+  DEFAULT_RESOURCE_SPACING,
+  defaultResourceChances,
+  type Resource,
+  type ResourceChances,
+  type ResourceOrigin,
+  type ResourceType,
+} from '../terrain/resources'
 import { sightFrom, type PartySight } from '../terrain/sight'
 import { isWater, TERRAIN_DEFAULTS, type TerrainId, type TerrainTile } from '../terrain/terrain'
 import { canEnter, chainRoute, joinLegs, KM_PER_HEX, type Route } from '../terrain/travel'
@@ -163,6 +171,17 @@ export const useHexMapStore = defineStore('hexMap', () => {
 
   /** Every caravan's crew, in the order they were taken on. */
   const merchants = shallowRef<readonly Merchant[]>([])
+
+  /** Every resource on the map, in the order they were placed. */
+  const resources = shallowRef<readonly Resource[]>([])
+  const resourceChances = shallowRef<ResourceChances>(defaultResourceChances())
+  const resourceSpacing = ref(DEFAULT_RESOURCE_SPACING)
+
+  const resourcesByHex = computed<ReadonlyMap<HexKey, readonly Resource[]>>(() => {
+    const byHex = new Map<HexKey, Resource[]>()
+    for (const one of resources.value) byHex.set(one.hex, [...(byHex.get(one.hex) ?? []), one])
+    return byHex
+  })
 
   const fog = ref(true)
   const showSight = ref(false)
@@ -442,6 +461,36 @@ export const useHexMapStore = defineStore('hexMap', () => {
 
   const setMerchantLevel = (id: string, level: number): void => {
     patchMerchant(id, { level: clampLevel(level) })
+  }
+
+  const resourcesOn = (hex: HexKey): readonly Resource[] => resourcesByHex.value.get(hex) ?? []
+
+  const addResource = (
+    hex: HexKey,
+    type: ResourceType,
+    origin: ResourceOrigin = 'manual',
+  ): string => {
+    const id = crypto.randomUUID()
+    resources.value = [...resources.value, { id, hex, type, origin }]
+    return id
+  }
+
+  const removeResource = (id: string): void => {
+    if (!resources.value.some((one) => one.id === id)) return
+    resources.value = resources.value.filter((one) => one.id !== id)
+  }
+
+  const setResourceChance = (terrainId: TerrainId, chance: number): void => {
+    if (!Number.isFinite(chance)) return
+    resourceChances.value = {
+      ...resourceChances.value,
+      [terrainId]: Math.max(0, Math.min(1, chance)),
+    }
+  }
+
+  const setResourceSpacing = (hexes: number): void => {
+    if (!Number.isFinite(hexes)) return
+    resourceSpacing.value = Math.max(0, Math.round(hexes))
   }
 
   /**
@@ -932,6 +981,9 @@ export const useHexMapStore = defineStore('hexMap', () => {
     events: [...events.value].flatMap(([hex, list]) => list.map((one) => ({ hex, ...one }))),
     locations: [...locations.value].flatMap(([hex, list]) => list.map((one) => ({ hex, ...one }))),
     merchants: merchants.value,
+    resources: resources.value,
+    resourceChances: resourceChances.value,
+    resourceSpacing: resourceSpacing.value,
   }))
 
   // Terrain goes in first: laying down a new world is what wipes the map, so
@@ -979,6 +1031,9 @@ export const useHexMapStore = defineStore('hexMap', () => {
     events.value = grouped<HexEvent>(saved.events)
     locations.value = grouped<HexLocation>(saved.locations)
     merchants.value = saved.merchants.map((one) => ({ ...one }))
+    resources.value = saved.resources.map((one) => ({ ...one }))
+    resourceChances.value = { ...saved.resourceChances }
+    resourceSpacing.value = saved.resourceSpacing
   }
 
   // A new world is a different place, so nothing the entities learned about the
@@ -995,6 +1050,7 @@ export const useHexMapStore = defineStore('hexMap', () => {
       notes.value = new Map()
       events.value = new Map()
       locations.value = new Map()
+      resources.value = []
     },
     { flush: 'sync' },
   )
@@ -1102,6 +1158,14 @@ export const useHexMapStore = defineStore('hexMap', () => {
     removeMerchant,
     renameMerchant,
     setMerchantLevel,
+    resources,
+    resourcesOn,
+    addResource,
+    removeResource,
+    resourceChances,
+    setResourceChance,
+    resourceSpacing,
+    setResourceSpacing,
   }
 })
 

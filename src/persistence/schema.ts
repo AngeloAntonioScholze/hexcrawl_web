@@ -151,6 +151,22 @@ const MIGRATIONS: readonly string[] = [
     level INTEGER NOT NULL
   );
   `,
+  `
+  ALTER TABLE map ADD COLUMN resource_spacing INTEGER NOT NULL DEFAULT 10;
+
+  CREATE TABLE resource (
+    id TEXT PRIMARY KEY,
+    hex TEXT NOT NULL,
+    ord INTEGER NOT NULL,
+    type TEXT NOT NULL,
+    origin TEXT NOT NULL
+  );
+
+  CREATE TABLE resource_chance (
+    terrain TEXT PRIMARY KEY,
+    chance REAL NOT NULL
+  ) WITHOUT ROWID;
+  `,
 ]
 
 export const SCHEMA_VERSION = MIGRATIONS.length

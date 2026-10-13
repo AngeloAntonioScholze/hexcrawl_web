@@ -2,6 +2,7 @@ import { Color3 } from '@babylonjs/core/Maths/math.color'
 import { createPinia, setActivePinia } from 'pinia'
 import { beforeEach, describe, expect, it } from 'vitest'
 import { hexKey, range, type Axial, type HexKey } from '../hex/coords'
+import { DEFAULT_RESOURCE_SPACING, defaultResourceChances } from '../terrain/resources'
 import { TERRAIN_DEFAULTS, type TerrainTile } from '../terrain/terrain'
 import { TURNS_PER_PHASE } from '../time/clock'
 import { MAX_SIGHT, MIN_SIGHT, TERRAIN_LIMITS, useHexMapStore } from './hexMap'
@@ -963,6 +964,88 @@ describe('a caravan crew', () => {
     fresh.restore(saved)
 
     expect(fresh.merchantsOf(caravan)).toEqual(store.merchantsOf(caravan))
+  })
+})
+
+describe('resources', () => {
+  const here = '1,0' as HexKey
+
+  it('adds and removes resources, read back hex by hex', () => {
+    const store = setup()
+
+    const timber = store.addResource(here, 'timber')
+    const herbs = store.addResource(here, 'herbs', 'generated')
+    store.addResource('0,0' as HexKey, 'iron')
+
+    expect(store.resourcesOn(here)).toEqual([
+      { id: timber, hex: here, type: 'timber', origin: 'manual' },
+      { id: herbs, hex: here, type: 'herbs', origin: 'generated' },
+    ])
+
+    store.removeResource(timber)
+    expect(store.resourcesOn(here).map((one) => one.type)).toEqual(['herbs'])
+
+    store.removeResource(herbs)
+    expect(store.resourcesOn(here)).toEqual([])
+    expect(store.resources).toHaveLength(1)
+  })
+
+  it('starts every terrain at the default odds and spacing', () => {
+    const store = setup()
+
+    expect(store.resourceChances).toEqual(defaultResourceChances())
+    expect(store.resourceSpacing).toBe(DEFAULT_RESOURCE_SPACING)
+  })
+
+  it('clamps the odds to a probability and the spacing to whole hexes', () => {
+    const store = setup()
+
+    store.setResourceChance('forest', 0.25)
+    store.setResourceChance('peaks', 3)
+    store.setResourceChance('sand', -1)
+    store.setResourceChance('grass', Number.NaN)
+    store.setResourceSpacing(6.6)
+
+    expect(store.resourceChances).toEqual({
+      ...defaultResourceChances(),
+      forest: 0.25,
+      peaks: 1,
+      sand: 0,
+    })
+    expect(store.resourceSpacing).toBe(7)
+
+    store.setResourceSpacing(-4)
+    expect(store.resourceSpacing).toBe(0)
+  })
+
+  it('wipes the resources but keeps the odds when the world changes', () => {
+    const store = setup()
+    store.addResource(here, 'timber')
+    store.setResourceChance('forest', 0.5)
+
+    store.setTerrain({ seed: TERRAIN_DEFAULTS.seed + 1 })
+
+    expect(store.resources).toEqual([])
+    expect(store.resourceChances.forest).toBe(0.5)
+  })
+
+  it('comes back from a snapshot as it was saved', () => {
+    const store = setup()
+    store.setTerrain({ seed: TERRAIN_DEFAULTS.seed + 7 })
+    store.addResource(here, 'timber', 'generated')
+    store.addResource('0,0' as HexKey, 'iron')
+    store.setResourceChance('mountains', 0.3)
+    store.setResourceSpacing(4)
+    const saved = store.snapshot
+
+    setActivePinia(createPinia())
+    const fresh = setup()
+    fresh.restore(saved)
+
+    expect(fresh.resources).toEqual(store.resources)
+    expect(fresh.resourcesOn(here)).toEqual(store.resourcesOn(here))
+    expect(fresh.resourceChances).toEqual(store.resourceChances)
+    expect(fresh.resourceSpacing).toBe(4)
   })
 })
 
