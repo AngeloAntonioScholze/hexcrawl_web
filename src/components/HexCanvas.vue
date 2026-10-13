@@ -8,6 +8,7 @@ import { gridCapacity, maxZoomFor, useHexWindow } from '../composables/useHexWin
 import { useTurnPlayback } from '../composables/useTurnPlayback'
 import { createFogStepper } from '../engine/fogStepper'
 import type { HexGrid } from '../engine/hexGrid'
+import { visiblePois } from '../engine/poiMarkers'
 import { resourceMarks } from '../engine/resourceMarkers'
 import { roadSpans } from '../engine/roadSegments'
 import type { SkyGlow } from '../engine/sky'
@@ -214,6 +215,16 @@ const marks = computed(() =>
 
 watch(marks, (next) => hexScene.value?.resources.setMarks(next))
 
+const pois = computed(() =>
+  visiblePois(store.locations, store.events, {
+    dmView: store.dmView,
+    fog: store.fog,
+    explored: store.known,
+  }),
+)
+
+watch(pois, (next) => hexScene.value?.pois.setPois(next))
+
 const spans = computed(() =>
   roadSpans(store.roads, { dmView: store.dmView, fog: store.fog, explored: store.explored }),
 )
@@ -237,6 +248,7 @@ const pushHeights = (created: NonNullable<typeof hexScene.value>): void => {
   created.tokens.setEntries(tokens.value)
   created.stops.setStops(store.stops.hexes, store.stops.color)
   created.resources.setMarks(marks.value)
+  created.pois.setPois(pois.value)
   created.roads.setSpans(spans.value)
   created.vision.setField(sightField.value.lit, sightField.value.shadow)
 }

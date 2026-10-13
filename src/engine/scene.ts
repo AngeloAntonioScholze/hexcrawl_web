@@ -22,6 +22,7 @@ import type { TerrainField } from '../terrain/field'
 import { createHexGrid, wantsDetail, type HexGrid, type HexTile } from './hexGrid'
 import { worldBounds } from './hexWindow'
 import { createTokenField, type TokenField } from './tokenField'
+import { createPoiMarkers, type PoiMarkers } from './poiMarkers'
 import { createResourceMarkers, type ResourceMarkers } from './resourceMarkers'
 import { createRoadSegments, type RoadSegments } from './roadSegments'
 import { createRouteArrows, type RouteArrows } from './routeArrows'
@@ -55,6 +56,7 @@ export interface HexScene {
   vision: VisionOverlay
   stops: WaypointMarkers
   resources: ResourceMarkers
+  pois: PoiMarkers
   roads: RoadSegments
   /** Draws a different window of the world; everything else rides along. */
   setWindow(tiles: readonly HexTile[]): void
@@ -177,6 +179,7 @@ export function createHexScene(canvas: HTMLCanvasElement, options: HexSceneOptio
   const vision = createVisionOverlay(scene, options.layout, elevationOf, { gap: options.gap })
   const stops = createWaypointMarkers(scene, options.layout, elevationOf)
   const resources = createResourceMarkers(scene, options.layout, elevationOf)
+  const pois = createPoiMarkers(scene, options.layout, elevationOf)
   const roads = createRoadSegments(scene, options.layout, elevationOf, {
     tileSize: grid.tileSize,
     bevel: options.bevel,
@@ -215,6 +218,7 @@ export function createHexScene(canvas: HTMLCanvasElement, options: HexSceneOptio
   redrawOnCall(vision, ['setField', 'setShown'])
   redrawOnCall(stops, ['setStops'])
   redrawOnCall(resources, ['setMarks'])
+  redrawOnCall(pois, ['setPois'])
   redrawOnCall(roads, ['setSpans'])
 
   // The rounded edge is dropped once it shrinks to about a pixel on screen,
@@ -299,6 +303,7 @@ export function createHexScene(canvas: HTMLCanvasElement, options: HexSceneOptio
     vision,
     stops,
     resources,
+    pois,
     roads,
 
     setDaylight,
@@ -330,6 +335,7 @@ export function createHexScene(canvas: HTMLCanvasElement, options: HexSceneOptio
       detachControls()
       cancelAnimationFrame(frameRequest)
       roads.dispose()
+      pois.dispose()
       resources.dispose()
       stops.dispose()
       vision.dispose()
