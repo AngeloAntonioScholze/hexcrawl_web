@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest'
 import { hexKey, type Axial } from '../hex/coords'
 import { createLayout, hexToWorld, worldToHex } from '../hex/layout'
-import { hexUnderRay, neighborUnderRay } from './groundPick'
+import { hexUnderRay } from './groundPick'
 
 const layout = createLayout(2)
 const SIZE = layout.size
@@ -78,30 +78,5 @@ describe('hexUnderRay', () => {
   it('misses a ray that does not come down', () => {
     const ray = { origin: { x: 0, y: 10, z: 0 }, direction: { x: 0, y: 0.2, z: 1 } }
     expect(hexUnderRay(layout, ray, heights([], 1), 1, SIZE)).toBeNull()
-  })
-})
-
-describe('neighborUnderRay', () => {
-  const toward = (hex: Axial, other: Axial, top: number) => {
-    const from = hexToWorld(layout, hex)
-    const to = hexToWorld(layout, other)
-    const x = from.x + (to.x - from.x) * 0.4
-    const z = from.z + (to.z - from.z) * 0.4
-    // Slanted, so a ray read at y=0 instead of on the top would land elsewhere.
-    const direction = { x: 0, y: -1, z: 0.9 }
-    return { origin: { x, y: top + 10, z: z - 9 }, direction }
-  }
-
-  it.each([
-    [{ q: 1, r: 0 }],
-    [{ q: 1, r: -1 }],
-    [{ q: 0, r: -1 }],
-    [{ q: -1, r: 0 }],
-    [{ q: -1, r: 1 }],
-    [{ q: 0, r: 1 }],
-  ])('picks the neighbour across the side the ray meets the top nearest, toward %o', (other) => {
-    const hex = { q: 2, r: -1 }
-    const across = { q: hex.q + other.q, r: hex.r + other.r }
-    expect(neighborUnderRay(layout, toward(hex, across, 4), hex, 4)).toEqual(across)
   })
 })

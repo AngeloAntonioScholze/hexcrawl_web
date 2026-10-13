@@ -9,6 +9,7 @@ import { MIN_ELEVATION } from './hexGrid'
 import { bevelProfile } from './hexPrism'
 import {
   buildRoadGeometry,
+  cutLine,
   createRoadSegments,
   hexPaint,
   roadHexes,
@@ -98,8 +99,8 @@ describe('topHeight', () => {
   })
 })
 
-const paintOf = (from: Axial, toward: Axial[], profile = bevelled): HexPaint =>
-  hexPaint(layout, { hex: from, buried: false, toward }, tileSize, profile, 0.2)
+const paintOf = (from: Axial, toward: Axial[], profile = bevelled, shift = 0): HexPaint =>
+  hexPaint(layout, { hex: from, buried: false, toward }, tileSize, profile, 0.2, shift)
 
 describe('hexPaint', () => {
   it('leaves through the middle of the side, so neighbours line up across the border', () => {
@@ -113,6 +114,34 @@ describe('hexPaint', () => {
     expect(centreB.x + there.x - (centreA.x + here.x)).toBeCloseTo(
       2 * (layout.size * SIN60 - capEdge),
     )
+  })
+
+  it('shifts a line off the middle alike on both sides of the border', () => {
+    const centreA = hexToWorld(layout, { q: 0, r: 0 })
+    const centreB = hexToWorld(layout, { q: 1, r: 1 })
+    const here = paintOf({ q: 0, r: 0 }, [{ q: 1, r: 1 }], bevelled, 0.5).lines[0][0]
+    const there = paintOf({ q: 1, r: 1 }, [{ q: 0, r: 0 }], bevelled, 0.5).lines[0][0]
+    const crossing = { x: centreB.x - centreA.x, z: centreB.z - centreA.z }
+    const gap = {
+      x: centreB.x + there.x - centreA.x - here.x,
+      z: centreB.z + there.z - centreA.z - here.z,
+    }
+    expect(crossing.x * gap.z - crossing.z * gap.x).toBeCloseTo(0)
+    expect(Math.hypot(here.x, here.z)).toBeGreaterThan(capEdge)
+  })
+
+  it('runs a shifted line straight through a hex it crosses side to side', () => {
+    const line = paintOf(
+      { q: 0, r: 0 },
+      [
+        { q: 1, r: 0 },
+        { q: -1, r: 0 },
+      ],
+      bevelled,
+      0.5,
+    ).lines[0]
+    for (const point of line) expect(point.z).toBeCloseTo(line[0].z)
+    expect(Math.abs(line[0].z)).toBeCloseTo(0.5)
   })
 
   it('stops at the edge of the flat top, which on the flat prism is the rim', () => {
@@ -133,6 +162,33 @@ describe('hexPaint', () => {
     const last = line[line.length - 1]
     expect(Math.hypot(line[0].x, line[0].z)).toBeCloseTo(capEdge)
     expect(Math.hypot(last.x, last.z)).toBeCloseTo(capEdge)
+  })
+
+  it('branches three streams instead: two run on as one, the third joins it', () => {
+    const paint = hexPaint(
+      layout,
+      {
+        hex: { q: 0, r: 0 },
+        buried: false,
+        toward: [
+          { q: 0, r: 1 },
+          { q: 1, r: 0 },
+          { q: -1, r: 0 },
+        ],
+      },
+      tileSize,
+      bevelled,
+      0.2,
+      0.5,
+      true,
+    )
+    expect(paint.clearing).toBe(0)
+    expect(paint.joins).toEqual([false, true])
+    const [main, branch] = paint.lines
+    expect(Math.max(...main.map((point) => point.x))).toBeCloseTo(capEdge)
+    expect(Math.min(...main.map((point) => point.x))).toBeCloseTo(-capEdge)
+    const mouth = branch[branch.length - 1]
+    expect(main.some((point) => point.x === mouth.x && point.z === mouth.z)).toBe(true)
   })
 
   it('runs three roads into a clearing, and ends a lone road in a small patch', () => {
@@ -274,5 +330,53 @@ describe('createRoadSegments', () => {
     segments.setDetail(true)
     expect(gap()).toBeCloseTo(layout.size * SIN60 - capEdge)
     expect(Math.min(...heights())).toBeCloseTo(2)
+  })
+})
+
+describe('cutLine', () => {
+  const line = [
+    { x: -2, z: 0 },
+    { x: 2, z: 0 },
+  ]
+
+  it('hands back a line no gap touches as it was', () => {
+    expect(cutLine(line, [{ x: 0, z: 3, radius: 1 }], 0.1)).toEqual([line])
+  })
+
+  it('takes out the stretch inside a gap, cutting on its rim', () => {
+    const pieces = cutLine(line, [{ x: 0, z: 0, radius: 0.5 }], 0.1)
+    expect(pieces).toHaveLength(2)
+    expect(pieces[0][0]).toEqual({ x: -2, z: 0 })
+    expect(pieces[0][pieces[0].length - 1].x).toBeCloseTo(-0.5, 3)
+    expect(pieces[1][0].x).toBeCloseTo(0.5, 3)
+    expect(pieces[1][pieces[1].length - 1]).toEqual({ x: 2, z: 0 })
+  })
+})
+
+describe('createRoadSegments gaps', () => {
+  let engine: NullEngine
+  let scene: Scene
+  let segments: RoadSegments
+
+  beforeEach(() => {
+    engine = new NullEngine()
+    scene = new Scene(engine)
+    segments = createRoadSegments(scene, layout, () => 2)
+  })
+
+  afterEach(() => {
+    segments.dispose()
+    scene.dispose()
+    engine.dispose()
+  })
+
+  it('leaves the ground under a bridge unpainted', () => {
+    segments.setSpans([{ a: '0,0', b: '1,0', buriedA: false, buriedB: false }])
+    const middle = hexToWorld(layout, { q: 0, r: 0 })
+    segments.setGaps([{ x: middle.x + 0.8, z: middle.z, radius: 0.3 }])
+    const xs = Array.from(segments.mesh.getVerticesData('position') ?? []).filter(
+      (_, at) => at % 3 === 0,
+    )
+    expect(xs.some((x) => Math.abs(x - (middle.x + 0.8)) < 0.15)).toBe(false)
   })
 })

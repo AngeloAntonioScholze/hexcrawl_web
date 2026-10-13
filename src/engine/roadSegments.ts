@@ -101,8 +101,22 @@ export interface Point {
 export interface HexPaint {
   /** Centre lines, each running from the edge of the flat top; one strip of dirt is laid along each. */
   lines: Point[][]
-  /** Radius of the trodden clearing at the centre, or 0 for none. */
+  /** Radius of the trodden clearing, or 0 for none. */
   clearing: number
+  /** Where the clearing lies. */
+  hub: Point
+  /** For each line, whether it ends by running into another one, a branch joining the main stream. */
+  joins?: boolean[]
+}
+
+/**
+ * Square across a direction, always pointing the same way for a direction and
+ * its reverse, so both hexes either side of a border shift a line alike.
+ */
+export const across = (direction: Point): Point => {
+  const side = { x: -direction.z, z: direction.x }
+  const flip = side.x < -1e-9 || (Math.abs(side.x) <= 1e-9 && side.z < 0)
+  return flip ? { x: -side.x, z: -side.z } : side
 }
 
 /**
@@ -110,7 +124,11 @@ export interface HexPaint {
  * middle of its side, so it lines up with the neighbour's road across the
  * border, and stops where the flat top ends: down the rounded rim it would
  * read as a smear. Inside, two roads bend into each other as one path; a lone
- * road ends in a small round patch, and three or more run into a clearing.
+ * road ends in a small round patch, and three or more run into a clearing,
+ * unless they `branch`: then the two most nearly opposite run on as one and
+ * the rest join it from the side, the way streams meet.
+ * `shift` moves every line sideways off the middle by the same amount on both
+ * sides of a border, so a river can run beside a road between the same hexes.
  */
 export function hexPaint(
   layout: Layout,
@@ -118,6 +136,8 @@ export function hexPaint(
   tileSize: number,
   profile: readonly ProfileRing[],
   halfWidth: number,
+  shift = 0,
+  branch = false,
 ): HexPaint {
   const centre = hexToWorld(layout, road.hex)
   const edge = profile[0].radius * COS30
@@ -130,38 +150,89 @@ export function hexPaint(
     const dz = world.z - centre.z
     const length = Math.hypot(dx, dz)
     const direction = { x: dx / length, z: dz / length }
-    return { direction, points: rows.map((d) => ({ x: direction.x * d, z: direction.z * d })) }
+    const side = across(direction)
+    const offset = { x: side.x * shift, z: side.z * shift }
+    return {
+      direction,
+      offset,
+      points: rows.map((d) => ({ x: direction.x * d + offset.x, z: direction.z * d + offset.z })),
+    }
   })
 
   const steps = Math.max(2, Math.ceil(throat / halfWidth))
-  const inward = (direction: Point): Point[] => {
+  const inward = (from: Point, hub: Point): Point[] => {
     const points: Point[] = []
     for (let step = steps - 1; step >= 0; step--) {
-      const d = (throat * step) / steps
-      points.push({ x: direction.x * d, z: direction.z * d })
+      const t = step / steps
+      points.push({ x: hub.x + (from.x - hub.x) * t, z: hub.z + (from.z - hub.z) * t })
     }
     return points
   }
 
-  if (arms.length === 2) {
-    const [first, second] = arms
+  type Arm = (typeof arms)[number]
+  const through = (first: Arm, second: Arm): { line: Point[]; pull: Point } => {
     const from = first.points[first.points.length - 1]
     const to = second.points[second.points.length - 1]
+    const pull = {
+      x: (first.offset.x + second.offset.x) / 2,
+      z: (first.offset.z + second.offset.z) / 2,
+    }
     const bend: Point[] = []
-    // A quadratic curve pulled toward the centre: it leaves each throat heading
+    // A quadratic curve pulled toward the middle: it leaves each throat heading
     // along its road, so the bend joins the straight runs without a kink.
     for (let step = 1; step < steps * 2; step++) {
       const t = step / (steps * 2)
       bend.push({
-        x: (1 - t) ** 2 * from.x + t ** 2 * to.x,
-        z: (1 - t) ** 2 * from.z + t ** 2 * to.z,
+        x: (1 - t) ** 2 * from.x + 2 * t * (1 - t) * pull.x + t ** 2 * to.x,
+        z: (1 - t) ** 2 * from.z + 2 * t * (1 - t) * pull.z + t ** 2 * to.z,
       })
     }
-    return { lines: [[...first.points, ...bend, ...second.points.slice().reverse()]], clearing: 0 }
+    return { line: [...first.points, ...bend, ...second.points.slice().reverse()], pull }
   }
 
+  if (arms.length === 2) {
+    const { line, pull } = through(arms[0], arms[1])
+    return { lines: [line], clearing: 0, hub: pull }
+  }
+
+  if (branch && arms.length > 2) {
+    let main: [Arm, Arm] = [arms[0], arms[1]]
+    let straightest = Infinity
+    for (const one of arms) {
+      for (const other of arms) {
+        const dot = one.direction.x * other.direction.x + one.direction.z * other.direction.z
+        if (one !== other && dot < straightest) {
+          straightest = dot
+          main = [one, other]
+        }
+      }
+    }
+    const { line, pull } = through(...main)
+    const nearest = (point: Point): Point =>
+      line.reduce((best, next) =>
+        Math.hypot(next.x - point.x, next.z - point.z) <
+        Math.hypot(best.x - point.x, best.z - point.z)
+          ? next
+          : best,
+      )
+    const branches = arms
+      .filter((arm) => !main.includes(arm))
+      .map((arm) => {
+        const mouth = arm.points[arm.points.length - 1]
+        return [...arm.points, ...inward(mouth, nearest(mouth))]
+      })
+    return {
+      lines: [line, ...branches],
+      joins: [false, ...branches.map(() => true)],
+      clearing: 0,
+      hub: pull,
+    }
+  }
+
+  const hub = arms.length === 1 ? arms[0].offset : { x: 0, z: 0 }
   return {
-    lines: arms.map((arm) => [...arm.points, ...inward(arm.direction)]),
+    lines: arms.map((arm) => [...arm.points, ...inward(arm.points[arm.points.length - 1], hub)]),
+    hub,
     clearing: arms.length === 1 ? halfWidth : halfWidth * 1.6,
   }
 }
@@ -208,6 +279,79 @@ const SHADE: readonly [Color3, number][] = [
 
 const CLEARING_SIDES = 18
 
+/** A round hole in the paint, in world coordinates: where a bridge carries the road over water. */
+export interface Gap {
+  x: number
+  z: number
+  radius: number
+}
+
+const closest = (from: Point, to: Point, point: Point): Point => {
+  const dx = to.x - from.x
+  const dz = to.z - from.z
+  const t = Math.max(
+    0,
+    Math.min(1, ((point.x - from.x) * dx + (point.z - from.z) * dz) / (dx * dx + dz * dz || 1)),
+  )
+  return { x: from.x + dx * t, z: from.z + dz * t }
+}
+
+/**
+ * A line with every stretch inside a gap taken out, in the pieces left either
+ * side, each cut found exactly on the gap's rim. A line no gap touches comes
+ * back whole and as it was; one that is cut is first sampled every `step`.
+ */
+export function cutLine(line: readonly Point[], gaps: readonly Gap[], step: number): Point[][] {
+  const near = gaps.filter((gap) =>
+    line.some((point, at) => {
+      if (at === 0) return false
+      const foot = closest(line[at - 1], point, gap)
+      return Math.hypot(foot.x - gap.x, foot.z - gap.z) < gap.radius
+    }),
+  )
+  if (near.length === 0) return [line.slice()]
+  const inside = (point: Point): boolean =>
+    near.some((gap) => Math.hypot(point.x - gap.x, point.z - gap.z) < gap.radius)
+
+  const dense: Point[] = [line[0]]
+  for (let at = 1; at < line.length; at++) {
+    const from = line[at - 1]
+    const to = line[at]
+    const pieces = Math.max(1, Math.ceil(Math.hypot(to.x - from.x, to.z - from.z) / step))
+    for (let piece = 1; piece <= pieces; piece++) {
+      const t = piece / pieces
+      dense.push({ x: from.x + (to.x - from.x) * t, z: from.z + (to.z - from.z) * t })
+    }
+  }
+
+  const rim = (dry: Point, wet: Point): Point => {
+    let [a, b] = [dry, wet]
+    for (let i = 0; i < 12; i++) {
+      const mid = { x: (a.x + b.x) / 2, z: (a.z + b.z) / 2 }
+      if (inside(mid)) b = mid
+      else a = mid
+    }
+    return a
+  }
+
+  const pieces: Point[][] = []
+  let run: Point[] = []
+  dense.forEach((point, at) => {
+    if (inside(point)) {
+      if (run.length > 0) {
+        run.push(rim(dense[at - 1], point))
+        pieces.push(run)
+        run = []
+      }
+      return
+    }
+    if (run.length === 0 && at > 0) run.push(rim(point, dense[at - 1]))
+    run.push(point)
+  })
+  if (run.length > 0) pieces.push(run)
+  return pieces.filter((piece) => piece.length > 1)
+}
+
 export interface RoadGeometry {
   positions: number[]
   indices: number[]
@@ -219,6 +363,8 @@ export interface PaintOptions {
   tileSize: number
   profile: readonly ProfileRing[]
   halfWidth: number
+  /** Where bridges carry the roads over rivers, left unpainted. */
+  gaps?: readonly Gap[]
 }
 
 /**
@@ -233,7 +379,7 @@ export function buildRoadGeometry(
   groundOf: (road: RoadHex) => number,
   options: PaintOptions,
 ): RoadGeometry {
-  const { tileSize, profile, halfWidth } = options
+  const { tileSize, profile, halfWidth, gaps = [] } = options
   const geometry: RoadGeometry = { positions: [], indices: [], colors: [], uvs: [] }
   const { positions, indices, colors, uvs } = geometry
   const meander = halfWidth * 0.35
@@ -251,8 +397,14 @@ export function buildRoadGeometry(
     const ground = groundOf(road)
     const paint = hexPaint(layout, road, tileSize, profile, halfWidth)
     const seed = Math.imul(road.hex.q, 73856093) ^ Math.imul(road.hex.r, 19349663)
+    const holes = gaps
+      .filter(
+        (gap) => Math.hypot(gap.x - centre.x, gap.z - centre.z) < layout.size * 2 + gap.radius,
+      )
+      .map((gap) => ({ ...gap, x: gap.x - centre.x, z: gap.z - centre.z }))
+    const lines = paint.lines.flatMap((line) => cutLine(line, holes, halfWidth / 2))
 
-    paint.lines.forEach((line, index) => {
+    lines.forEach((line, index) => {
       let length = 0
       const along = line.map((point, at) => {
         if (at > 0) length += Math.hypot(point.x - line[at - 1].x, point.z - line[at - 1].z)
@@ -300,7 +452,14 @@ export function buildRoadGeometry(
     if (paint.clearing > 0) {
       clearings.push(() => {
         const first = positions.length / 3
-        vertex(centre.x, ground * profile[0].y, centre.z, CLEARING, 1)
+        const { hub } = paint
+        vertex(
+          centre.x + hub.x,
+          ground * topHeight(hub.x, hub.z, profile),
+          centre.z + hub.z,
+          CLEARING,
+          1,
+        )
         uvs.push(0.5, 0.5)
         for (let k = 0; k < CLEARING_SIDES; k++) {
           const angle = (2 * Math.PI * k) / CLEARING_SIDES
@@ -309,8 +468,8 @@ export function buildRoadGeometry(
             [swell, 1],
             [swell * 1.4, 0],
           ] as const) {
-            const x = Math.cos(angle) * paint.clearing * scale
-            const z = Math.sin(angle) * paint.clearing * scale
+            const x = hub.x + Math.cos(angle) * paint.clearing * scale
+            const z = hub.z + Math.sin(angle) * paint.clearing * scale
             vertex(centre.x + x, ground * topHeight(x, z, profile), centre.z + z, CLEARING, alpha)
             uvs.push(0.5 + x / (halfWidth * 2), 0.5 + z / (halfWidth * 2))
           }
@@ -346,6 +505,8 @@ export interface RoadSegments {
   /** Hexes with road painted on them right now. */
   readonly count: number
   setSpans(spans: readonly RoadSpan[]): void
+  /** Where bridges carry the roads over rivers; the paint stops short of them. */
+  setGaps(gaps: readonly Gap[]): void
   /** Follows the grid between its bevelled prism and the flat one, so the paint stays on the top. */
   setDetail(detailed: boolean): void
   dispose(): void
@@ -360,7 +521,8 @@ export interface RoadSegmentOptions {
   width?: number
 }
 
-const DEFAULTS = { width: 0.3 } as const
+/** Road width, as a fraction of the hex size. */
+export const ROAD_WIDTH = 0.3
 const GRIT_SIZE = 64
 
 /**
@@ -376,7 +538,7 @@ export function createRoadSegments(
   options: RoadSegmentOptions = {},
 ): RoadSegments {
   const tileSize = options.tileSize ?? layout.size
-  const halfWidth = (layout.size * (options.width ?? DEFAULTS.width)) / 2
+  const halfWidth = (layout.size * (options.width ?? ROAD_WIDTH)) / 2
   const profiles = {
     detailed: bevelProfile(tileSize, { bevel: options.bevel }),
     flat: bevelProfile(tileSize, { bevel: 0 }),
@@ -412,6 +574,7 @@ export function createRoadSegments(
 
   let detailed = true
   let painted: RoadHex[] = []
+  let gaps: readonly Gap[] = []
 
   const rebuild = (): void => {
     mesh.isVisible = painted.length > 0
@@ -420,6 +583,7 @@ export function createRoadSegments(
       tileSize,
       profile: detailed ? profiles.detailed : profiles.flat,
       halfWidth,
+      gaps,
     })
     const data = new VertexData()
     data.positions = geometry.positions
@@ -440,6 +604,11 @@ export function createRoadSegments(
 
     setSpans(spans): void {
       painted = roadHexes(spans)
+      rebuild()
+    },
+
+    setGaps(next): void {
+      gaps = next
       rebuild()
     },
 

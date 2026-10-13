@@ -65,10 +65,7 @@ const SWATCHES = Object.fromEntries(
         {{ mode }}
       </button>
     </div>
-    <RoadOptions v-if="store.dmTool === 'road'" />
-    <span v-if="store.dmTool === 'river'" class="hint">
-      tap near a hex side to lay river along it, again to lift it
-    </span>
+    <RoadOptions v-if="store.dmTool === 'road' || store.dmTool === 'river'" />
     <div v-if="store.dmTool === 'paint'" class="paint" role="radiogroup" aria-label="terrain">
       <button
         v-for="id in TERRAIN_IDS"
@@ -140,10 +137,6 @@ button.here {
 .fog-modes {
   display: flex;
   gap: 4px;
-}
-
-.hint {
-  color: var(--ink-dim);
 }
 
 .value {

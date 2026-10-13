@@ -19,7 +19,7 @@ import {
   stepKmOn,
 } from './travel'
 import { fieldFromTiles } from './field'
-import { withRiverToggled, type Rivers } from './rivers'
+import type { Rivers } from './rivers'
 import { withRoad } from './roads'
 
 // The number is the mechanical level; the rendered height is derived from it so
@@ -153,12 +153,18 @@ describe('roads', () => {
 describe('rivers', () => {
   const here = tile({ q: 0, r: 0 }, 1)
   const there = tile({ q: 1, r: 0 }, 1)
-  const river = withRiverToggled(new Set(), here.hex, there.hex)
+  const beyond = tile({ q: 2, r: 0 }, 1)
+  // Through `there` from north to south, square across the way east.
+  const river: Rivers = withRoad(new Set(), [{ q: 1, r: -1 }, there.hex, { q: 1, r: 1 }])
 
-  it('charge a hex more to ford, whichever way', () => {
+  it('charge a hex more to step into a river hex, and nothing to step out', () => {
     expect(RIVER_CROSSING_KM).toBe(KM_PER_HEX)
     expect(stepKmOn(new Set(), here, there, 'land', river)).toBe(KM_PER_HEX + RIVER_CROSSING_KM)
-    expect(stepKmOn(new Set(), there, here, 'land', river)).toBe(KM_PER_HEX + RIVER_CROSSING_KM)
+    expect(stepKmOn(new Set(), there, beyond, 'land', river)).toBe(KM_PER_HEX)
+  })
+
+  it('charge nothing more to follow the river', () => {
+    expect(stepKmOn(new Set(), tile({ q: 1, r: -1 }, 1), there, 'land', river)).toBe(KM_PER_HEX)
   })
 
   it('add the ford on top of a climb', () => {
@@ -168,7 +174,7 @@ describe('rivers', () => {
     )
   })
 
-  it('are crossed at no extra cost on a bridge, a road over the same side', () => {
+  it('are crossed at no extra cost on a bridge, a road into the river hex', () => {
     const roads = withRoad(new Set(), [here.hex, there.hex])
     expect(stepKmOn(roads, here, there, 'land', river)).toBe(KM_PER_HEX)
   })
@@ -178,16 +184,12 @@ describe('rivers', () => {
     expect(stepCostKm(water(here.hex), water(there.hex), 'sea', false, true)).toBe(KM_PER_HEX)
   })
 
-  // Along every side between rows 0 and 1 from q = -1 to q = 4: too long to
-  // walk around, so getting from one row to the other means fording it.
-  const barrier = (): Rivers => {
-    let rivers: Rivers = new Set()
-    for (let q = -1; q <= 3; q++) {
-      rivers = withRiverToggled(rivers, { q, r: 0 }, { q, r: 1 })
-      rivers = withRiverToggled(rivers, { q: q + 1, r: 0 }, { q, r: 1 })
-    }
-    return rivers
-  }
+  // Down the whole of row 1, so getting from row 0 to row 2 means fording it.
+  const barrier = (): Rivers =>
+    withRoad(
+      new Set(),
+      Array.from({ length: 15 }, (_, i) => ({ q: i - 7, r: 1 })),
+    )
 
   it('charge a route that has to ford for the crossing', () => {
     const route = findRoute(
@@ -205,17 +207,16 @@ describe('rivers', () => {
     expect(route.km).toBe(KM_PER_HEX + RIVER_CROSSING_KM)
   })
 
-  it('never cost more than going round the end of the river', () => {
-    const rivers = withRiverToggled(new Set(), { q: 0, r: 0 }, { q: 1, r: 0 })
+  it('cost nothing more down the river once in it', () => {
     const route = findRoute(
       fieldFromTiles(flatField(6)),
-      { q: 0, r: 0 },
-      { q: 1, r: 0 },
+      { q: 0, r: 1 },
+      { q: 3, r: 1 },
       {
-        rivers,
+        rivers: barrier(),
       },
     )!
-    expect(route.km).toBe(2 * KM_PER_HEX)
+    expect(route.km).toBe(3 * KM_PER_HEX)
   })
 
   it('cross at the plain rate where a road bridges them', () => {

@@ -1,10 +1,9 @@
-import { distance, type Axial } from '../hex/coords'
+import { neighbors, type Axial } from '../hex/coords'
 import { isRoadEdge, roadEdge, roadKey, type RoadEdge, type RoadKey } from './roads'
 
 /**
- * A river runs along the side two neighbouring hexes share, so it is named by
- * that pair exactly as the road crossing it would be: a road and a river with
- * the same key are a bridge.
+ * A river runs from one hex's middle to its neighbour's, exactly as a road
+ * does, so it is named by that pair the same way and drawn with the same tool.
  */
 export type RiverKey = RoadKey
 
@@ -19,11 +18,13 @@ export const isRiverEdge = isRoadEdge
 
 export const hasRiver = (rivers: Rivers, a: Axial, b: Axial): boolean => rivers.has(riverKey(a, b))
 
-/** Lays river along the side two hexes share, or takes it up if it is there already. */
-export function withRiverToggled(rivers: Rivers, a: Axial, b: Axial): Rivers {
-  if (distance(a, b) !== 1) return rivers
-  const key = riverKey(a, b)
-  const next = new Set(rivers)
-  if (!next.delete(key)) next.add(key)
-  return next
-}
+/** Whether a river runs through a hex at all. */
+export const wet = (rivers: Rivers, hex: Axial): boolean =>
+  neighbors(hex).some((next) => hasRiver(rivers, hex, next))
+
+/**
+ * Stepping into a hex a river runs through means fording it, unless the step
+ * follows the river itself: walking along the bank never crosses the water.
+ */
+export const crossesRiver = (rivers: Rivers, from: Axial, to: Axial): boolean =>
+  !hasRiver(rivers, from, to) && wet(rivers, to)

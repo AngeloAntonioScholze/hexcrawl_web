@@ -23,7 +23,7 @@ onBeforeUnmount(() => window.removeEventListener('keydown', onKey))
       <span>erase</span>
     </label>
     <button type="button" :disabled="!store.roadTail" @click="store.finishRoad()">
-      finish road
+      finish {{ store.dmTool }}
     </button>
   </div>
 </template>

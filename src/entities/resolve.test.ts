@@ -1,7 +1,6 @@
 import { Color3 } from '@babylonjs/core/Maths/math.color'
 import { describe, expect, it } from 'vitest'
 import { hexKey, parseKey, range, type Axial, type HexKey } from '../hex/coords'
-import { withRiverToggled } from '../terrain/rivers'
 import { withRoad } from '../terrain/roads'
 import type { TerrainTile } from '../terrain/terrain'
 import type { Action } from './action'
@@ -122,7 +121,10 @@ describe('the cost of a step', () => {
   it('holds a party on the bank for the turn the ford takes', () => {
     const who = entity({ pacePerTurn: 1 })
     const field = fieldFromTiles(flatField(4))
-    const rivers = withRiverToggled(new Set(), { q: 0, r: 0 }, { q: 1, r: 0 })
+    const rivers = withRoad(new Set(), [
+      { q: 1, r: -1 },
+      { q: 1, r: 0 },
+    ])
     const from = new Map([[who.id, standing('0,0')]])
     const queued = new Map([[who.id, move(east(1))]])
 
@@ -135,7 +137,10 @@ describe('the cost of a step', () => {
   it('lets the slowest party ford a river at the top of a climb in the end', () => {
     const who = entity({ pacePerTurn: 0.5 })
     const field = fieldFromTiles(ridgeField(4))
-    const rivers = withRiverToggled(new Set(), { q: 1, r: 0 }, { q: 2, r: 0 })
+    const rivers = withRoad(new Set(), [
+      { q: 2, r: -1 },
+      { q: 2, r: 0 },
+    ])
     let states: ReadonlyMap<string, EntityState> = new Map([[who.id, standing('1,0')]])
     for (let turn = 0; turn < 6; turn++) {
       const queued = new Map<string, Action>(turn === 0 ? [[who.id, move(['1,0', '2,0'])]] : [])

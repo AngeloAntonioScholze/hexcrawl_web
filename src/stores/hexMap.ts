@@ -65,18 +65,12 @@ import {
   type FogMode,
   type Knowledge,
 } from '../hex/fogEdits'
-import { hexKey, parseKey, range, type Axial, type HexKey } from '../hex/coords'
+import { hexKey, line, parseKey, range, type Axial, type HexKey } from '../hex/coords'
 import type { VisionOptions } from '../hex/vision'
 import type { MapSnapshot } from '../persistence/mapState'
 import { fieldFromTiles, withOverrides, type TerrainField } from '../terrain/field'
 import { scatterResources } from '../terrain/resourceGen'
-import {
-  riverEdge,
-  riverKey,
-  withRiverToggled,
-  type RiverKey,
-  type Rivers,
-} from '../terrain/rivers'
+import { riverEdge, riverKey, type Rivers } from '../terrain/rivers'
 import { roadEdge, roadKey, withoutRoadAt, withRoad, type Roads } from '../terrain/roads'
 import {
   DEFAULT_RESOURCE_SPACING,
@@ -222,8 +216,6 @@ export const useHexMapStore = defineStore('hexMap', () => {
   /** The DM's brushwork over the generated ground, hex by hex. */
   const terrainOverrides = shallowRef<ReadonlyMap<HexKey, TerrainId>>(new Map())
   const hovered = ref<HexKey | null>(null)
-  /** The neighbour across the side of the hovered hex nearest the pointer. */
-  const hoveredAcross = ref<HexKey | null>(null)
 
   // Entities are held as whole records and replaced rather than mutated, so a
   // crawl hundreds of turns long never becomes hundreds of reactive proxies.
@@ -280,14 +272,14 @@ export const useHexMapStore = defineStore('hexMap', () => {
   const roads = shallowRef<Roads>(new Set())
 
   /**
-   * Where the road being drawn last reached, so the next tap carries it on from
-   * there; null when no road is being drawn. Never saved, but undone with the
+   * Where the road or river being drawn last reached, so the next tap carries
+   * it on from there; null when none is being drawn. Never saved, but undone with the
    * tap that moved it, so undoing a stretch hands the pen back where it was.
    */
   const roadTail = ref<HexKey | null>(null)
   const roadErase = ref(false)
 
-  /** Every stretch of river, each along the side two neighbouring hexes share. */
+  /** Every stretch of river, each running from one hex's middle to its neighbour's like a road. */
   const rivers = shallowRef<Rivers>(new Set())
 
   const resourcesByHex = computed<ReadonlyMap<HexKey, readonly Resource[]>>(() => {
@@ -519,9 +511,8 @@ export const useHexMapStore = defineStore('hexMap', () => {
 
   const tileAt = (hex: HexKey): TerrainTile | undefined => field.value.at(parseKey(hex))
 
-  const setHovered = (hex: Axial | null, across: Axial | null = null): void => {
+  const setHovered = (hex: Axial | null): void => {
     hovered.value = hex ? hexKey(hex) : null
-    hoveredAcross.value = hex && across ? hexKey(across) : null
   }
 
   /** The hex the DM is looking at; view state, never saved. */
@@ -950,18 +941,27 @@ export const useHexMapStore = defineStore('hexMap', () => {
     roadTail.value = null
   }
 
-  /** Lays river along the side of a hex nearest the tap, or takes it up again. */
-  const riverTap = (hex: Axial, across: Axial): void => {
-    if (!field.value.at(hex) || !field.value.at(across)) return
-    rivers.value = withRiverToggled(rivers.value, hex, across)
+  /**
+   * Drawn like a road, but straight from hex to hex rather than along the
+   * cheapest route, since a river goes where the DM says, sea and all.
+   */
+  const riverTap = (hex: HexKey): void => {
+    if (roadErase.value) {
+      rivers.value = withoutRoadAt(rivers.value, parseKey(hex))
+      return
+    }
+    const tail = roadTail.value
+    if (tail === hex) {
+      roadTail.value = null
+      return
+    }
+    if (tail !== null) rivers.value = withRoad(rivers.value, line(parseKey(tail), parseKey(hex)))
+    roadTail.value = hex
   }
 
-  /** Where a tap of the river tool would lay or lift river, for the preview. */
-  const riverHover = computed<RiverKey | null>(() =>
-    dmView.value && dmTool.value === 'river' && hovered.value && hoveredAcross.value
-      ? riverKey(parseKey(hovered.value), parseKey(hoveredAcross.value))
-      : null,
-  )
+  toolHandlers.river = (hexes) => {
+    if (hexes[0]) riverTap(hexes[0])
+  }
 
   /** What the paint brush lays down. View state, never saved. */
   const paintTerrain = ref<TerrainId>('grass')
@@ -994,14 +994,12 @@ export const useHexMapStore = defineStore('hexMap', () => {
    * Clicking the picked hex again, or the goal of the order just given, takes
    * the pick back.
    */
-  const click = (hex: Axial | null, append = false, across: Axial | null = null): void => {
+  const click = (hex: Axial | null, append = false): void => {
     const key = hex ? hexKey(hex) : null
     if (dmView.value) {
       const tool = dmTool.value
       if (tool === 'select') selectHex(key === selectedHex.value ? null : hex)
-      else if (tool === 'river') {
-        if (hex && across) riverTap(hex, across)
-      } else if (hex) toolHandlers[tool]?.(brushHexes(hex))
+      else if (hex) toolHandlers[tool]?.(brushHexes(hex))
       return
     }
     const id = selectedId.value
@@ -1566,11 +1564,11 @@ export const useHexMapStore = defineStore('hexMap', () => {
     { flush: 'sync' },
   )
 
-  // Putting the road tool down, or leaving the DM's view, ends the road in hand.
+  // Changing tools, or leaving the DM's view, ends the road or river in hand.
   watch(
     [dmTool, dmView],
-    ([tool, dm]) => {
-      if (tool !== 'road' || !dm) roadTail.value = null
+    () => {
+      roadTail.value = null
     },
     { flush: 'sync' },
   )
@@ -1719,7 +1717,6 @@ export const useHexMapStore = defineStore('hexMap', () => {
     finishRoad,
     setRoadErase,
     rivers,
-    riverHover,
     undo: history.undo,
     redo: history.redo,
     canUndo: history.canUndo,

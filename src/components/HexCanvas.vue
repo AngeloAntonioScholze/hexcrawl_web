@@ -10,7 +10,6 @@ import { createFogStepper } from '../engine/fogStepper'
 import type { HexGrid } from '../engine/hexGrid'
 import { visiblePois } from '../engine/poiMarkers'
 import { resourceMarks } from '../engine/resourceMarkers'
-import { riverSpans } from '../engine/riverSegments'
 import { roadSpans } from '../engine/roadSegments'
 import type { SkyGlow } from '../engine/sky'
 import { useHexScene } from '../engine/useHexScene'
@@ -230,17 +229,20 @@ const spans = computed(() =>
   roadSpans(store.roads, { dmView: store.dmView, fog: store.fog, explored: store.explored }),
 )
 
-watch(spans, (next) => hexScene.value?.roads.setSpans(next))
+watch(spans, (next) => {
+  hexScene.value?.roads.setSpans(next)
+  hexScene.value?.bridges.setRoads(next)
+})
 
 const riverLines = computed(() =>
-  riverSpans(
-    store.rivers,
-    { dmView: store.dmView, fog: store.fog, explored: store.explored },
-    store.riverHover,
-  ),
+  roadSpans(store.rivers, { dmView: store.dmView, fog: store.fog, explored: store.explored }),
 )
 
-watch(riverLines, (next) => hexScene.value?.rivers.setSpans(next))
+watch(riverLines, (next) => {
+  hexScene.value?.rivers.setSpans(next)
+  hexScene.value?.bridges.setRivers(next)
+})
+
 // The sky over the map follows the same clock the dial draws: each turn of the
 // day has a light of its own.
 watch(
@@ -261,6 +263,8 @@ const pushHeights = (created: NonNullable<typeof hexScene.value>): void => {
   created.pois.setPois(pois.value)
   created.roads.setSpans(spans.value)
   created.rivers.setSpans(riverLines.value)
+  created.bridges.setRoads(spans.value)
+  created.bridges.setRivers(riverLines.value)
   created.vision.setField(sightField.value.lit, sightField.value.shadow)
 }
 

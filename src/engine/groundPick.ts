@@ -1,4 +1,4 @@
-import { neighbor, type Axial } from '../hex/coords'
+import type { Axial } from '../hex/coords'
 import { hexToWorld, worldToHex, type Layout } from '../hex/layout'
 
 interface Point3 {
@@ -60,28 +60,4 @@ export function hexUnderRay(
   }
 
   return null
-}
-
-/**
- * The neighbour across whichever side of a hex the ray meets its top nearest,
- * so an edge can be picked by pointing at it from inside either hex.
- */
-export function neighborUnderRay(layout: Layout, ray: PickRay, hex: Axial, top: number): Axial {
-  const { origin, direction } = ray
-  const t = direction.y < 0 ? (top - origin.y) / direction.y : 0
-  const x = origin.x + direction.x * t
-  const z = origin.z + direction.z * t
-  const centre = hexToWorld(layout, hex)
-  let best = neighbor(hex, 0)
-  let reach = -Infinity
-  for (let side = 0; side < 6; side++) {
-    const next = neighbor(hex, side)
-    const world = hexToWorld(layout, next)
-    const along = (world.x - centre.x) * (x - centre.x) + (world.z - centre.z) * (z - centre.z)
-    if (along > reach) {
-      reach = along
-      best = next
-    }
-  }
-  return best
 }

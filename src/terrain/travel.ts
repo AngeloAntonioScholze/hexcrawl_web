@@ -1,7 +1,7 @@
 import { distance, neighbors, type Axial } from '../hex/coords'
 import { findPath } from '../hex/pathfind'
 import type { TerrainField } from './field'
-import { hasRiver, type Rivers } from './rivers'
+import { crossesRiver, type Rivers } from './rivers'
 import { hasRoad, type Roads } from './roads'
 import { isWater, type TerrainTile } from './terrain'
 
@@ -30,9 +30,9 @@ export const ROADS_GRADED: Readonly<Record<Movement, boolean>> = {
 }
 
 /**
- * Wading or swimming a river costs a hex of its own on top of the step, so a
- * crossing stays a whole number of hexes like everything else. A road over the
- * same side is a bridge and the crossing is free. Ships sail past rivers.
+ * Wading or swimming a river costs a hex of its own on top of the step into
+ * its hex, so a crossing stays a whole number of hexes like everything else.
+ * A road into that hex is a bridge and the crossing is free. Ships sail past rivers.
  */
 export const RIVER_CROSSING_KM = KM_PER_HEX
 
@@ -115,7 +115,7 @@ export const stepKmOn = (
     to,
     movement,
     hasRoad(roads, from.hex, to.hex),
-    hasRiver(rivers, from.hex, to.hex),
+    crossesRiver(rivers, from.hex, to.hex),
   )
 
 /** Land with open water on at least one side. */
@@ -159,7 +159,7 @@ export function findRoute(
       if (!here || !passable(there)) return null
       const road = hasRoad(roads, a, b)
       const nudge = usesRoads && !road ? OFF_ROAD_NUDGE : 0
-      return stepCostKm(here, there, movement, road, hasRiver(rivers, a, b)) + nudge
+      return stepCostKm(here, there, movement, road, crossesRiver(rivers, a, b)) + nudge
     },
     // The cheapest step under any movement rule is one flat hex, so this never
     // overestimates.

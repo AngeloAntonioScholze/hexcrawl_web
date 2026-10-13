@@ -1,6 +1,6 @@
 import { parseKey, type HexKey } from '../hex/coords'
 import type { TerrainField } from '../terrain/field'
-import { hasRiver, type Rivers } from '../terrain/rivers'
+import { crossesRiver, type Rivers } from '../terrain/rivers'
 import { hasRoad, type Roads } from '../terrain/roads'
 import {
   CLIMB_MULTIPLIER,
@@ -96,7 +96,7 @@ function walk(
     if (!here || !next) break
 
     const road = hasRoad(roads, here.hex, next.hex)
-    const river = hasRiver(rivers, here.hex, next.hex)
+    const river = crossesRiver(rivers, here.hex, next.hex)
     const cost = stepCostTurns(here, next, KIND_MOVEMENT[entity.kind], road, river)
     if (budget < cost) break
 

@@ -11,7 +11,7 @@ import {
   type PixelBox,
 } from '../engine/minimap'
 import { RESOURCE_MARKER_COLOR, resourceMarks } from '../engine/resourceMarkers'
-import { RIVER_COLOR, riverSpans, sharedSide } from '../engine/riverSegments'
+import { RIVER_COLOR } from '../engine/riverSegments'
 import { ROAD_COLOR, roadSpans } from '../engine/roadSegments'
 import type { HexScene } from '../engine/scene'
 import { parseKey, type Axial, type HexKey } from '../hex/coords'
@@ -73,14 +73,11 @@ const roadLines = computed<readonly [Pixel, Pixel][]>(() =>
 )
 
 const riverLines = computed<readonly [Pixel, Pixel][]>(() =>
-  riverSpans(store.rivers, {
+  roadSpans(store.rivers, {
     dmView: store.dmView,
     fog: store.fog,
     explored: store.explored,
-  }).map((span) => {
-    const [from, to] = sharedSide(props.layout, parseKey(span.a), parseKey(span.b))
-    return [worldToMinimap(frame.value, from.x, from.z), worldToMinimap(frame.value, to.x, to.z)]
-  }),
+  }).map((span) => [hexPixel(span.a), hexPixel(span.b)]),
 )
 
 /**
