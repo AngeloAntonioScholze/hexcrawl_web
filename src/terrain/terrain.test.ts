@@ -1,7 +1,14 @@
 import { describe, expect, it } from 'vitest'
 import { spiral, type Axial } from '../hex/coords'
 import { createLayout } from '../hex/layout'
-import { MAX_LEVEL, bandFor, createTerrain, type TerrainId } from './terrain'
+import {
+  MAX_LEVEL,
+  TERRAIN_IDS,
+  TERRAIN_LABELS,
+  bandFor,
+  createTerrain,
+  type TerrainId,
+} from './terrain'
 
 const layout = createLayout(2)
 const field = spiral({ q: 0, r: 0 }, 22)
@@ -38,6 +45,12 @@ describe('bandFor', () => {
     ]
     const seen = [-0.5, -0.1, 0.03, 0.15, 0.35, 0.6, 0.9].map((h) => bandFor(h).id)
     expect(seen).toEqual(order)
+  })
+
+  it('lists the terrain ids in the order the bands climb, each with a label', () => {
+    const climb = [-0.5, -0.1, 0.03, 0.15, 0.35, 0.6, 0.9].map((h) => bandFor(h).id)
+    expect(TERRAIN_IDS).toEqual(climb)
+    expect(TERRAIN_LABELS.deepWater).toBe('deep water')
   })
 })
 

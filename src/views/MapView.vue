@@ -16,7 +16,8 @@ import {
   useHexMapStore,
   type WorldSize,
 } from '../stores/hexMap'
-import { RESOURCE_SPACING_LIMITS } from '../terrain/resources'
+import { RESOURCE_SPACING_LIMITS, countByOrigin } from '../terrain/resources'
+import { TERRAIN_IDS, TERRAIN_LABELS, type TerrainId } from '../terrain/terrain'
 import { KM_PER_HEX } from '../terrain/travel'
 
 const store = useHexMapStore()
@@ -47,6 +48,22 @@ const onPace = (event: Event): void => {
 
 const onSpacing = (event: Event): void => {
   store.setResourceSpacing(Number((event.target as HTMLInputElement).value))
+}
+
+const onChance = (terrainId: TerrainId, event: Event): void => {
+  store.setResourceChance(terrainId, Number((event.target as HTMLInputElement).value) / 100)
+}
+
+const resourceCounts = computed(() => countByOrigin(store.resources))
+
+const generateResources = (): void => {
+  const generated = resourceCounts.value.generated
+  if (
+    generated > 0 &&
+    !window.confirm(`Replace the ${generated} generated resources? Hand-placed ones stay.`)
+  )
+    return
+  store.generateResources()
 }
 
 const onTerrain = (key: 'scale' | 'seaLevel' | 'relief', event: Event): void => {
@@ -240,6 +257,34 @@ const olderTurns = computed(() => Math.max(0, store.journey.length - TURNS_SHOWN
               :step="RESOURCE_SPACING_LIMITS.step"
               @input="onSpacing"
             />
+
+            <template v-if="store.dmView">
+              <details class="odds">
+                <summary>resource odds</summary>
+                <template v-for="terrainId in TERRAIN_IDS" :key="terrainId">
+                  <div class="row">
+                    <span>{{ TERRAIN_LABELS[terrainId] }}</span>
+                    <span class="value">
+                      {{ Math.round(store.resourceChances[terrainId] * 100) }}%
+                    </span>
+                  </div>
+                  <input
+                    :value="Math.round(store.resourceChances[terrainId] * 100)"
+                    type="range"
+                    min="0"
+                    max="100"
+                    step="1"
+                    :aria-label="`resource odds on ${TERRAIN_LABELS[terrainId]}`"
+                    @input="onChance(terrainId, $event)"
+                  />
+                </template>
+              </details>
+              <button type="button" @click="generateResources">generate resources</button>
+              <p class="dim">
+                {{ store.resources.length }} resources: {{ resourceCounts.generated }} generated,
+                {{ resourceCounts.manual }} manual
+              </p>
+            </template>
           </div>
 
           <label class="control">
@@ -615,6 +660,21 @@ aside:where(.panel) {
 
 .entities li button.here {
   background: color-mix(in srgb, var(--line) 70%, transparent);
+}
+
+.odds {
+  display: flex;
+  flex-direction: column;
+  gap: 0.4rem;
+}
+
+.odds summary {
+  color: var(--ink-dim);
+  cursor: pointer;
+}
+
+.odds summary:hover {
+  color: var(--ink);
 }
 
 .sizes {

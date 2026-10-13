@@ -58,6 +58,15 @@ export const TERRAIN_RESOURCES: Readonly<Record<TerrainId, readonly ResourceType
   peaks: ['rareOre', 'crystal'],
 }
 
+/** How many resources the generator laid down and how many the DM placed. */
+export const countByOrigin = (
+  resources: readonly Resource[],
+): Readonly<Record<ResourceOrigin, number>> => {
+  const counts = { generated: 0, manual: 0 }
+  for (const one of resources) counts[one.origin] += 1
+  return counts
+}
+
 export interface NearbyResource {
   resource: Resource
   distance: number

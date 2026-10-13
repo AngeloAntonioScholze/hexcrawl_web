@@ -5,6 +5,19 @@ import { createFbm, type FbmOptions } from './perlin'
 
 export type TerrainId = 'deepWater' | 'water' | 'sand' | 'grass' | 'forest' | 'mountains' | 'peaks'
 
+/** Lowest to highest, the order the bands climb in. */
+export const TERRAIN_LABELS: Readonly<Record<TerrainId, string>> = {
+  deepWater: 'deep water',
+  water: 'water',
+  sand: 'sand',
+  grass: 'grass',
+  forest: 'forest',
+  mountains: 'mountains',
+  peaks: 'peaks',
+}
+
+export const TERRAIN_IDS = Object.keys(TERRAIN_LABELS) as readonly TerrainId[]
+
 export interface TerrainTile {
   hex: Axial
   terrain: TerrainId

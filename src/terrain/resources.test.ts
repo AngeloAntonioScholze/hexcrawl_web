@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest'
 import {
+  countByOrigin,
   DEFAULT_RESOURCE_CHANCE,
   defaultResourceChances,
   nearestWithin,
@@ -73,5 +74,23 @@ describe('the nearest resource within spacing', () => {
   it('ignores resources at or beyond the spacing', () => {
     expect(nearestWithin('0,0', [at('edge', '10,0'), at('out', '0,12')], 10)).toBeNull()
     expect(nearestWithin('0,0', [at('in', '9,0')], 10)?.distance).toBe(9)
+  })
+})
+
+describe('counting resources by origin', () => {
+  const made = (id: string, origin: Resource['origin']): Resource => ({
+    id,
+    hex: '0,0',
+    type: 'fish',
+    origin,
+  })
+
+  it('is nothing of either on an empty map', () => {
+    expect(countByOrigin([])).toEqual({ generated: 0, manual: 0 })
+  })
+
+  it('tells the generated from the hand-placed', () => {
+    const resources = [made('a', 'generated'), made('b', 'manual'), made('c', 'generated')]
+    expect(countByOrigin(resources)).toEqual({ generated: 2, manual: 1 })
   })
 })
