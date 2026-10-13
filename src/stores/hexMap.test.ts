@@ -8,6 +8,7 @@ import {
   defaultResourceChances,
   RESOURCE_SPACING_LIMITS,
 } from '../terrain/resources'
+import { mulberry32 } from '../terrain/perlin'
 import { roadHexes } from '../terrain/roads'
 import { TERRAIN_DEFAULTS, type TerrainId, type TerrainTile } from '../terrain/terrain'
 import { TURNS_PER_PHASE } from '../time/clock'
@@ -1860,6 +1861,41 @@ describe('encounter tables', () => {
     store.restoreEncounter('grass.wolves')
     store.setEncounter('nope', { weight: 3 })
     expect(store.canUndo).toBe(false)
+  })
+
+  it('rolls on the painted ground of a hex at the hour it is now', () => {
+    const store = setup()
+    store.setDmTool('paint')
+    store.setPaintTerrain('forest')
+    store.setBrushSize(0)
+    store.click({ q: 1, r: 0 })
+
+    const night = new Set(store.encounterTable('forest', 'night').map((one) => one.id))
+    const day = new Set(store.encounterTable('forest', 'day').map((one) => one.id))
+    const random = mulberry32(8)
+    for (let i = 0; i < 100; i++) {
+      expect(day.has(store.rollEncounterOn('1,0', random)!.entry.id)).toBe(true)
+    }
+
+    store.skipPhase()
+    expect(store.clock.phase).toBe('night')
+    for (let i = 0; i < 100; i++) {
+      expect(night.has(store.rollEncounterOn('1,0', random)!.entry.id)).toBe(true)
+    }
+    expect(store.rollEncounterOn('99,99')).toBeNull()
+  })
+
+  it('writes an accepted encounter onto the hex as an event, undone in one step', () => {
+    const store = setup()
+    const { entry } = store.rollEncounterOn('0,0', () => 0)!
+
+    store.acceptEncounter('0,0', entry)
+    expect(store.events.get('0,0')).toEqual([
+      { id: expect.any(String), title: entry.title, description: entry.description },
+    ])
+
+    store.undo()
+    expect(store.events.has('0,0')).toBe(false)
   })
 
   it('comes back from a snapshot with the overrides it was saved with', () => {

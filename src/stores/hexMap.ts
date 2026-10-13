@@ -35,10 +35,12 @@ import {
   removeEncounter as dropEncounter,
   resetTerrain,
   restoreEncounter as undoEncounterOverride,
+  rollFor,
   tableFor,
   type EncounterChange,
   type EncounterEntry,
   type EncounterOverride,
+  type EncounterRoll,
 } from '../encounters/tables'
 import { resolveTurn } from '../entities/resolve'
 import type { TokenShape } from '../engine/partyToken'
@@ -672,6 +674,18 @@ export const useHexMapStore = defineStore('hexMap', () => {
 
   const encounterTable = (terrainId: TerrainId, phase: Phase): EncounterEntry[] =>
     tableFor(terrainId, phase, encounters.value)
+
+  /** Reads the ground as painted and the hour as it stands now. */
+  const rollEncounterOn = (
+    hex: HexKey,
+    random: () => number = Math.random,
+  ): EncounterRoll | null => {
+    const under = tileAt(hex)
+    return under ? rollFor(under.terrain, clock.value.phase, encounters.value, random) : null
+  }
+
+  const acceptEncounter = (hex: HexKey, entry: EncounterEntry): string =>
+    addEvent(hex, { title: entry.title, description: entry.description })
 
   const setOverrides = (next: EncounterOverride[]): void => {
     const now = encounterOverrides.value
@@ -1583,6 +1597,8 @@ export const useHexMapStore = defineStore('hexMap', () => {
     encounterOverrides,
     encounters,
     encounterTable,
+    rollEncounterOn,
+    acceptEncounter: history.track(acceptEncounter),
     setEncounter: history.track(setEncounter, (id) => `encounter:${id}`),
     removeEncounter: history.track(removeEncounter),
     restoreEncounter: history.track(restoreEncounter),

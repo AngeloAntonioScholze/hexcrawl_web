@@ -2,6 +2,7 @@
 import { computed, watch } from 'vue'
 import { parseKey } from '../hex'
 import { useHexMapStore } from '../stores/hexMap'
+import HexEncounter from './HexEncounter.vue'
 import HexEvents from './HexEvents.vue'
 import HexLocations from './HexLocations.vue'
 import HexResources from './HexResources.vue'
@@ -76,6 +77,7 @@ const onNote = (event: Event): void => {
         <textarea :value="note" rows="4" placeholder="what the DM knows here" @input="onNote" />
       </label>
 
+      <HexEncounter :hex="hex" />
       <HexEvents :hex="hex" />
       <HexLocations :hex="hex" />
       <HexResources :hex="hex" />

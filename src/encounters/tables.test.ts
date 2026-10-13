@@ -10,6 +10,7 @@ import {
   resetTerrain,
   restoreEncounter,
   rollEncounter,
+  rollFor,
   tableFor,
   type EncounterEntry,
   type EncounterOverride,
@@ -112,6 +113,26 @@ describe('rollEncounter', () => {
     for (let i = 0; i < 200; i++) {
       expect(rollEncounter(tableFor('grass', 'night', entries), random)?.id).toBe('night')
     }
+  })
+})
+
+describe('rollFor', () => {
+  const entries = [
+    { ...line('quiet', 3), terrain: 'forest' as const },
+    { ...line('spiders', 1, 'night'), terrain: 'forest' as const },
+    line('herd', 5, 'day'),
+  ]
+
+  it('draws from the table of the terrain and phase, with its odds', () => {
+    const roll = rollFor('forest', 'night', entries, () => 0.9)
+    expect(roll).toEqual({ entry: entries[1], total: 4 })
+    expect(rollFor('forest', 'day', entries, () => 0.9)).toEqual({ entry: entries[0], total: 3 })
+    expect(rollFor('grass', 'day', entries, () => 0)?.entry.id).toBe('herd')
+  })
+
+  it('draws nothing from a table with nothing on it', () => {
+    expect(rollFor('grass', 'night', entries, Math.random)).toBeNull()
+    expect(rollFor('sand', 'day', entries, Math.random)).toBeNull()
   })
 })
 

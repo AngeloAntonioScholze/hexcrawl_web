@@ -136,6 +136,26 @@ export function rollEncounter(
   return live[live.length - 1]
 }
 
+/** A line drawn for a hex, with the odds it had against the rest of its table. */
+export interface EncounterRoll {
+  entry: EncounterEntry
+  /** Out of the table's whole weight: the line came up `weight` in `total`. */
+  total: number
+}
+
+export function rollFor(
+  terrain: TerrainId,
+  phase: Phase,
+  entries: readonly EncounterEntry[],
+  random: () => number,
+): EncounterRoll | null {
+  const table = tableFor(terrain, phase, entries)
+  const entry = rollEncounter(table, random)
+  if (!entry) return null
+  const total = table.reduce((sum, one) => sum + Math.max(0, one.weight), 0)
+  return { entry, total }
+}
+
 /** The defaults with the DM's changes laid over them, then the DM's own lines. */
 export function mergeTables(
   defaults: readonly EncounterEntry[],
