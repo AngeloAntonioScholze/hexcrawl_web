@@ -882,9 +882,19 @@ describe('a caravan crew', () => {
 
     expect(store.merchantsOf(caravan)).toEqual([
       { id: smith.id, caravanId: caravan, name: 'Bram', type: 'smith', level: 4 },
-      { id: cook.id, caravanId: caravan, name: 'cook', type: 'cook', level: 1 },
+      { id: cook.id, caravanId: caravan, name: 'Cook', type: 'cook', level: 1 },
     ])
     expect(store.merchantsOf(other).map((one) => one.name)).toEqual(['Ilse'])
+  })
+
+  it('names an unnamed merchant after its type', () => {
+    const store = setup()
+    const caravan = store.addEntity('the caravan', 'caravan').id
+
+    store.addMerchant(caravan, 'leatherworker')
+    store.addMerchant(caravan, 'stablemaster', '   ')
+
+    expect(store.merchants.map((one) => one.name)).toEqual(['Leatherworker', 'Stablemaster'])
   })
 
   it('takes no merchants onto anything but a caravan', () => {

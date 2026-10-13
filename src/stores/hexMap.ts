@@ -10,7 +10,13 @@ import {
   type EntityState,
   type Owner,
 } from '../entities/entity'
-import { clampLevel, newMerchant, type Merchant, type MerchantType } from '../entities/merchant'
+import {
+  clampLevel,
+  MERCHANT_INFO,
+  newMerchant,
+  type Merchant,
+  type MerchantType,
+} from '../entities/merchant'
 import { resolveTurn } from '../entities/resolve'
 import type { TokenShape } from '../engine/partyToken'
 import type { HexEvent, HexLocation } from '../hex/content'
@@ -458,11 +464,11 @@ export const useHexMapStore = defineStore('hexMap', () => {
   const addMerchant = (
     caravanId: string,
     type: MerchantType,
-    name: string = type,
+    name?: string,
     level?: number,
   ): Merchant | null => {
     if (entities.value.find((one) => one.id === caravanId)?.kind !== 'caravan') return null
-    const made = newMerchant(caravanId, name.trim() || type, type, level)
+    const made = newMerchant(caravanId, name?.trim() || MERCHANT_INFO[type].label, type, level)
     merchants.value = [...merchants.value, made]
     return made
   }
