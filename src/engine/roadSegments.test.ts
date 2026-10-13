@@ -75,6 +75,7 @@ const tileSize = 2 * 0.94
 const bevelled = bevelProfile(tileSize, { bevel: 0.14 })
 const flat = bevelProfile(tileSize, { bevel: 0 })
 const rim = tileSize * SIN60
+const capEdge = bevelled[0].radius * SIN60
 
 describe('topHeight', () => {
   it('is level across the cap and drops down the rounded rim to the wall', () => {
@@ -101,27 +102,24 @@ const paintOf = (from: Axial, toward: Axial[], profile = bevelled): HexPaint =>
   hexPaint(layout, { hex: from, buried: false, toward }, tileSize, profile, 0.2)
 
 describe('hexPaint', () => {
-  it('leaves through the middle of the side, so neighbours meet square across the border', () => {
+  it('leaves through the middle of the side, so neighbours line up across the border', () => {
     const here = paintOf({ q: 0, r: 0 }, [{ q: 1, r: 0 }]).lines[0][0]
     const there = paintOf({ q: 1, r: 0 }, [{ q: 0, r: 0 }]).lines[0][0]
     const centreA = hexToWorld(layout, { q: 0, r: 0 })
     const centreB = hexToWorld(layout, { q: 1, r: 0 })
-    expect(here.x).toBeCloseTo(rim)
+    expect(here.x).toBeCloseTo(capEdge)
     expect(here.z).toBeCloseTo(0)
     expect(centreA.z + here.z).toBeCloseTo(centreB.z + there.z)
     expect(centreB.x + there.x - (centreA.x + here.x)).toBeCloseTo(
-      2 * (layout.size - tileSize) * SIN60,
+      2 * (layout.size * SIN60 - capEdge),
     )
   })
 
-  it('steps down the rounded rim on its rings, and runs straight on the flat prism', () => {
+  it('stops at the edge of the flat top, which on the flat prism is the rim', () => {
     const bevelledLine = paintOf({ q: 0, r: 0 }, [{ q: 1, r: 0 }]).lines[0]
     const flatLine = paintOf({ q: 0, r: 0 }, [{ q: 1, r: 0 }], flat).lines[0]
-    const reaches = bevelledLine.map((point) => point.x)
-    for (const ring of bevelled) {
-      expect(reaches.some((x) => Math.abs(x - ring.radius * SIN60) < 1e-9)).toBe(true)
-    }
-    expect(flatLine.length).toBeLessThan(bevelledLine.length)
+    expect(Math.max(...bevelledLine.map((point) => point.x))).toBeCloseTo(capEdge)
+    expect(Math.max(...flatLine.map((point) => point.x))).toBeCloseTo(rim)
   })
 
   it('bends two roads into one path with no clearing', () => {
@@ -133,8 +131,8 @@ describe('hexPaint', () => {
     expect(paint.clearing).toBe(0)
     const line = paint.lines[0]
     const last = line[line.length - 1]
-    expect(Math.hypot(line[0].x, line[0].z)).toBeCloseTo(rim)
-    expect(Math.hypot(last.x, last.z)).toBeCloseTo(rim)
+    expect(Math.hypot(line[0].x, line[0].z)).toBeCloseTo(capEdge)
+    expect(Math.hypot(last.x, last.z)).toBeCloseTo(capEdge)
   })
 
   it('runs three roads into a clearing, and ends a lone road in a small patch', () => {
@@ -172,18 +170,16 @@ describe('buildRoadGeometry', () => {
       { tileSize, profile, halfWidth: 0.2 },
     )
 
-  it('lies on the drawn top everywhere, never above it', () => {
-    const { positions } = build()
-    for (let at = 0; at < positions.length; at += 3) {
-      const y = positions[at + 1]
-      expect(y).toBeCloseTo(3 * topHeight(positions[at], positions[at + 2], bevelled))
-      expect(y).toBeLessThanOrEqual(3)
+  it('lies on the flat top everywhere, with nothing on the rounded rim', () => {
+    for (const profile of [bevelled, flat]) {
+      const { positions } = build(profile)
+      for (let at = 0; at < positions.length; at += 3) {
+        expect(positions[at + 1]).toBeCloseTo(3)
+      }
     }
-    const flatTop = build(flat).positions.filter((_, at) => at % 3 === 1)
-    expect(new Set(flatTop)).toEqual(new Set([3]))
   })
 
-  it('meets the rim at its plain width, wandering only inside the hex', () => {
+  it('meets the edge of the top at its plain width, wandering only inside the hex', () => {
     const { positions } = build()
     const zs = positions.slice(0, 30).filter((_, at) => at % 3 === 2)
     expect(Math.abs(zs[0])).toBeCloseTo(0.2)
@@ -262,10 +258,21 @@ describe('createRoadSegments', () => {
     expect(Math.max(...heights())).toBeCloseTo(2)
   })
 
-  it('follows the grid onto the flat prism, all the way out to the rim', () => {
+  it('follows the grid onto the flat prism and back, out to the edge of each top', () => {
+    const border = (hexToWorld(layout, { q: 0, r: 0 }).x + hexToWorld(layout, { q: 1, r: 0 }).x) / 2
+    const gap = (): number =>
+      Math.min(
+        ...Array.from(segments.mesh.getVerticesData('position') ?? [])
+          .filter((_, at) => at % 3 === 0)
+          .map((x) => Math.abs(x - border)),
+      )
     segments.setSpans([{ a: '0,0', b: '1,0', buriedA: false, buriedB: false }])
-    expect(Math.min(...heights())).toBeLessThan(2)
+    expect(gap()).toBeCloseTo(layout.size * SIN60 - capEdge)
     segments.setDetail(false)
+    expect(gap()).toBeCloseTo(layout.size * SIN60 - rim)
+    expect(Math.min(...heights())).toBeCloseTo(2)
+    segments.setDetail(true)
+    expect(gap()).toBeCloseTo(layout.size * SIN60 - capEdge)
     expect(Math.min(...heights())).toBeCloseTo(2)
   })
 })

@@ -2,7 +2,7 @@
 import { computed } from 'vue'
 import sunAndMoon from '../assets/sun-and-moon.png'
 import { useHexMapStore } from '../stores/hexMap'
-import { clockLabel, TURNS_PER_PHASE, widestClockLabels } from '../time/clock'
+import { clockLabel, timeOfDay, TURNS_PER_PHASE, widestClockLabels } from '../time/clock'
 
 const store = useHexMapStore()
 
@@ -71,7 +71,7 @@ const dome = [
     <svg
       viewBox="0 0 220 108"
       role="img"
-      :aria-label="`day ${store.clock.day}, turn ${store.clock.index + 1} of ${store.clock.phase}`"
+      :aria-label="`day ${store.clock.day}, ${timeOfDay(store.clock)}`"
     >
       <path :d="dome" class="sky" />
 
@@ -102,6 +102,7 @@ const dome = [
     </svg>
 
     <div class="face">
+      <span class="time">{{ timeOfDay(store.clock) }}</span>
       <div class="row">
         <button
           v-if="store.dmView"
@@ -270,6 +271,17 @@ button:disabled {
 .step svg {
   width: 1.15rem;
   fill: currentColor;
+}
+
+/* The turn by name, over the day it falls in. Its own line, so a long name
+   never pushes the arrows either side of the label below. */
+.time {
+  color: var(--phase-ink);
+  font-size: 0.72rem;
+  text-transform: uppercase;
+  letter-spacing: 0.12em;
+  white-space: nowrap;
+  text-shadow: 0 1px 2px rgba(8, 10, 16, 0.95);
 }
 
 .skip {

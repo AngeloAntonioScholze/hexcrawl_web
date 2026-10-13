@@ -3,7 +3,7 @@ import { PointerEventTypes } from '@babylonjs/core/Events/pointerEvents'
 import { DirectionalLight } from '@babylonjs/core/Lights/directionalLight'
 import { HemisphericLight } from '@babylonjs/core/Lights/hemisphericLight'
 import { StandardMaterial } from '@babylonjs/core/Materials/standardMaterial'
-import { Color3, Color4 } from '@babylonjs/core/Maths/math.color'
+import { Color3 } from '@babylonjs/core/Maths/math.color'
 import { Matrix, Vector3 } from '@babylonjs/core/Maths/math.vector'
 import { CreateGround } from '@babylonjs/core/Meshes/Builders/groundBuilder'
 import type { PickingInfo } from '@babylonjs/core/Collisions/pickingInfo'
@@ -12,7 +12,8 @@ import type { PickingInfo } from '@babylonjs/core/Collisions/pickingInfo'
 import { Ray } from '@babylonjs/core/Culling/ray'
 import { Scene } from '@babylonjs/core/scene'
 import { hexKey, type Axial } from '../hex/coords'
-import { TURNS_PER_DAY, TURNS_PER_PHASE, type Phase } from '../time/clock'
+import type { TimeOfDay } from '../time/clock'
+import { daylightFor, skyGlow, type SkyGlow } from './sky'
 import type { Layout } from '../hex/layout'
 import { createIsoCamera, type IsoCamera } from './camera'
 import { hexUnderRay, type PickRay } from './groundPick'
@@ -40,6 +41,8 @@ export interface HexSceneOptions {
   onHover?(hex: Axial | null): void
   /** `append` is a shift-click: add the hex to the order rather than replace it. */
   onSelect?(hex: Axial | null, append: boolean): void
+  /** Where the sun or moon glows over the view; called again whenever the time or the camera moves it. */
+  onGlow?(glow: SkyGlow): void
 }
 
 export interface HexScene {
@@ -62,7 +65,7 @@ export interface HexScene {
   /** How far back the view may be pulled on the world it is now showing. */
   setMaxZoom(limit: number): void
   /** Swings the light to where the clock says the sun is. */
-  setDaylight(phase: Phase, index: number): void
+  setDaylight(time: TimeOfDay): void
   resize(): void
   dispose(): void
 }
@@ -119,91 +122,10 @@ function addGroundSlab(scene: Scene, bounds: IsoCameraBounds | undefined, margin
   ground.material = material
 }
 
-/**
- * The light over the map, read off the clock. The sun swings from one horizon
- * to the other across the turns of a phase: a bright dawn on the near horizon,
- * white overhead at noon, and a warm twilight on the far one. After dark the
- * same arc is walked by a moon bright enough to read the terrain by, because a
- * map nobody can see is not a night, it is a blank screen.
- */
-interface Daylight {
-  /** Where the light comes from, as a direction to point the light at. */
-  direction: Vector3
-  sun: number
-  sky: number
-  warmth: Color3
-  ground: Color3
-  clear: Color4
-}
-
-const DAY = {
-  /** First light: pale and clean rather than orange, so dawn reads bright. */
-  dawn: new Color3(1, 0.94, 0.85),
-  noon: new Color3(1, 0.99, 0.97),
-  /** The far horizon, where the day is allowed to go amber. */
-  dusk: new Color3(1, 0.82, 0.6),
-  sun: 1.05,
-  sky: 0.9,
-  ground: new Color3(0.42, 0.45, 0.52),
-  clear: new Color4(0.16, 0.18, 0.22, 1),
-}
-
-const NIGHT = {
-  moon: new Color3(0.62, 0.72, 1),
-  sun: 0.21,
-  sky: 0.24,
-  ground: new Color3(0.2, 0.24, 0.36),
-  clear: new Color4(0.07, 0.085, 0.14, 1),
-}
-
-/**
- * How far a turn has gone over to the night's cool blue: nearly none in the
- * middle of the day, nearly all of it in the middle of the night, and the turns
- * either side of dusk and dawn caught partway. Read at the middle of the turn,
- * so the eight turns of a day step evenly around the curve.
- */
-function coolnessAt(turnOfDay: number): number {
-  const position = (turnOfDay + 0.5) / TURNS_PER_DAY
-  return 0.5 + 0.5 * Math.cos(2 * Math.PI * (position - 0.75))
-}
-
-function daylightFor(phase: Phase, index: number): Daylight {
-  // Zero at the near horizon, one at the far one: the same sweep the dial's
-  // emblem takes, so the shadows agree with the icon over the map.
-  const across = TURNS_PER_PHASE > 1 ? Math.min(1, Math.max(0, index / (TURNS_PER_PHASE - 1))) : 0
-  const angle = Math.PI - across * Math.PI
-  const height = Math.sin(angle)
-
-  // The light swings across the sky but never drops toward the horizon: a
-  // grazing sun lit the tops of the tiles at a quarter of a high one, and the
-  // map flashed bright and dim from one turn to the next.
-  const direction = new Vector3(-Math.cos(angle) * 0.8, -0.9, 0.4)
-
-  // By day the tint drifts from the pale dawn to the amber dusk, and the higher
-  // the sun the more of it noon washes out. By night the same arc runs from
-  // the last of the dusk to the first of the dawn, under the moon's blue.
-  const hue =
-    phase === 'day'
-      ? Color3.Lerp(Color3.Lerp(DAY.dawn, DAY.dusk, across), DAY.noon, height)
-      : Color3.Lerp(DAY.dusk, DAY.dawn, across)
-
-  const cool = coolnessAt((phase === 'night' ? TURNS_PER_PHASE : 0) + index)
-  const mix = (day: number, night: number): number => day + (night - day) * cool
-
-  return {
-    direction,
-    sun: mix(DAY.sun, NIGHT.sun),
-    sky: mix(DAY.sky, NIGHT.sky),
-    warmth: Color3.Lerp(hue, NIGHT.moon, cool),
-    ground: Color3.Lerp(DAY.ground, NIGHT.ground, cool),
-    clear: Color4.Lerp(DAY.clear, NIGHT.clear, cool),
-  }
-}
-
 export function createHexScene(canvas: HTMLCanvasElement, options: HexSceneOptions): HexScene {
   const engine = new Engine(canvas, true, { preserveDrawingBuffer: true, stencil: true })
   const scene = new Scene(engine)
-  scene.clearColor = DAY.clear
+  scene.clearColor = daylightFor('noon').clear
   // Hover runs its own pick against the grid alone; Babylon's pick of every
   // mesh on each pointer move would be the same work done twice.
   scene.skipPointerMovePicking = true
@@ -215,8 +137,11 @@ export function createHexScene(canvas: HTMLCanvasElement, options: HexSceneOptio
   const sky = new HemisphericLight('sky', new Vector3(0, 1, 0), scene)
   const sun = new DirectionalLight('sun', new Vector3(-0.6, -1, 0.4), scene)
 
-  const setDaylight = (phase: Phase, index: number): void => {
-    const light = daylightFor(phase, index)
+  let time: TimeOfDay = 'noon'
+
+  const setDaylight = (next: TimeOfDay): void => {
+    time = next
+    const light = daylightFor(time)
     sun.direction = light.direction
     sun.intensity = light.sun
     sun.diffuse = light.warmth
@@ -226,7 +151,7 @@ export function createHexScene(canvas: HTMLCanvasElement, options: HexSceneOptio
     dirty = true
   }
 
-  setDaylight('day', 1)
+  setDaylight('noon')
 
   let field = options.field
   const bounds = worldBounds(options.layout, field.radius)
@@ -299,6 +224,25 @@ export function createHexScene(canvas: HTMLCanvasElement, options: HexSceneOptio
     const pixels = (grid.bevelRadius * engine.getRenderHeight()) / (2 * iso.zoom)
     grid.setDetail(wantsDetail(pixels, grid.detailed))
     roads.setDetail(grid.detailed)
+  })
+
+  // Only the camera's turn and tilt move the glow, never a pan, so it is
+  // worked out on every drawn frame but handed on only when it has shifted.
+  let glowSeen: SkyGlow | null = null
+  const glowObserver = scene.onBeforeRenderObservable.add(() => {
+    if (!options.onGlow) return
+    const glow = skyGlow(time, iso.camera.getViewMatrix())
+    if (
+      glowSeen &&
+      glowSeen.color === glow.color &&
+      Math.abs(glowSeen.x - glow.x) < 1e-3 &&
+      Math.abs(glowSeen.y - glow.y) < 1e-3 &&
+      glowSeen.strength === glow.strength
+    ) {
+      return
+    }
+    glowSeen = glow
+    options.onGlow(glow)
   })
 
   // A drag or a jump moves the target directly rather than through the easing,
@@ -382,6 +326,7 @@ export function createHexScene(canvas: HTMLCanvasElement, options: HexSceneOptio
     dispose(): void {
       scene.onPointerObservable.remove(pointerObserver)
       scene.onBeforeRenderObservable.remove(detailObserver)
+      scene.onBeforeRenderObservable.remove(glowObserver)
       detachControls()
       cancelAnimationFrame(frameRequest)
       roads.dispose()

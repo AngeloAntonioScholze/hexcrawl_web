@@ -12,6 +12,7 @@ import { parseKey, type Axial, type HexKey } from '../hex/coords'
 import { hexToWorld, type Layout } from '../hex/layout'
 import { RESOURCE_TYPES, type Resource, type ResourceType } from '../terrain/resources'
 import { MIN_ELEVATION } from './hexGrid'
+import { CARAVAN_WIDTH } from './partyToken'
 
 /** Violet: a colour none of the terrain bands come near, from deep water to the peaks. */
 export const RESOURCE_MARKER_COLOR = '#d64cf2'
@@ -56,71 +57,45 @@ export interface ResourceMarkerOptions {
 
 const DEFAULTS = { hover: 0.03 } as const
 
-/** Past this many kinds on one hex the rest go unshown: the hex panel lists them all. */
-export const MAX_CLUSTER = 3
-
-/**
- * A hex's resources stand in a ring of clumps, one toward each corner, so a
- * lone kind covers the hex and two or three split it into halves or thirds.
- */
-export const SLOTS = 6
-
-/** How far a clump stands from the hex centre, as a fraction of the hex size. */
-export const SLOT_DISTANCE = 0.52
-
-/**
- * Radius of the circle a clump fits in, as a fraction of the hex size. With
- * the distance above it keeps clear of the bevelled rim, of its neighbours,
- * and of the middle, where tokens stand.
- */
-export const FOOTPRINT = 0.24
-
-/** How much smaller than full size a clump may be drawn, so a hex of them does not look stamped. */
-const SHRINK = 0.15
+/** A model's width as a fraction of the hex size: as wide as a caravan token, so it reads at the same glance. */
+export const FOOTPRINT = CARAVAN_WIDTH
 
 export interface MarkPlacement {
   type: ResourceType
   x: number
   y: number
   z: number
-  scale: number
   /** Turn about the vertical, in radians. */
   yaw: number
 }
 
-/** A fixed number in [0, 1) for a hex and a draw, so a hex's clumps look the same every frame. */
-function jitter(hex: Axial, draw: number): number {
-  let h =
-    Math.imul(hex.q, 0x27d4eb2d) ^ Math.imul(hex.r, 0x165667b1) ^ Math.imul(draw + 1, 0x9e3779b1)
+/** A fixed number in [0, 1) for a hex, so its model faces the same way every frame. */
+function jitter(hex: Axial): number {
+  let h = Math.imul(hex.q, 0x27d4eb2d) ^ Math.imul(hex.r, 0x165667b1)
   h = Math.imul(h ^ (h >>> 15), 0x85ebca6b)
   h = Math.imul(h ^ (h >>> 13), 0xc2b2ae35)
   return ((h ^ (h >>> 16)) >>> 0) / 2 ** 32
 }
 
-/** A clump in every slot of the hex, each kind taking a run of neighbouring slots. */
-export function markPlacements(
+/**
+ * One model in the middle of the hex, of its first kind: the hex panel lists
+ * the rest.
+ */
+export function markPlacement(
   layout: Layout,
   mark: ResourceMark,
   elevationOf: (hex: Axial) => number,
   hover: number,
-): MarkPlacement[] {
+): MarkPlacement {
   const hex = parseKey(mark.hex)
   const world = hexToWorld(layout, hex)
-  const y = (mark.buried ? MIN_ELEVATION : Math.max(MIN_ELEVATION, elevationOf(hex))) + hover
-  const shown = mark.types.slice(0, MAX_CLUSTER)
-  const share = SLOTS / shown.length
-  const distance = SLOT_DISTANCE * layout.size
-  return Array.from({ length: SLOTS }, (_, slot) => {
-    const angle = (Math.PI / 3) * slot - Math.PI / 6
-    return {
-      type: shown[Math.floor(slot / share)],
-      x: world.x + distance * Math.cos(angle),
-      y,
-      z: world.z + distance * Math.sin(angle),
-      scale: 1 - SHRINK * jitter(hex, slot + SLOTS),
-      yaw: 2 * Math.PI * jitter(hex, slot),
-    }
-  })
+  return {
+    type: mark.types[0],
+    x: world.x,
+    y: (mark.buried ? MIN_ELEVATION : Math.max(MIN_ELEVATION, elevationOf(hex))) + hover,
+    z: world.z,
+    yaw: 2 * Math.PI * jitter(hex),
+  }
 }
 
 /** Every mark's models, gathered by kind so each kind fills one thin instance buffer. */
@@ -135,9 +110,8 @@ export function placementsByType(
     MarkPlacement[]
   >
   for (const mark of marks) {
-    for (const placed of markPlacements(layout, mark, elevationOf, hover)) {
-      byType[placed.type].push(placed)
-    }
+    const placed = markPlacement(layout, mark, elevationOf, hover)
+    byType[placed.type].push(placed)
   }
   return byType
 }
@@ -145,12 +119,12 @@ export function placementsByType(
 export function instanceBuffer(placements: readonly MarkPlacement[]): Float32Array {
   const buffer = new Float32Array(placements.length * 16)
   const matrix = new Matrix()
-  const scaling = new Vector3()
+  const scaling = Vector3.One()
   const turn = new Quaternion()
   const translation = new Vector3()
-  placements.forEach(({ x, y, z, scale, yaw }, index) => {
+  placements.forEach(({ x, y, z, yaw }, index) => {
     Quaternion.RotationYawPitchRollToRef(yaw, 0, 0, turn)
-    Matrix.ComposeToRef(scaling.setAll(scale), turn, translation.copyFromFloats(x, y, z), matrix)
+    Matrix.ComposeToRef(scaling, turn, translation.copyFromFloats(x, y, z), matrix)
     matrix.copyToArray(buffer, index * 16)
   })
   return buffer
@@ -258,9 +232,9 @@ function rope(from: readonly [number, number], to: readonly [number, number], co
 }
 
 /**
- * Each kind's clump at unit width: it fits in a circle half a unit across the
- * origin, stands on it, and stays low beside the tokens. Six of them cover a
- * hex, so each is kept to a hundred or so triangles.
+ * Each kind's model at unit width: it fits in a circle a unit across the
+ * origin and stands on it. One stands on every resource hex in the world, so
+ * each is kept to a hundred or so triangles.
  */
 const MODELS: Readonly<Record<ResourceType, () => VertexData[]>> = {
   timber: () => {
@@ -499,15 +473,15 @@ export function buildResourceModel(type: ResourceType, width: number): VertexDat
 
 export interface ResourceMarkers {
   meshes: Readonly<Record<ResourceType, Mesh>>
-  /** Clumps standing right now, across every kind: a few for each hex marked. */
+  /** Models standing right now, across every kind: one for each hex marked. */
   readonly count: number
   setMarks(marks: readonly ResourceMark[]): void
   dispose(): void
 }
 
 /**
- * One mesh a kind, every clump of that kind a thin instance of it. The whole
- * world's worth is some ten thousand clumps of a hundred triangles, cheaper drawn whole than
+ * One mesh a kind, every model of that kind a thin instance of it. The whole
+ * world's worth is a few thousand models of a hundred triangles, cheaper drawn whole than
  * kept in step with the grid's window, and each buffer is rebuilt to fit on
  * every set, so there is no capacity to run past.
  */
@@ -517,7 +491,7 @@ export function createResourceMarkers(
   elevationOf: (hex: Axial) => number,
   options: ResourceMarkerOptions = {},
 ): ResourceMarkers {
-  const width = layout.size * 2 * FOOTPRINT
+  const width = layout.size * FOOTPRINT
   const hover = layout.size * (options.hover ?? DEFAULTS.hover)
 
   const materials: StandardMaterial[] = []

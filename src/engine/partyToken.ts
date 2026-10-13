@@ -81,6 +81,9 @@ const MIN_CROWD_SCALE = 0.45
 /** A carrier is a bigger thing on the board than anyone walking beside it. */
 const WAGON_SCALE = 1.5
 
+/** How wide a caravan token's plinth is across its base, as a fraction of the hex size. */
+export const CARAVAN_WIDTH = DEFAULTS.height * WAGON_SCALE * 1.05
+
 /** How small a pawn gets as it disappears into a caravan, or starts coming out of one. */
 const TUCKED_SCALE = 0.05
 

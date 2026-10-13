@@ -99,7 +99,7 @@ export interface Point {
 
 /** The paint on one hex top, in coordinates relative to its centre. */
 export interface HexPaint {
-  /** Centre lines, each running from a rim; one strip of dirt is laid along each. */
+  /** Centre lines, each running from the edge of the flat top; one strip of dirt is laid along each. */
   lines: Point[][]
   /** Radius of the trodden clearing at the centre, or 0 for none. */
   clearing: number
@@ -107,11 +107,10 @@ export interface HexPaint {
 
 /**
  * Where the dirt runs on a hex top. Every road leaves straight out through the
- * middle of its side, so it meets the neighbour's road square across the
- * border whatever the cliff between them, and steps down the rounded rim on
- * rows that land on the profile's rings. Inside, two roads bend into each
- * other as one path; a lone road ends in a small round patch, and three or
- * more run into a clearing.
+ * middle of its side, so it lines up with the neighbour's road across the
+ * border, and stops where the flat top ends: down the rounded rim it would
+ * read as a smear. Inside, two roads bend into each other as one path; a lone
+ * road ends in a small round patch, and three or more run into a clearing.
  */
 export function hexPaint(
   layout: Layout,
@@ -121,14 +120,9 @@ export function hexPaint(
   halfWidth: number,
 ): HexPaint {
   const centre = hexToWorld(layout, road.hex)
-  const rim = tileSize * COS30
-  const throat = rim * 0.55
-  const rows = [rim]
-  for (let ring = profile.length - 1; ring >= 0; ring--) {
-    const reach = profile[ring].radius * COS30
-    if (reach < rows[rows.length - 1] - 1e-6 && reach > throat + 1e-6) rows.push(reach)
-  }
-  rows.push(throat)
+  const edge = profile[0].radius * COS30
+  const throat = tileSize * COS30 * 0.55
+  const rows = [edge, throat]
 
   const arms = road.toward.map((hex) => {
     const world = hexToWorld(layout, hex)
@@ -230,8 +224,8 @@ export interface PaintOptions {
 /**
  * Every road hex painted into one ribbon mesh lying on the drawn tops. The
  * strips wander a little and swell and narrow along their length, but both
- * die away to nothing at the rim, so a road meets its neighbour's at the same
- * place and width. Clearings come last, so they are laid over the ruts.
+ * die away to nothing at the edge of the top, so a road lines up with its
+ * neighbour's at the same width. Clearings come last, so they are laid over the ruts.
  */
 export function buildRoadGeometry(
   layout: Layout,

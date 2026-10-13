@@ -10,6 +10,20 @@ export const PHASES = ['day', 'night'] as const
 
 export type Phase = (typeof PHASES)[number]
 
+/** Every turn of the day by name, from first light: four of the day, then four of the night. */
+export const TIMES_OF_DAY = [
+  'morning',
+  'noon',
+  'afternoon',
+  'twilight',
+  'dusk',
+  'midnight',
+  'late night',
+  'dawn',
+] as const
+
+export type TimeOfDay = (typeof TIMES_OF_DAY)[number]
+
 export interface Clock {
   /** Whole turns since the crawl began; everything else is read off this. */
   turn: number
@@ -33,6 +47,9 @@ export function clockAt(turn: number): Clock {
 }
 
 export const isNight = (turn: number): boolean => clockAt(turn).phase === 'night'
+
+export const timeOfDay = ({ phase, index }: Pick<Clock, 'phase' | 'index'>): TimeOfDay =>
+  TIMES_OF_DAY[(phase === 'night' ? TURNS_PER_PHASE : 0) + index]
 
 /** Where the skip control lands: the opening of the phase after this one. */
 export function nextPhaseTurn(turn: number): number {

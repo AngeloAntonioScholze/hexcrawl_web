@@ -5,6 +5,8 @@ import {
   isNight,
   nextPhaseTurn,
   PHASES,
+  timeOfDay,
+  TIMES_OF_DAY,
   TURNS_PER_DAY,
   TURNS_PER_PHASE,
   widestClockLabels,
@@ -56,6 +58,20 @@ describe('the clock', () => {
     expect(nextPhaseTurn(TURNS_PER_PHASE - 1)).toBe(TURNS_PER_PHASE)
     expect(nextPhaseTurn(TURNS_PER_PHASE)).toBe(TURNS_PER_DAY)
     expect(clockAt(nextPhaseTurn(1)).index).toBe(0)
+  })
+})
+
+describe('the time of day', () => {
+  it('names every turn of the day in order, the day before the night', () => {
+    const names = Array.from({ length: TURNS_PER_DAY }, (_, turn) => timeOfDay(clockAt(turn)))
+    expect(names).toEqual([...TIMES_OF_DAY])
+    expect(names.slice(0, TURNS_PER_PHASE)).toEqual(['morning', 'noon', 'afternoon', 'twilight'])
+    expect(names.slice(TURNS_PER_PHASE)).toEqual(['dusk', 'midnight', 'late night', 'dawn'])
+  })
+
+  it('comes round to the morning again on the next day', () => {
+    expect(timeOfDay(clockAt(TURNS_PER_DAY * 5))).toBe('morning')
+    expect(timeOfDay(clockAt(TURNS_PER_DAY * 5 - 1))).toBe('dawn')
   })
 })
 

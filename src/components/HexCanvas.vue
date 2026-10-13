@@ -10,10 +10,12 @@ import { createFogStepper } from '../engine/fogStepper'
 import type { HexGrid } from '../engine/hexGrid'
 import { resourceMarks } from '../engine/resourceMarkers'
 import { roadSpans } from '../engine/roadSegments'
+import type { SkyGlow } from '../engine/sky'
 import { useHexScene } from '../engine/useHexScene'
 import { useHexMapStore } from '../stores/hexMap'
 import { createTerrainField, repainted } from '../terrain/field'
 import { TERRAIN_COLORS } from '../terrain/terrain'
+import { timeOfDay } from '../time/clock'
 
 const props = withDefaults(
   defineProps<{
@@ -75,6 +77,19 @@ const maxZoom = (): number => maxZoomFor(layout, store.worldRadius)
 // limit without ever reallocating.
 const capacity = gridCapacity(layout)
 
+const glow = ref<SkyGlow | null>(null)
+
+// Laid on the screen edge nearest the sun or moon, brightest off screen so
+// only its spill reaches over the map, and blended so it lights rather than paints.
+const glowStyle = computed(() => {
+  if (!glow.value) return { display: 'none' }
+  const { x, y, color, strength } = glow.value
+  const [r, g, b] = color.map((channel) => Math.round(channel * 255))
+  return {
+    background: `radial-gradient(circle at ${x * 100}% ${y * 100}%, rgba(${r}, ${g}, ${b}, ${0.55 * strength}) 0%, rgba(${r}, ${g}, ${b}, ${0.18 * strength}) 35%, transparent 70%)`,
+  }
+})
+
 const { hexScene } = useHexScene(canvas, {
   layout,
   field: store.field,
@@ -84,6 +99,7 @@ const { hexScene } = useHexScene(canvas, {
   bevel: props.bevel,
   onHover: store.setHovered,
   onSelect: store.click,
+  onGlow: (next) => (glow.value = next),
 })
 
 /**
@@ -204,11 +220,11 @@ const spans = computed(() =>
 
 watch(spans, (next) => hexScene.value?.roads.setSpans(next))
 
-// The sky over the map follows the same clock the dial draws: the sun swings
-// across the four turns of the day and the ground goes cold after dark.
+// The sky over the map follows the same clock the dial draws: each turn of the
+// day has a light of its own.
 watch(
   () => store.clock,
-  ({ phase, index }) => hexScene.value?.setDaylight(phase, index),
+  (clock) => hexScene.value?.setDaylight(timeOfDay(clock)),
 )
 
 const tokens = computed(() =>
@@ -239,7 +255,7 @@ const pushEverything = (created: NonNullable<typeof hexScene.value>): void => {
   paintFog(created.grid)
   pushHeights(created)
   created.vision.setShown(store.showSight)
-  created.setDaylight(store.clock.phase, store.clock.index)
+  created.setDaylight(timeOfDay(store.clock))
 }
 
 watch(hexScene, (created) => {
@@ -272,6 +288,7 @@ watch(
 
 <template>
   <canvas ref="canvas" touch-action="none" />
+  <div class="sky-glow" :style="glowStyle" aria-hidden="true" />
   <MiniMap :hex-scene="hexScene" :layout="layout" />
   <component :is="RenderStats" v-if="RenderStats" :hex-scene="hexScene" />
 </template>
@@ -282,5 +299,12 @@ canvas {
   width: 100%;
   height: 100%;
   outline: none;
+}
+
+.sky-glow {
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+  mix-blend-mode: screen;
 }
 </style>
