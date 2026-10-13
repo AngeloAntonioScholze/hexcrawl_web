@@ -17,6 +17,18 @@ import {
   type Merchant,
   type MerchantType,
 } from '../entities/merchant'
+import {
+  changeEncounter,
+  DEFAULT_ENCOUNTERS,
+  mergeTables,
+  removeEncounter as dropEncounter,
+  resetTerrain,
+  restoreEncounter as undoEncounterOverride,
+  tableFor,
+  type EncounterChange,
+  type EncounterEntry,
+  type EncounterOverride,
+} from '../encounters/tables'
 import { resolveTurn } from '../entities/resolve'
 import type { TokenShape } from '../engine/partyToken'
 import type { HexEvent, HexLocation } from '../hex/content'
@@ -46,7 +58,7 @@ import {
 import { sightFrom, type PartySight } from '../terrain/sight'
 import { isWater, TERRAIN_DEFAULTS, type TerrainId, type TerrainTile } from '../terrain/terrain'
 import { canEnter, chainRoute, joinLegs, KM_PER_HEX, type Route } from '../terrain/travel'
-import { clockAt, isNight, nextPhaseTurn, type Clock } from '../time/clock'
+import { clockAt, isNight, nextPhaseTurn, type Clock, type Phase } from '../time/clock'
 import { createHistory, slotOf } from './history'
 
 const NOTHING_IN_SIGHT: PartySight = { radius: 0, visible: new Set(), blocked: new Set() }
@@ -212,6 +224,13 @@ export const useHexMapStore = defineStore('hexMap', () => {
     return byHex
   })
 
+  /** The DM's edits to the encounter tables, laid over the defaults. */
+  const encounterOverrides = shallowRef<readonly EncounterOverride[]>([])
+
+  const encounters = computed<readonly EncounterEntry[]>(() =>
+    mergeTables(DEFAULT_ENCOUNTERS, encounterOverrides.value),
+  )
+
   const fog = ref(true)
   /** Hexes the DM has revealed to or hidden from the players by hand. */
   const fogEdits = shallowRef<FogEdits>(NO_FOG_EDITS)
@@ -251,6 +270,7 @@ export const useHexMapStore = defineStore('hexMap', () => {
     resourceChances: slotOf(resourceChances),
     resourceSpacing: slotOf(resourceSpacing),
     fogEdits: slotOf(fogEdits),
+    encounterOverrides: slotOf(encounterOverrides),
   })
 
   /**
@@ -577,6 +597,44 @@ export const useHexMapStore = defineStore('hexMap', () => {
       RESOURCE_SPACING_LIMITS.min,
       Math.min(RESOURCE_SPACING_LIMITS.max, Math.round(hexes)),
     )
+  }
+
+  const encounterTable = (terrainId: TerrainId, phase: Phase): EncounterEntry[] =>
+    tableFor(terrainId, phase, encounters.value)
+
+  const setOverrides = (next: EncounterOverride[]): void => {
+    const now = encounterOverrides.value
+    if (next.length !== now.length || next.some((one, at) => one !== now[at])) {
+      encounterOverrides.value = next
+    }
+  }
+
+  const setEncounter = (id: string, change: EncounterChange): void => {
+    if (change.weight !== undefined && !(Number.isFinite(change.weight) && change.weight >= 0)) {
+      return
+    }
+    setOverrides(changeEncounter(DEFAULT_ENCOUNTERS, encounterOverrides.value, id, change))
+  }
+
+  const removeEncounter = (id: string): void => {
+    setOverrides(dropEncounter(DEFAULT_ENCOUNTERS, encounterOverrides.value, id))
+  }
+
+  const restoreEncounter = (id: string): void => {
+    setOverrides(undoEncounterOverride(encounterOverrides.value, id))
+  }
+
+  const addEncounter = (entry: Omit<EncounterEntry, 'id'>): string => {
+    const id = crypto.randomUUID()
+    encounterOverrides.value = [
+      ...encounterOverrides.value,
+      { kind: 'add', entry: { ...entry, id, weight: Math.max(0, entry.weight) } },
+    ]
+    return id
+  }
+
+  const resetEncounters = (terrainId: TerrainId): void => {
+    setOverrides(resetTerrain(DEFAULT_ENCOUNTERS, encounterOverrides.value, terrainId))
   }
 
   /**
@@ -1136,6 +1194,7 @@ export const useHexMapStore = defineStore('hexMap', () => {
       ...[...fogEdits.value.revealed].map((hex) => ({ hex, revealed: true })),
       ...[...fogEdits.value.hidden].map((hex) => ({ hex, revealed: false })),
     ],
+    encounterOverrides: encounterOverrides.value,
   }))
 
   // Terrain goes in first: laying down a new world is what wipes the map, so
@@ -1190,6 +1249,7 @@ export const useHexMapStore = defineStore('hexMap', () => {
       revealed: new Set(saved.fogEdits.filter((one) => one.revealed).map((one) => one.hex)),
       hidden: new Set(saved.fogEdits.filter((one) => !one.revealed).map((one) => one.hex)),
     }
+    encounterOverrides.value = saved.encounterOverrides
     history.clear()
   }
 
@@ -1335,6 +1395,14 @@ export const useHexMapStore = defineStore('hexMap', () => {
     setResourceChance: history.track(setResourceChance, (terrainId) => `chance:${terrainId}`),
     resourceSpacing,
     setResourceSpacing: history.track(setResourceSpacing, () => 'spacing'),
+    encounterOverrides,
+    encounters,
+    encounterTable,
+    setEncounter: history.track(setEncounter, (id) => `encounter:${id}`),
+    removeEncounter: history.track(removeEncounter),
+    restoreEncounter: history.track(restoreEncounter),
+    addEncounter: history.track(addEncounter),
+    resetEncounters: history.track(resetEncounters),
     undo: history.undo,
     redo: history.redo,
     canUndo: history.canUndo,

@@ -178,6 +178,12 @@ const MIGRATIONS: readonly string[] = [
     revealed INTEGER NOT NULL
   ) WITHOUT ROWID;
   `,
+  `
+  CREATE TABLE encounter_override (
+    ord INTEGER PRIMARY KEY,
+    payload TEXT NOT NULL
+  );
+  `,
 ]
 
 export const SCHEMA_VERSION = MIGRATIONS.length

@@ -1,4 +1,5 @@
 import type { Database } from '@sqlite.org/sqlite-wasm'
+import type { EncounterOverride } from '../encounters/tables'
 import type { Action, ActionKind, ActionRecord } from '../entities/action'
 import type { Entity, EntityKind, EntityState, Owner } from '../entities/entity'
 import type { Merchant, MerchantType } from '../entities/merchant'
@@ -67,6 +68,8 @@ export interface MapSnapshot {
   resourceSpacing: number
   /** Hexes the DM revealed to the players or hid from them, whatever the crawl saw. */
   fogEdits: readonly { hex: HexKey; revealed: boolean }[]
+  /** The DM's edits to the encounter tables, in the order they were made. */
+  encounterOverrides: readonly EncounterOverride[]
 }
 
 const SAVE_MAP = `
@@ -297,6 +300,16 @@ export function saveSnapshot(db: Database, snapshot: MapSnapshot): void {
     } finally {
       fogEdit.finalize()
     }
+
+    db.exec('DELETE FROM encounter_override')
+    const override = db.prepare('INSERT INTO encounter_override (ord, payload) VALUES (?, ?)')
+    try {
+      snapshot.encounterOverrides.forEach((one, index) => {
+        override.bind([index, JSON.stringify(one)]).stepReset()
+      })
+    } finally {
+      override.finalize()
+    }
   })
 }
 
@@ -407,5 +420,8 @@ export function loadSnapshot(db: Database): MapSnapshot | null {
       hex: String(one.hex) as HexKey,
       revealed: Number(one.revealed) === 1,
     })),
+    encounterOverrides: db
+      .selectObjects('SELECT payload FROM encounter_override ORDER BY ord')
+      .map((one) => JSON.parse(String(one.payload)) as EncounterOverride),
   }
 }

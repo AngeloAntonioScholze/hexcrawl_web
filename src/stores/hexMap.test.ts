@@ -1529,3 +1529,76 @@ describe('undo and redo', () => {
     expect(store.canRedo).toBe(false)
   })
 })
+
+describe('encounter tables', () => {
+  it('rolls from the defaults until the DM changes them', () => {
+    const store = setup()
+    const night = store.encounterTable('forest', 'night')
+    expect(night.some((one) => one.id === 'forest.spiders')).toBe(true)
+    expect(store.encounterTable('forest', 'day').some((one) => one.id === 'forest.spiders')).toBe(
+      false,
+    )
+
+    store.setEncounter('forest.wolves', { weight: 9 })
+    store.removeEncounter('forest.spiders')
+    const id = store.addEncounter({
+      terrain: 'forest',
+      when: 'night',
+      weight: 2,
+      title: 'Headless rider',
+      description: '',
+    })
+
+    const table = store.encounterTable('forest', 'night')
+    expect(table.find((one) => one.id === 'forest.wolves')?.weight).toBe(9)
+    expect(table.some((one) => one.id === 'forest.spiders')).toBe(false)
+    expect(table.at(-1)?.id).toBe(id)
+
+    store.resetEncounters('forest')
+    expect(store.encounterOverrides).toEqual([])
+    expect(store.encounterTable('forest', 'night')).toEqual(night)
+  })
+
+  it('turns away a weight that is not a weight', () => {
+    const store = setup()
+    store.setEncounter('forest.wolves', { weight: -2 })
+    store.setEncounter('forest.wolves', { weight: Number.NaN })
+    expect(store.encounterOverrides).toEqual([])
+  })
+
+  it('takes an override back with undo and puts it back with redo', () => {
+    const store = setup()
+    store.setEncounter('grass.wolves', { weight: 8 })
+    const changed = store.encounterOverrides
+
+    store.undo()
+    expect(store.encounterOverrides).toEqual([])
+    expect(
+      store.encounterTable('grass', 'night').find((one) => one.id === 'grass.wolves')?.weight,
+    ).toBe(3)
+
+    store.redo()
+    expect(store.encounterOverrides).toBe(changed)
+  })
+
+  it('leaves no undo step for an edit that changes nothing', () => {
+    const store = setup()
+    store.restoreEncounter('grass.wolves')
+    store.setEncounter('nope', { weight: 3 })
+    expect(store.canUndo).toBe(false)
+  })
+
+  it('comes back from a snapshot with the overrides it was saved with', () => {
+    const store = setup()
+    store.removeEncounter('water.pirates')
+    const saved = store.snapshot
+
+    setActivePinia(createPinia())
+    const fresh = setup()
+    fresh.restore(saved)
+    expect(fresh.encounterOverrides).toEqual([{ kind: 'remove', id: 'water.pirates' }])
+    expect(fresh.encounterTable('water', 'day').some((one) => one.id === 'water.pirates')).toBe(
+      false,
+    )
+  })
+})

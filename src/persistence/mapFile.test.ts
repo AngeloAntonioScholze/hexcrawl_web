@@ -90,6 +90,21 @@ const snapshot = (): MapSnapshot => ({
   resourceChances: { ...defaultResourceChances(), forest: 0.2 },
   resourceSpacing: 10,
   fogEdits: [{ hex: '3,3' as HexKey, revealed: true }],
+  encounterOverrides: [
+    { kind: 'change', id: 'forest.wolves', change: { weight: 6 } },
+    { kind: 'remove', id: 'grass.bandits' },
+    {
+      kind: 'add',
+      entry: {
+        id: 'enc-1',
+        terrain: 'sand',
+        when: 'night',
+        weight: 2,
+        title: 'Sphinx',
+        description: '',
+      },
+    },
+  ],
 })
 
 // Breaking the file in every way it can be broken is the point, so the edits
@@ -174,6 +189,37 @@ describe('parseMapFile', () => {
     ['a fractional spacing', (map) => (map.resourceSpacing = 2.5), 'resourceSpacing'],
     ['a fog edit with no side', (map) => (map.fogEdits[0].revealed = 1), 'fogEdits'],
     ['no fog edits at all', (map) => delete map.fogEdits, 'fogEdits'],
+    [
+      'an unknown override',
+      (map) => (map.encounterOverrides[1].kind = 'swap'),
+      'encounterOverrides',
+    ],
+    [
+      'a negative weight',
+      (map) => (map.encounterOverrides[0].change.weight = -1),
+      'encounterOverrides',
+    ],
+    [
+      'an unknown changed field',
+      (map) => (map.encounterOverrides[0].change.loot = 5),
+      'encounterOverrides',
+    ],
+    ['a removal without an id', (map) => delete map.encounterOverrides[1].id, 'encounterOverrides'],
+    [
+      'an added line at noon',
+      (map) => (map.encounterOverrides[2].entry.when = 'noon'),
+      'encounterOverrides',
+    ],
+    [
+      'an added line on lava',
+      (map) => (map.encounterOverrides[2].entry.terrain = 'lava'),
+      'encounterOverrides',
+    ],
+    [
+      'an added line with no title',
+      (map) => delete map.encounterOverrides[2].entry.title,
+      'encounterOverrides',
+    ],
   ])('turns away %s, naming the field', (_, edit, field) => {
     expect(rejected(tampered((file) => edit(file.map)))).toContain(`"${field}"`)
   })
@@ -208,6 +254,15 @@ describe('a map carried out and back in', () => {
     store.setDmTool('fog')
     store.setFogMode('hide')
     store.click({ q: 0, r: 0 })
+    store.setEncounter('forest.wolves', { weight: 7 })
+    store.removeEncounter('grass.bandits')
+    store.addEncounter({
+      terrain: 'sand',
+      when: 'night',
+      weight: 2,
+      title: 'Sphinx',
+      description: '',
+    })
     store.fog = true
     store.dmView = true
     expect(store.snapshot.fogEdits.length).toBeGreaterThan(0)

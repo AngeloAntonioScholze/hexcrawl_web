@@ -1,3 +1,10 @@
+import {
+  ENCOUNTER_WHENS,
+  type EncounterChange,
+  type EncounterEntry,
+  type EncounterOverride,
+  type EncounterWhen,
+} from '../encounters/tables'
 import type { Action, ActionKind, ActionRecord } from '../entities/action'
 import type { Entity, EntityKind, Owner } from '../entities/entity'
 import {
@@ -16,7 +23,7 @@ import {
   type ResourceOrigin,
   type ResourceType,
 } from '../terrain/resources'
-import type { TerrainId } from '../terrain/terrain'
+import { TERRAIN_IDS, type TerrainId } from '../terrain/terrain'
 import type { MapSnapshot, SavedAction, SavedOrigin, SavedState } from './mapState'
 
 export const MAP_FILE_FORMAT = 'hexcrawl-map'
@@ -81,6 +88,36 @@ const isAction: Guard<Action> = (value): value is Action =>
   (value.kind === 'move'
     ? listOf(isHex)(value.route) && listOf(isHex)(value.waypoints)
     : value.kind === 'wait' || value.kind === 'camp')
+
+const isWeight: Guard<number> = (value): value is number => isNumber(value) && value >= 0
+
+const ENCOUNTER_FIELDS: { [K in keyof EncounterChange]-?: Guard<EncounterEntry[K]> } = {
+  terrain: oneOf<TerrainId>(...TERRAIN_IDS),
+  when: oneOf<EncounterWhen>(...ENCOUNTER_WHENS),
+  weight: isWeight,
+  title: isString,
+  description: isString,
+}
+
+const isEncounterEntry = shape<EncounterEntry>({ id: isString, ...ENCOUNTER_FIELDS })
+
+// A change names only the fields it touches, but nothing it names may be
+// unknown or malformed, or the merge would carry the junk into the table.
+const isEncounterChange: Guard<EncounterChange> = (value): value is EncounterChange =>
+  isObject(value) &&
+  Object.entries(value).every(
+    ([key, field]) =>
+      Object.hasOwn(ENCOUNTER_FIELDS, key) &&
+      (ENCOUNTER_FIELDS[key as keyof EncounterChange] as Guard<unknown>)(field),
+  )
+
+const isEncounterOverride: Guard<EncounterOverride> = (value): value is EncounterOverride =>
+  isObject(value) &&
+  (value.kind === 'add'
+    ? isEncounterEntry(value.entry)
+    : value.kind === 'remove'
+      ? isString(value.id)
+      : value.kind === 'change' && isString(value.id) && isEncounterChange(value.change))
 
 /** One check per snapshot field; a new field is one new line here. */
 const SNAPSHOT_FIELDS: { [K in keyof MapSnapshot]-?: Guard<MapSnapshot[K]> } = {
@@ -176,6 +213,7 @@ const SNAPSHOT_FIELDS: { [K in keyof MapSnapshot]-?: Guard<MapSnapshot[K]> } = {
   ),
   resourceSpacing: isTurn,
   fogEdits: listOf(shape<MapSnapshot['fogEdits'][number]>({ hex: isHex, revealed: isBoolean })),
+  encounterOverrides: listOf(isEncounterOverride),
 }
 
 export function serialiseMap(snapshot: MapSnapshot): string {

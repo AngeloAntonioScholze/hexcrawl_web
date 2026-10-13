@@ -45,6 +45,13 @@ const plain = (snapshot: MapSnapshot): MapSnapshot => ({
   resourceChances: { ...snapshot.resourceChances },
   resourceSpacing: snapshot.resourceSpacing,
   fogEdits: snapshot.fogEdits.map((one) => ({ ...one })),
+  encounterOverrides: snapshot.encounterOverrides.map((one) =>
+    one.kind === 'add'
+      ? { kind: one.kind, entry: { ...one.entry } }
+      : one.kind === 'change'
+        ? { kind: one.kind, id: one.id, change: { ...one.change } }
+        : { ...one },
+  ),
 })
 
 interface Pending {

@@ -119,6 +119,21 @@ const snapshot = (patch: Partial<MapSnapshot> = {}): MapSnapshot => ({
     { hex: '4,-2' as HexKey, revealed: true },
     { hex: '0,0' as HexKey, revealed: false },
   ],
+  encounterOverrides: [
+    { kind: 'change', id: 'forest.wolves', change: { weight: 6, when: 'night' } },
+    { kind: 'remove', id: 'grass.bandits' },
+    {
+      kind: 'add',
+      entry: {
+        id: 'enc-1',
+        terrain: 'sand',
+        when: 'day',
+        weight: 2,
+        title: 'Sphinx',
+        description: 'asks a riddle',
+      },
+    },
+  ],
   ...patch,
 })
 
@@ -165,6 +180,7 @@ describe('schema', () => {
     expect(loaded.resourceChances).toEqual(defaultResourceChances())
     expect(loaded.resourceSpacing).toBe(DEFAULT_RESOURCE_SPACING)
     expect(loaded.fogEdits).toEqual([])
+    expect(loaded.encounterOverrides).toEqual([])
 
     saveSnapshot(old, snapshot())
     expect(loadSnapshot(old)!.turn).toBe(2)
@@ -296,6 +312,15 @@ describe('map state', () => {
 
     saveSnapshot(db, snapshot({ fogEdits: [] }))
     expect(loadSnapshot(db)!.fogEdits).toEqual([])
+  })
+
+  it('round-trips the encounter overrides in the order they were made', () => {
+    const saved = snapshot()
+    saveSnapshot(db, saved)
+    expect(loadSnapshot(db)!.encounterOverrides).toEqual(saved.encounterOverrides)
+
+    saveSnapshot(db, snapshot({ encounterOverrides: [] }))
+    expect(loadSnapshot(db)!.encounterOverrides).toEqual([])
   })
 
   it('lets the resources be cleared off the map', () => {
