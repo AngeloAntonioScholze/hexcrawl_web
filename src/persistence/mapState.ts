@@ -8,6 +8,7 @@ import type { SupplyEntry } from '../entities/supplies'
 import type { HexEvent, HexLocation } from '../hex/content'
 import type { HexKey } from '../hex/coords'
 import type { Origin, TerrainControls } from '../stores/hexMap'
+import type { RiverEdge } from '../terrain/rivers'
 import type { RoadEdge } from '../terrain/roads'
 import {
   defaultResourceChances,
@@ -83,6 +84,8 @@ export interface MapSnapshot {
   encounterOverrides: readonly EncounterOverride[]
   /** Every stretch of road, each between two neighbouring hexes. */
   roads: readonly RoadEdge[]
+  /** Every stretch of river, each along the side two neighbouring hexes share. */
+  rivers: readonly RiverEdge[]
   /** Hexes the DM painted over, with the terrain each was painted. */
   terrainOverrides: readonly { hex: HexKey; terrain: TerrainId }[]
 }
@@ -332,6 +335,14 @@ export function saveSnapshot(db: Database, snapshot: MapSnapshot): void {
       road.finalize()
     }
 
+    db.exec('DELETE FROM river')
+    const river = db.prepare('INSERT INTO river (a, b) VALUES (?, ?)')
+    try {
+      for (const one of snapshot.rivers) river.bind([one.a, one.b]).stepReset()
+    } finally {
+      river.finalize()
+    }
+
     db.exec('DELETE FROM resource_chance')
     const chance = db.prepare('INSERT INTO resource_chance (terrain, chance) VALUES (?, ?)')
     try {
@@ -497,6 +508,10 @@ export function loadSnapshot(db: Database): MapSnapshot | null {
       .selectObjects('SELECT payload FROM encounter_override ORDER BY ord')
       .map((one) => JSON.parse(String(one.payload)) as EncounterOverride),
     roads: db.selectObjects('SELECT * FROM road ORDER BY a, b').map((one) => ({
+      a: String(one.a) as HexKey,
+      b: String(one.b) as HexKey,
+    })),
+    rivers: db.selectObjects('SELECT * FROM river ORDER BY a, b').map((one) => ({
       a: String(one.a) as HexKey,
       b: String(one.b) as HexKey,
     })),

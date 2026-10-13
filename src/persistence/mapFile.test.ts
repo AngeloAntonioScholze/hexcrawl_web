@@ -131,6 +131,7 @@ const snapshot = (): MapSnapshot => ({
     { a: '0,0' as HexKey, b: '1,0' as HexKey },
     { a: '1,0' as HexKey, b: '1,1' as HexKey },
   ],
+  rivers: [{ a: '0,1' as HexKey, b: '1,0' as HexKey }],
   terrainOverrides: [{ hex: '1,0' as HexKey, terrain: 'mountains' }],
 })
 
@@ -282,6 +283,8 @@ describe('parseMapFile', () => {
     ['a road end that is not a hex', (map) => (map.roads[0].b = 'east'), 'roads'],
     ['a road between hexes apart', (map) => (map.roads[0].b = '2,0'), 'roads'],
     ['a road from a hex to itself', (map) => (map.roads[0].b = '0,0'), 'roads'],
+    ['a river between hexes apart', (map) => (map.rivers[0].b = '3,0'), 'rivers'],
+    ['a river bank that is not a hex', (map) => (map.rivers[0].a = 'west'), 'rivers'],
     [
       'an unknown painted terrain',
       (map) => (map.terrainOverrides[0].terrain = 'lava'),
@@ -326,6 +329,7 @@ describe('parseMapFile', () => {
     ['encounterOverrides', []],
     ['catalogOverrides', []],
     ['roads', []],
+    ['rivers', []],
     ['terrainOverrides', []],
     ['supplies', []],
   ])('opens a file from before %s existed with the default', (field, fallback) => {
@@ -394,6 +398,9 @@ describe('a map carried out and back in', () => {
     store.click({ q: 0, r: 1 })
     store.click({ q: 3, r: 1 })
     expect(store.snapshot.roads).toHaveLength(3)
+    store.setDmTool('river')
+    store.click({ q: 1, r: 0 }, false, { q: 1, r: 1 })
+    expect(store.snapshot.rivers).toHaveLength(1)
     expect(store.snapshot.record.length).toBeGreaterThan(0)
     const exported = serialiseMap(store.snapshot)
 

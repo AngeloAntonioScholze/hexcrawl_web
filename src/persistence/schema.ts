@@ -216,6 +216,13 @@ const MIGRATIONS: readonly string[] = [
     PRIMARY KEY (turn, entity_id)
   );
   `,
+  `
+  CREATE TABLE river (
+    a TEXT NOT NULL,
+    b TEXT NOT NULL,
+    PRIMARY KEY (a, b)
+  ) WITHOUT ROWID;
+  `,
 ]
 
 export const SCHEMA_VERSION = MIGRATIONS.length

@@ -16,7 +16,7 @@ import type { TimeOfDay } from '../time/clock'
 import { daylightFor, skyGlow, type SkyGlow } from './sky'
 import type { Layout } from '../hex/layout'
 import { createIsoCamera, type IsoCamera } from './camera'
-import { hexUnderRay, type PickRay } from './groundPick'
+import { hexUnderRay, neighborUnderRay, type PickRay } from './groundPick'
 import { attachIsoControls } from './controls'
 import type { TerrainField } from '../terrain/field'
 import { createHexGrid, wantsDetail, type HexGrid, type HexTile } from './hexGrid'
@@ -24,6 +24,7 @@ import { worldBounds } from './hexWindow'
 import { createTokenField, type TokenField } from './tokenField'
 import { createPoiMarkers, type PoiMarkers } from './poiMarkers'
 import { createResourceMarkers, type ResourceMarkers } from './resourceMarkers'
+import { createRiverSegments, type RiverSegments } from './riverSegments'
 import { createRoadSegments, type RoadSegments } from './roadSegments'
 import { createRouteArrows, type RouteArrows } from './routeArrows'
 import { createVisionOverlay, type VisionOverlay } from './visionOverlay'
@@ -39,9 +40,10 @@ export interface HexSceneOptions {
   maxZoom?: number
   gap?: number
   bevel?: number
-  onHover?(hex: Axial | null): void
+  /** `across` is the neighbour beyond the side of the hex nearest the pointer. */
+  onHover?(hex: Axial | null, across: Axial | null): void
   /** `append` is a shift-click: add the hex to the order rather than replace it. */
-  onSelect?(hex: Axial | null, append: boolean): void
+  onSelect?(hex: Axial | null, append: boolean, across: Axial | null): void
   /** Where the sun or moon glows over the view; called again whenever the time or the camera moves it. */
   onGlow?(glow: SkyGlow): void
 }
@@ -58,6 +60,7 @@ export interface HexScene {
   resources: ResourceMarkers
   pois: PoiMarkers
   roads: RoadSegments
+  rivers: RiverSegments
   /** Draws a different window of the world; everything else rides along. */
   setWindow(tiles: readonly HexTile[]): void
   /** Slides the window: what `keep` turns down leaves, `entering` arrives. */
@@ -184,6 +187,7 @@ export function createHexScene(canvas: HTMLCanvasElement, options: HexSceneOptio
     tileSize: grid.tileSize,
     bevel: options.bevel,
   })
+  const rivers = createRiverSegments(scene, options.layout, elevationOf)
   addGroundSlab(scene, bounds, options.layout.size * 2)
 
   // Plain axial coordinates cross this boundary, never Babylon objects, so
@@ -195,10 +199,21 @@ export function createHexScene(canvas: HTMLCanvasElement, options: HexSceneOptio
     return hexUnderPointer(grid, options.layout, pointerRay)
   }
 
+  const pickSide = (hex: Axial | null): Axial | null => {
+    if (!hex) return null
+    const index = grid.indexOf(hexKey(hex))
+    const top = index === undefined ? 0 : grid.heightAt(index)
+    return neighborUnderRay(options.layout, pointerRay, hex, top)
+  }
+
   const pointerObserver = scene.onPointerObservable.add((info) => {
-    if (info.type === PointerEventTypes.POINTERMOVE) options.onHover?.(pickHex())
-    else if (info.type === PointerEventTypes.POINTERTAP)
-      options.onSelect?.(pickHex(), info.event.shiftKey)
+    if (info.type === PointerEventTypes.POINTERMOVE) {
+      const hex = pickHex()
+      options.onHover?.(hex, pickSide(hex))
+    } else if (info.type === PointerEventTypes.POINTERTAP) {
+      const hex = pickHex()
+      options.onSelect?.(hex, info.event.shiftKey, pickSide(hex))
+    }
   })
 
   const redrawOnCall = <T extends object>(target: T, methods: readonly (keyof T)[]): void => {
@@ -220,6 +235,7 @@ export function createHexScene(canvas: HTMLCanvasElement, options: HexSceneOptio
   redrawOnCall(resources, ['setMarks'])
   redrawOnCall(pois, ['setPois'])
   redrawOnCall(roads, ['setSpans'])
+  redrawOnCall(rivers, ['setSpans'])
 
   // The rounded edge is dropped once it shrinks to about a pixel on screen,
   // which at the widest zooms is two thirds of the grid's triangles. Worked out
@@ -305,6 +321,7 @@ export function createHexScene(canvas: HTMLCanvasElement, options: HexSceneOptio
     resources,
     pois,
     roads,
+    rivers,
 
     setDaylight,
 
@@ -334,6 +351,7 @@ export function createHexScene(canvas: HTMLCanvasElement, options: HexSceneOptio
       scene.onBeforeRenderObservable.remove(glowObserver)
       detachControls()
       cancelAnimationFrame(frameRequest)
+      rivers.dispose()
       roads.dispose()
       pois.dispose()
       resources.dispose()

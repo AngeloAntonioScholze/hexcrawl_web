@@ -161,6 +161,10 @@ const snapshot = (patch: Partial<MapSnapshot> = {}): MapSnapshot => ({
     { a: '0,0' as HexKey, b: '1,0' as HexKey },
     { a: '1,0' as HexKey, b: '2,-1' as HexKey },
   ],
+  rivers: [
+    { a: '0,1' as HexKey, b: '1,0' as HexKey },
+    { a: '1,0' as HexKey, b: '1,1' as HexKey },
+  ],
   terrainOverrides: [
     { hex: '-2,1' as HexKey, terrain: 'peaks' },
     { hex: '3,0' as HexKey, terrain: 'water' },
@@ -215,6 +219,7 @@ describe('schema', () => {
     expect(loaded.fogEdits).toEqual([])
     expect(loaded.encounterOverrides).toEqual([])
     expect(loaded.roads).toEqual([])
+    expect(loaded.rivers).toEqual([])
     expect(loaded.terrainOverrides).toEqual([])
 
     saveSnapshot(old, snapshot())
@@ -370,6 +375,20 @@ describe('map state', () => {
     saveSnapshot(db, snapshot({ roads: [] }))
 
     expect(loadSnapshot(db)!.roads).toEqual([])
+  })
+
+  it('round-trips the rivers', () => {
+    const saved = snapshot()
+    saveSnapshot(db, saved)
+
+    expect(loadSnapshot(db)!.rivers).toEqual(saved.rivers)
+  })
+
+  it('lets the rivers be taken up', () => {
+    saveSnapshot(db, snapshot())
+    saveSnapshot(db, snapshot({ rivers: [] }))
+
+    expect(loadSnapshot(db)!.rivers).toEqual([])
   })
 
   it('lets the resources be cleared off the map', () => {

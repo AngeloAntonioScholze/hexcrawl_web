@@ -12,11 +12,14 @@ import {
   findRoute,
   isCoast,
   joinLegs,
+  RIVER_CROSSING_KM,
+  RIVERS_SLOW,
   ROADS_GRADED,
   stepCostKm,
   stepKmOn,
 } from './travel'
 import { fieldFromTiles } from './field'
+import { withRiverToggled, type Rivers } from './rivers'
 import { withRoad } from './roads'
 
 // The number is the mechanical level; the rendered height is derived from it so
@@ -144,6 +147,110 @@ describe('roads', () => {
     )!
     expect(tied.km).toBe(3 * KM_PER_HEX)
     expect(tied.hexes).toEqual(detour.slice(1))
+  })
+})
+
+describe('rivers', () => {
+  const here = tile({ q: 0, r: 0 }, 1)
+  const there = tile({ q: 1, r: 0 }, 1)
+  const river = withRiverToggled(new Set(), here.hex, there.hex)
+
+  it('charge a hex more to ford, whichever way', () => {
+    expect(RIVER_CROSSING_KM).toBe(KM_PER_HEX)
+    expect(stepKmOn(new Set(), here, there, 'land', river)).toBe(KM_PER_HEX + RIVER_CROSSING_KM)
+    expect(stepKmOn(new Set(), there, here, 'land', river)).toBe(KM_PER_HEX + RIVER_CROSSING_KM)
+  })
+
+  it('add the ford on top of a climb', () => {
+    const high = tile({ q: 1, r: 0 }, 1 + CLIMB_THRESHOLD)
+    expect(stepCostKm(here, high, 'land', false, true)).toBe(
+      KM_PER_HEX * CLIMB_MULTIPLIER + RIVER_CROSSING_KM,
+    )
+  })
+
+  it('are crossed at no extra cost on a bridge, a road over the same side', () => {
+    const roads = withRoad(new Set(), [here.hex, there.hex])
+    expect(stepKmOn(roads, here, there, 'land', river)).toBe(KM_PER_HEX)
+  })
+
+  it('mean nothing afloat', () => {
+    expect(RIVERS_SLOW.sea).toBe(false)
+    expect(stepCostKm(water(here.hex), water(there.hex), 'sea', false, true)).toBe(KM_PER_HEX)
+  })
+
+  // Along every side between rows 0 and 1 from q = -1 to q = 4: too long to
+  // walk around, so getting from one row to the other means fording it.
+  const barrier = (): Rivers => {
+    let rivers: Rivers = new Set()
+    for (let q = -1; q <= 3; q++) {
+      rivers = withRiverToggled(rivers, { q, r: 0 }, { q, r: 1 })
+      rivers = withRiverToggled(rivers, { q: q + 1, r: 0 }, { q, r: 1 })
+    }
+    return rivers
+  }
+
+  it('charge a route that has to ford for the crossing', () => {
+    const route = findRoute(
+      fieldFromTiles(flatField(6)),
+      { q: 1, r: 0 },
+      { q: 1, r: 1 },
+      {
+        rivers: barrier(),
+      },
+    )!
+    expect(route.hexes).toEqual([
+      { q: 1, r: 0 },
+      { q: 1, r: 1 },
+    ])
+    expect(route.km).toBe(KM_PER_HEX + RIVER_CROSSING_KM)
+  })
+
+  it('never cost more than going round the end of the river', () => {
+    const rivers = withRiverToggled(new Set(), { q: 0, r: 0 }, { q: 1, r: 0 })
+    const route = findRoute(
+      fieldFromTiles(flatField(6)),
+      { q: 0, r: 0 },
+      { q: 1, r: 0 },
+      {
+        rivers,
+      },
+    )!
+    expect(route.km).toBe(2 * KM_PER_HEX)
+  })
+
+  it('cross at the plain rate where a road bridges them', () => {
+    const roads = withRoad(new Set(), [
+      { q: 1, r: 0 },
+      { q: 1, r: 1 },
+    ])
+    const route = findRoute(
+      fieldFromTiles(flatField(6)),
+      { q: 1, r: 0 },
+      { q: 1, r: 1 },
+      {
+        rivers: barrier(),
+        roads,
+      },
+    )!
+    expect(route.km).toBe(KM_PER_HEX)
+  })
+
+  it('pull a route onto the bridge rather than the ford beside it', () => {
+    const roads = withRoad(new Set(), [
+      { q: 2, r: 0 },
+      { q: 2, r: 1 },
+    ])
+    const route = findRoute(
+      fieldFromTiles(flatField(6)),
+      { q: 2, r: -1 },
+      { q: 2, r: 2 },
+      {
+        rivers: barrier(),
+        roads,
+      },
+    )!
+    expect(route.km).toBe(3 * KM_PER_HEX)
+    expect(route.hexes).toContainEqual({ q: 2, r: 1 })
   })
 })
 

@@ -17,6 +17,7 @@ import {
 import { SUPPLY_LIMITS, type Supply } from '../entities/supplies'
 import type { HexKey } from '../hex/coords'
 import type { TerrainControls } from '../stores/hexMap'
+import { isRiverEdge, type RiverEdge } from '../terrain/rivers'
 import { isRoadEdge, type RoadEdge } from '../terrain/roads'
 import {
   defaultResourceChances,
@@ -286,6 +287,10 @@ const SNAPSHOT_FIELDS: { [K in keyof MapSnapshot]-?: Guard<MapSnapshot[K]> } = {
     (value): value is RoadEdge =>
       shape<RoadEdge>({ a: isHex, b: isHex })(value) && isRoadEdge(value.a, value.b),
   ),
+  rivers: listOf(
+    (value): value is RiverEdge =>
+      shape<RiverEdge>({ a: isHex, b: isHex })(value) && isRiverEdge(value.a, value.b),
+  ),
   terrainOverrides: listOf(
     shape<MapSnapshot['terrainOverrides'][number]>({
       hex: isHex,
@@ -328,6 +333,7 @@ const ADDED_FIELD_DEFAULTS: {
   encounterOverrides: () => [],
   catalogOverrides: () => [],
   roads: () => [],
+  rivers: () => [],
   terrainOverrides: () => [],
   supplies: () => [],
 }

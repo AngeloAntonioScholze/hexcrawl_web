@@ -11,6 +11,7 @@ import {
   type PixelBox,
 } from '../engine/minimap'
 import { RESOURCE_MARKER_COLOR, resourceMarks } from '../engine/resourceMarkers'
+import { RIVER_COLOR, riverSpans, sharedSide } from '../engine/riverSegments'
 import { ROAD_COLOR, roadSpans } from '../engine/roadSegments'
 import type { HexScene } from '../engine/scene'
 import { parseKey, type Axial, type HexKey } from '../hex/coords'
@@ -69,6 +70,17 @@ const roadLines = computed<readonly [Pixel, Pixel][]>(() =>
     fog: store.fog,
     explored: store.explored,
   }).map((span) => [hexPixel(span.a), hexPixel(span.b)]),
+)
+
+const riverLines = computed<readonly [Pixel, Pixel][]>(() =>
+  riverSpans(store.rivers, {
+    dmView: store.dmView,
+    fog: store.fog,
+    explored: store.explored,
+  }).map((span) => {
+    const [from, to] = sharedSide(props.layout, parseKey(span.a), parseKey(span.b))
+    return [worldToMinimap(frame.value, from.x, from.z), worldToMinimap(frame.value, to.x, to.z)]
+  }),
 )
 
 /**
@@ -145,6 +157,17 @@ const draw = (): void => {
     ink.strokeStyle = 'rgba(240, 244, 255, 0.85)'
     ink.lineWidth = 1
     ink.strokeRect(box.x - box.width / 2, box.y - box.height / 2, box.width, box.height)
+  }
+
+  if (riverLines.value.length > 0) {
+    ink.strokeStyle = RIVER_COLOR
+    ink.lineWidth = 1.5
+    ink.beginPath()
+    for (const [from, to] of riverLines.value) {
+      ink.moveTo(from.x, from.y)
+      ink.lineTo(to.x, to.y)
+    }
+    ink.stroke()
   }
 
   if (roadLines.value.length > 0) {

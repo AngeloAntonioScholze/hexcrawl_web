@@ -9,6 +9,7 @@ import {
   RESOURCE_SPACING_LIMITS,
 } from '../terrain/resources'
 import { mulberry32 } from '../terrain/perlin'
+import { riverKey } from '../terrain/rivers'
 import { roadHexes } from '../terrain/roads'
 import { TERRAIN_DEFAULTS, type TerrainId, type TerrainTile } from '../terrain/terrain'
 import { TURNS_PER_PHASE } from '../time/clock'
@@ -421,6 +422,86 @@ describe('roads', () => {
 
     fresh.setTerrain({ seed: TERRAIN_DEFAULTS.seed + 1 })
     expect(fresh.roads.size).toBe(0)
+  })
+})
+
+describe('rivers', () => {
+  const riverTool = (): Store => {
+    const store = setup()
+    store.setDmTool('river')
+    return store
+  }
+
+  it('lays river along the side tapped and lifts it on a second tap from either bank', () => {
+    const store = riverTool()
+    store.click({ q: 0, r: 0 }, false, { q: 1, r: 0 })
+    expect([...store.rivers]).toEqual([riverKey({ q: 0, r: 0 }, { q: 1, r: 0 })])
+
+    store.click({ q: 1, r: 0 }, false, { q: 0, r: 0 })
+    expect(store.rivers.size).toBe(0)
+  })
+
+  it('ignores a tap with no side, or a side off the edge of the world', () => {
+    const store = riverTool()
+    store.click({ q: 0, r: 0 })
+    store.click({ q: 6, r: 0 }, false, { q: 7, r: 0 })
+    expect(store.rivers.size).toBe(0)
+  })
+
+  it('previews the side under the pointer only while the river tool is in hand', () => {
+    const store = riverTool()
+    store.setHovered({ q: 0, r: 0 }, { q: 0, r: 1 })
+    expect(store.riverHover).toBe(riverKey({ q: 0, r: 0 }, { q: 0, r: 1 }))
+
+    store.setDmTool('road')
+    expect(store.riverHover).toBeNull()
+  })
+
+  it('takes a tap back with undo', () => {
+    const store = riverTool()
+    store.click({ q: 0, r: 0 }, false, { q: 1, r: 0 })
+    store.undo()
+    expect(store.rivers.size).toBe(0)
+    store.redo()
+    expect(store.rivers.size).toBe(1)
+  })
+
+  it('makes a route that fords dearer to plan and slower to walk, unless bridged', () => {
+    const store = setup()
+    store.setDmTool('river')
+    // Fenced off between rows 0 and 1 the whole width of the map.
+    for (let q = -7; q <= 6; q++) {
+      store.click({ q, r: 0 }, false, { q, r: 1 })
+      store.click({ q: q + 1, r: 0 }, false, { q, r: 1 })
+    }
+    store.dmView = false
+    store.select({ q: 0, r: 0 })
+    store.select({ q: 0, r: 1 })
+    expect(store.route!.km).toBe(20)
+    store.advanceTurn()
+    expect(store.start).toBe('0,0')
+
+    store.dmView = true
+    store.setDmTool('road')
+    store.click({ q: 0, r: 0 })
+    store.click({ q: 0, r: 1 })
+    expect(store.route!.km).toBe(10)
+  })
+
+  it('round-trips through a snapshot and is cleared by a new world', () => {
+    const store = riverTool()
+    store.click({ q: 0, r: 0 }, false, { q: 1, r: 0 })
+    store.click({ q: 1, r: 0 }, false, { q: 1, r: 1 })
+    const saved = store.snapshot
+    expect(saved.rivers).toHaveLength(2)
+
+    setActivePinia(createPinia())
+    const fresh = setup()
+    fresh.restore(saved)
+    expect(fresh.rivers).toEqual(store.rivers)
+
+    fresh.setTerrain({ seed: TERRAIN_DEFAULTS.seed + 1 })
+    expect(fresh.rivers.size).toBe(0)
   })
 })
 

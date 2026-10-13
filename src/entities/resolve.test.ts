@@ -1,6 +1,7 @@
 import { Color3 } from '@babylonjs/core/Maths/math.color'
 import { describe, expect, it } from 'vitest'
 import { hexKey, parseKey, range, type Axial, type HexKey } from '../hex/coords'
+import { withRiverToggled } from '../terrain/rivers'
 import { withRoad } from '../terrain/roads'
 import type { TerrainTile } from '../terrain/terrain'
 import type { Action } from './action'
@@ -108,6 +109,39 @@ describe('the cost of a step', () => {
     const rough = resolveTurn(0, field, [who], from, queued)
     const stuck = resolveTurn(1, field, [who], rough.states, new Map())
     expect(stuck.states.get(who.id)!.at).toBe('1,0')
+  })
+
+  it('charges a turn more to ford a river, and nothing more on a bridge', () => {
+    const tiles = ridgeField(4)
+    expect(stepCostTurns(tiles.get('0,0')!, tiles.get('1,0')!, 'land', false, true)).toBe(2)
+    expect(stepCostTurns(tiles.get('1,0')!, tiles.get('2,0')!, 'land', false, true)).toBe(3)
+    expect(stepCostTurns(tiles.get('0,0')!, tiles.get('1,0')!, 'land', true, true)).toBe(1)
+    expect(stepCostTurns(tiles.get('0,0')!, tiles.get('1,0')!, 'sea', false, true)).toBe(1)
+  })
+
+  it('holds a party on the bank for the turn the ford takes', () => {
+    const who = entity({ pacePerTurn: 1 })
+    const field = fieldFromTiles(flatField(4))
+    const rivers = withRiverToggled(new Set(), { q: 0, r: 0 }, { q: 1, r: 0 })
+    const from = new Map([[who.id, standing('0,0')]])
+    const queued = new Map([[who.id, move(east(1))]])
+
+    const first = resolveTurn(0, field, [who], from, queued, new Set(), rivers)
+    expect(first.states.get(who.id)!.at).toBe('0,0')
+    const second = resolveTurn(1, field, [who], first.states, new Map(), new Set(), rivers)
+    expect(second.states.get(who.id)!.at).toBe('1,0')
+  })
+
+  it('lets the slowest party ford a river at the top of a climb in the end', () => {
+    const who = entity({ pacePerTurn: 0.5 })
+    const field = fieldFromTiles(ridgeField(4))
+    const rivers = withRiverToggled(new Set(), { q: 1, r: 0 }, { q: 2, r: 0 })
+    let states: ReadonlyMap<string, EntityState> = new Map([[who.id, standing('1,0')]])
+    for (let turn = 0; turn < 6; turn++) {
+      const queued = new Map<string, Action>(turn === 0 ? [[who.id, move(['1,0', '2,0'])]] : [])
+      states = resolveTurn(turn, field, [who], states, queued, new Set(), rivers).states
+    }
+    expect(states.get(who.id)!.at).toBe('2,0')
   })
 })
 
