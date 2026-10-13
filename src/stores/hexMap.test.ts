@@ -369,6 +369,28 @@ describe('the record', () => {
 })
 
 describe('entities', () => {
+  it('opens a map that was never saved with the party on it', () => {
+    const store = setup()
+
+    expect(store.entities.map((one) => one.name)).toEqual(['the party'])
+    expect(store.selectedEntity?.name).toBe('the party')
+  })
+
+  it('comes back from a snapshot of a cleared map with nobody on it', () => {
+    const store = setup()
+    store.removeEntity(store.selectedId)
+    const saved = store.snapshot
+
+    setActivePinia(createPinia())
+    const fresh = setup()
+    fresh.restore(saved)
+
+    expect(fresh.entities).toEqual([])
+    expect(fresh.selectedId).toBe('')
+    expect(fresh.selectedEntity).toBeNull()
+    expect(fresh.snapshot).toEqual(saved)
+  })
+
   it('lets the map be cleared of everybody', () => {
     const store = setup()
     sendEast(store, 2)

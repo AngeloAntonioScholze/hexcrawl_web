@@ -217,4 +217,22 @@ describe('a map carried out and back in', () => {
     expect(fresh.snapshot).toEqual(store.snapshot)
     expect(serialiseMap(fresh.snapshot)).toBe(exported)
   })
+
+  it('comes back with nobody on it when the file has no entities', () => {
+    const store = useHexMapStore()
+    store.setTiles(flatField())
+    store.removeEntity(store.selectedId)
+    const exported = serialiseMap(store.snapshot)
+
+    setActivePinia(createPinia())
+    const fresh = useHexMapStore()
+    fresh.setTiles(flatField())
+    const result = parseMapFile(exported)
+    if (!result.ok) throw new Error(result.error)
+    fresh.restore(result.snapshot)
+
+    expect(fresh.entities).toEqual([])
+    expect(fresh.snapshot).toEqual(store.snapshot)
+    expect(serialiseMap(fresh.snapshot)).toBe(exported)
+  })
 })

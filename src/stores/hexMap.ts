@@ -1109,11 +1109,11 @@ export const useHexMapStore = defineStore('hexMap', () => {
     showSight.value = saved.showSight
     showHistory.value = saved.showHistory
     dmView.value = saved.dmView
-    // A save file written before entities existed has none of them, and the map
-    // always has somebody on it, so the party it opened with stays.
-    if (saved.entities.length > 0) entities.value = saved.entities.map((one) => ({ ...one }))
+    // Taken as saved, nobody included: an empty board is one the DM cleared, and
+    // the opening party only belongs to a map that was never saved at all.
+    entities.value = saved.entities.map((one) => ({ ...one }))
     selectedId.value =
-      entities.value.find((one) => one.id === saved.selectedId)?.id ?? entities.value[0].id
+      entities.value.find((one) => one.id === saved.selectedId)?.id ?? entities.value[0]?.id ?? ''
     origins.value = new Map(
       saved.origins.map(({ entityId, turn: at, hex }) => [entityId, { turn: at, hex }]),
     )
