@@ -3,7 +3,7 @@ import { Scene } from '@babylonjs/core/scene'
 import { afterEach, beforeEach, describe, expect, it } from 'vitest'
 import { hexKey, type Axial } from '../hex/coords'
 import { createLayout, hexToWorld } from '../hex/layout'
-import { createTokenField, type TokenField } from './tokenField'
+import { createTokenField, type TokenEntry, type TokenField } from './tokenField'
 
 const layout = createLayout(2)
 const elevationOf = (): number => 1
@@ -21,11 +21,19 @@ const entry = (
   id: string,
   hex: Axial | null,
   color = '#ffffff',
-): { id: string; hex: Axial | null; color: string } => ({
+  inside: string | null = null,
+): TokenEntry => ({
   id,
   hex,
   color,
+  shape: 'pawn',
+  inside,
 })
+
+const play = (frames: number, ms = 50): void => {
+  engine.getDeltaTime = () => ms
+  for (let i = 0; i < frames; i++) scene.onBeforeRenderObservable.notifyObservers(scene)
+}
 
 beforeEach(() => {
   engine = new NullEngine()
@@ -78,6 +86,19 @@ describe('createTokenField', () => {
 
     expect(scene.meshes.find((mesh) => mesh.name === 'partyToken')).toBe(first)
     expect(first!.position.x).toBeCloseTo(hexToWorld(layout, { q: 1, r: 0 }).x)
+  })
+
+  it('rebuilds a token as a boat, which turns to face where it sails', () => {
+    field.setEntries([entry('a', { q: 0, r: 0 })])
+    const pawn = scene.meshes.find((mesh) => mesh.name === 'partyToken')
+
+    field.setEntries([{ ...entry('a', { q: 0, r: 0 }), shape: 'boat' }])
+    const boat = scene.meshes.find((mesh) => mesh.name === 'partyToken')
+    expect(boat).not.toBe(pawn)
+    expect(pawns()).toHaveLength(1)
+
+    field.hop('a', { q: 0, r: 1 }, 0.1)
+    expect(boat!.rotation.y).not.toBe(0)
   })
 
   it('drops the token of an entity that has left the map', () => {
@@ -144,5 +165,68 @@ describe('a crowded hex', () => {
 
     expect(mesh(0).scaling.x).toBeLessThan(1)
     expect(mesh(1).scaling.x).toBeLessThan(1)
+  })
+})
+
+describe('riding in a caravan', () => {
+  const here = { q: 0, r: 0 }
+
+  it('keeps a rider off the board', () => {
+    field.setEntries([entry('wagon', here), entry('a', here, '#ff0000', 'wagon')])
+    expect(pawns()).toHaveLength(1)
+  })
+
+  it('shrinks a boarding party into the caravan and then takes it off the board', () => {
+    field.setEntries([entry('wagon', here), entry('a', here, '#ff0000')])
+    field.board('a', 'wagon', 0.2)
+    expect(field.hopping).toBe(true)
+    play(2)
+    expect(pawns()).toHaveLength(2)
+
+    play(4)
+    expect(field.hopping).toBe(false)
+    expect(pawns()).toHaveLength(1)
+  })
+
+  it('grows an alighting party out of the caravan onto its hex', () => {
+    field.setEntries([entry('wagon', here), entry('a', here, '#ff0000', 'wagon')])
+    field.alight('a', 'wagon', here, 0.2)
+    expect(pawns()).toHaveLength(2)
+
+    play(1)
+    const sizes = scene.meshes
+      .filter((mesh) => mesh.name === 'partyToken')
+      .map((mesh) => mesh.scaling.x)
+    expect(Math.min(...sizes)).toBeLessThan(Math.max(...sizes))
+
+    play(4)
+    expect(field.hopping).toBe(false)
+    const settled = scene.meshes
+      .filter((mesh) => mesh.name === 'partyToken')
+      .map((mesh) => mesh.scaling.x)
+    expect(settled[0]).toBeCloseTo(settled[1])
+  })
+})
+
+describe('shapes', () => {
+  it('rebuilds a token whose shape changes', () => {
+    field.setEntries([entry('a', { q: 0, r: 0 })])
+    const pawn = scene.meshes.find((mesh) => mesh.name === 'partyToken')
+
+    field.setEntries([{ ...entry('a', { q: 0, r: 0 }), shape: 'wagon' }])
+    const wagon = scene.meshes.find((mesh) => mesh.name === 'partyToken')
+
+    expect(wagon).not.toBe(pawn)
+    expect(pawn!.isDisposed()).toBe(true)
+  })
+
+  it('turns a wagon to face the hex it leaps to', () => {
+    field.setEntries([{ ...entry('a', { q: 0, r: 0 }), shape: 'wagon' }])
+    const wagon = scene.meshes.find((mesh) => mesh.name === 'partyToken')!
+
+    field.hop('a', { q: 0, r: 1 }, 0.1)
+    const from = hexToWorld(layout, { q: 0, r: 0 })
+    const to = hexToWorld(layout, { q: 0, r: 1 })
+    expect(wagon.rotation.y).toBeCloseTo(Math.atan2(-(to.z - from.z), to.x - from.x))
   })
 })

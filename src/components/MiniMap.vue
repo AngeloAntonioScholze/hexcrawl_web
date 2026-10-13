@@ -104,7 +104,7 @@ const draw = (): void => {
   }
 
   for (const token of store.tokens) {
-    if (!token.hex) continue
+    if (!token.hex || token.inside) continue
     const world = hexToWorld(props.layout, parseKey(token.hex))
     const point = worldToMinimap(frame.value, world.x, world.z)
 
@@ -242,6 +242,7 @@ const onPointerCancel = (): void => {
   <canvas
     ref="canvas"
     class="minimap"
+    :class="{ beside: store.dmView && store.selectedHex }"
     :width="SIZE"
     :height="SIZE"
     :style="{ width: `${SIZE}px`, height: `${SIZE}px`, cursor }"
@@ -263,6 +264,10 @@ const onPointerCancel = (): void => {
   background: color-mix(in srgb, var(--surface-raised) 88%, transparent);
   pointer-events: auto;
   touch-action: none;
+}
+
+.minimap.beside {
+  right: calc(1rem + var(--details-width) + 0.75rem);
 }
 
 /* Nothing is worth covering a phone's map with; the minimap sits this one out. */

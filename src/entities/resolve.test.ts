@@ -80,6 +80,11 @@ describe('the cost of a step', () => {
     expect(stepCostTurns(tiles.get('0,0')!, tiles.get('1,0')!)).toBe(1)
     expect(stepCostTurns(tiles.get('1,0')!, tiles.get('2,0')!)).toBe(2)
   })
+
+  it('never charges a climb at sea', () => {
+    const tiles = ridgeField(4)
+    expect(stepCostTurns(tiles.get('1,0')!, tiles.get('2,0')!, 'sea')).toBe(1)
+  })
 })
 
 describe('resolving a turn', () => {
@@ -303,5 +308,240 @@ describe('walking a chain of legs', () => {
     )
 
     expect(camped.states.get('party')!.waypoints).toEqual([])
+  })
+})
+
+describe('riding in a caravan', () => {
+  const party = entity()
+  const caravan = entity({ id: 'caravan', kind: 'caravan', ...KIND_DEFAULTS.caravan })
+  const field = fieldFromTiles(flatField(4))
+
+  it('climbs into a caravan standing where it arrives', () => {
+    const { states } = resolveTurn(
+      0,
+      field,
+      [party, caravan],
+      new Map([
+        [party.id, standing('0,0', { pending: ['1,0'], waypoints: ['1,0'] })],
+        [caravan.id, standing('1,0')],
+      ]),
+      new Map(),
+    )
+
+    expect(states.get(party.id)).toEqual({ ...idleState(), at: '1,0', riding: caravan.id })
+  })
+
+  it('only passes a caravan on its way somewhere else', () => {
+    const { states } = resolveTurn(
+      0,
+      field,
+      [party, caravan],
+      new Map([
+        [party.id, standing('0,0', { pending: ['1,0', '2,0'] })],
+        [caravan.id, standing('1,0')],
+      ]),
+      new Map(),
+    )
+
+    expect(states.get(party.id)!.at).toBe('1,0')
+    expect(states.get(party.id)!.riding).toBeNull()
+  })
+
+  it('goes where the caravan goes, at the caravan pace, for nothing', () => {
+    const first = resolveTurn(
+      0,
+      field,
+      [party, caravan],
+      new Map([
+        [party.id, standing('0,0', { riding: caravan.id })],
+        [caravan.id, standing('0,0', { carry: 0.5 })],
+      ]),
+      new Map<string, Action>([[caravan.id, move(east(2))]]),
+    )
+
+    expect(first.states.get(party.id)).toEqual({ ...idleState(), at: '1,0', riding: caravan.id })
+    expect(first.records[0]).toMatchObject({ entered: ['1,0'], spent: 0 })
+
+    // Half a hex a turn: the caravan stands this one out, and so does its rider.
+    const second = resolveTurn(1, field, [party, caravan], first.states, new Map())
+    expect(second.states.get(party.id)!.at).toBe('1,0')
+  })
+
+  it('climbs out and walks at its own pace when ordered away', () => {
+    const { states, records } = resolveTurn(
+      0,
+      field,
+      [party, caravan],
+      new Map([
+        [party.id, standing('0,0', { riding: caravan.id })],
+        [caravan.id, standing('0,0', { carry: 0.5 })],
+      ]),
+      new Map<string, Action>([
+        [caravan.id, move(east(2))],
+        [party.id, move(['0,0', '0,1', '0,2'])],
+      ]),
+    )
+
+    expect(states.get(party.id)).toMatchObject({ at: '0,1', pending: ['0,2'], riding: null })
+    expect(records[0].spent).toBe(1)
+    expect(states.get(caravan.id)!.at).toBe('1,0')
+  })
+
+  it('does not climb straight back in when a climb holds it on the caravan hex', () => {
+    const { states } = resolveTurn(
+      0,
+      fieldFromTiles(ridgeField(4)),
+      [party, caravan],
+      new Map([
+        [party.id, standing('1,0', { riding: caravan.id })],
+        [caravan.id, standing('1,0')],
+      ]),
+      new Map<string, Action>([[party.id, move(['1,0', '2,0'])]]),
+    )
+
+    expect(states.get(party.id)).toMatchObject({ at: '1,0', pending: ['2,0'], riding: null })
+  })
+
+  it('stays aboard when told to wait or camp', () => {
+    const { states } = resolveTurn(
+      0,
+      field,
+      [party, caravan],
+      new Map([
+        [party.id, standing('0,0', { riding: caravan.id })],
+        [caravan.id, standing('0,0', { carry: 0.5 })],
+      ]),
+      new Map<string, Action>([
+        [caravan.id, move(east(2))],
+        [party.id, { kind: 'camp' }],
+      ]),
+    )
+
+    expect(states.get(party.id)).toMatchObject({ at: '1,0', riding: caravan.id })
+  })
+
+  it('rides nothing once its caravan is gone', () => {
+    const { states } = resolveTurn(
+      0,
+      field,
+      [party],
+      new Map([[party.id, standing('0,0', { riding: caravan.id })]]),
+      new Map(),
+    )
+
+    expect(states.get(party.id)).toMatchObject({ at: '0,0', riding: null })
+  })
+
+  it('never puts a caravan inside another', () => {
+    const wagon = entity({ id: 'wagon', kind: 'caravan', ...KIND_DEFAULTS.caravan })
+    const { states } = resolveTurn(
+      0,
+      field,
+      [caravan, wagon],
+      new Map([
+        [caravan.id, standing('0,0')],
+        [wagon.id, standing('0,0')],
+      ]),
+      new Map(),
+    )
+
+    expect(states.get(caravan.id)!.riding).toBeNull()
+    expect(states.get(wagon.id)!.riding).toBeNull()
+  })
+})
+
+describe('riding a ship', () => {
+  const party = entity()
+  const ship = entity({ id: 'ship', kind: 'ship', ...KIND_DEFAULTS.ship })
+  const caravan = entity({ id: 'caravan', kind: 'caravan', ...KIND_DEFAULTS.caravan })
+
+  /** Land west of the meridian, open sea east of it: the 0,0 column is the coast. */
+  const shore = (): Map<HexKey, TerrainTile> => {
+    const tiles = flatField(4)
+    for (const [key, one] of tiles) {
+      if (one.hex.q > 0) tiles.set(key, { ...one, height: -1, level: 0, elevation: 0 })
+    }
+    return tiles
+  }
+  const field = fieldFromTiles(shore())
+
+  it('boards a ship lying at the coast where it stands', () => {
+    const { states } = resolveTurn(
+      0,
+      field,
+      [party, ship],
+      new Map([
+        [party.id, standing('0,0')],
+        [ship.id, standing('0,0')],
+      ]),
+      new Map(),
+    )
+
+    expect(states.get(party.id)).toEqual({ ...idleState(), at: '0,0', riding: ship.id })
+  })
+
+  it('is carried three hexes of open water a turn for nothing', () => {
+    const { states, records } = resolveTurn(
+      0,
+      field,
+      [party, ship],
+      new Map([
+        [party.id, standing('0,0', { riding: ship.id })],
+        [ship.id, standing('0,0')],
+      ]),
+      new Map<string, Action>([[ship.id, move(east(4))]]),
+    )
+
+    expect(states.get(party.id)).toEqual({ ...idleState(), at: '3,0', riding: ship.id })
+    expect(records[0]).toMatchObject({ entered: ['1,0', '2,0', '3,0'], spent: 0 })
+  })
+
+  it('cannot be ordered off at sea and stays with the ship', () => {
+    const { states } = resolveTurn(
+      0,
+      field,
+      [party, ship],
+      new Map([
+        [party.id, standing('2,0', { riding: ship.id })],
+        [ship.id, standing('2,0')],
+      ]),
+      new Map<string, Action>([
+        [ship.id, move(['2,0', '3,0'])],
+        [party.id, move(['2,0', '1,0', '0,0'])],
+      ]),
+    )
+
+    expect(states.get(party.id)).toEqual({ ...idleState(), at: '3,0', riding: ship.id })
+  })
+
+  it('disembarks at the coast when ordered inland', () => {
+    const { states } = resolveTurn(
+      0,
+      field,
+      [party, ship],
+      new Map([
+        [party.id, standing('0,0', { riding: ship.id })],
+        [ship.id, standing('0,0')],
+      ]),
+      new Map<string, Action>([[party.id, move(['0,0', '-1,0'])]]),
+    )
+
+    expect(states.get(party.id)).toMatchObject({ at: '-1,0', pending: [], riding: null })
+  })
+
+  it('never takes another carrier aboard', () => {
+    const { states } = resolveTurn(
+      0,
+      field,
+      [caravan, ship],
+      new Map([
+        [caravan.id, standing('0,0')],
+        [ship.id, standing('0,0')],
+      ]),
+      new Map(),
+    )
+
+    expect(states.get(caravan.id)!.riding).toBeNull()
+    expect(states.get(ship.id)!.riding).toBeNull()
   })
 })

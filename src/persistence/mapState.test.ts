@@ -31,7 +31,6 @@ const caravan: Entity = {
 const snapshot = (patch: Partial<MapSnapshot> = {}): MapSnapshot => ({
   terrain: { seed: 4242, scale: 65, seaLevel: -0.15, relief: 9.5 },
   worldRadius: 150,
-  allowWater: true,
   fog: false,
   showSight: true,
   showHistory: true,
@@ -70,8 +69,17 @@ const snapshot = (patch: Partial<MapSnapshot> = {}): MapSnapshot => ({
       carry: 0,
       pending: ['1,-1'] as HexKey[],
       waypoints: ['1,-1'] as HexKey[],
+      riding: null,
     },
-    { turn: 1, entityId: party.id, at: '1,-1' as HexKey, carry: 0, pending: [], waypoints: [] },
+    {
+      turn: 1,
+      entityId: party.id,
+      at: '1,-1' as HexKey,
+      carry: 0,
+      pending: [],
+      waypoints: [],
+      riding: caravan.id,
+    },
   ],
   queue: [
     {
@@ -82,6 +90,19 @@ const snapshot = (patch: Partial<MapSnapshot> = {}): MapSnapshot => ({
         waypoints: ['2,-1', '3,-1'] as HexKey[],
       },
     },
+  ],
+  notes: [
+    { hex: '0,0' as HexKey, text: 'ruined watchtower' },
+    { hex: '1,0' as HexKey, text: 'smells of smoke' },
+  ],
+  events: [
+    { hex: '1,0' as HexKey, id: 'event-2', title: 'ambush', description: 'goblins' },
+    { hex: '1,0' as HexKey, id: 'event-1', title: 'storm', description: 'a long night' },
+    { hex: '0,0' as HexKey, id: 'event-3', title: 'omen', description: '' },
+  ],
+  locations: [
+    { hex: '0,0' as HexKey, id: 'loc-b', name: 'Oakvale', kind: 'village', description: 'quiet' },
+    { hex: '0,0' as HexKey, id: 'loc-a', name: 'the well', kind: 'landmark', description: '' },
   ],
   ...patch,
 })
@@ -150,7 +171,6 @@ describe('map state', () => {
 
     expect(loaded.terrain).toEqual(saved.terrain)
     expect(loaded.worldRadius).toBe(150)
-    expect(loaded.allowWater).toBe(true)
     expect(loaded.fog).toBe(false)
     expect(loaded.showSight).toBe(true)
     expect(loaded.showHistory).toBe(true)
@@ -162,6 +182,30 @@ describe('map state', () => {
     expect(loaded.record).toEqual(saved.record)
     expect(loaded.states).toEqual(saved.states)
     expect(loaded.queue).toEqual(saved.queue)
+  })
+
+  it('round-trips a ship and the party riding in it', () => {
+    const ship: Entity = { ...caravan, id: 'ship-1', kind: 'ship', pacePerTurn: 3, sight: 7 }
+    const saved = snapshot({
+      entities: [party, ship],
+      states: [
+        {
+          turn: 0,
+          entityId: party.id,
+          at: '1,0' as HexKey,
+          carry: 0,
+          pending: [],
+          waypoints: [],
+          riding: ship.id,
+        },
+      ],
+    })
+    saveSnapshot(db, saved)
+
+    const loaded = loadSnapshot(db)!
+
+    expect(loaded.entities).toEqual([party, ship])
+    expect(loaded.states).toEqual(saved.states)
   })
 
   it('keeps a crawl that has not started yet', () => {
@@ -199,6 +243,29 @@ describe('map state', () => {
     expect(loaded.record).toHaveLength(1)
     expect(loaded.states).toHaveLength(1)
     expect(db.selectValue('SELECT count(*) FROM turn')).toBe(1)
+  })
+
+  it('round-trips what each hex holds, keeping the order things were added', () => {
+    const saved = snapshot()
+    saveSnapshot(db, saved)
+
+    const loaded = loadSnapshot(db)!
+
+    expect(loaded.notes).toEqual(expect.arrayContaining([...saved.notes]))
+    expect(loaded.notes).toHaveLength(saved.notes.length)
+    expect(loaded.events).toEqual(saved.events)
+    expect(loaded.locations).toEqual(saved.locations)
+  })
+
+  it('keeps a map with nothing written on it', () => {
+    saveSnapshot(db, snapshot())
+    saveSnapshot(db, snapshot({ notes: [], events: [], locations: [] }))
+
+    const loaded = loadSnapshot(db)!
+
+    expect(loaded.notes).toEqual([])
+    expect(loaded.events).toEqual([])
+    expect(loaded.locations).toEqual([])
   })
 
   it('keeps the record in the order the turns were spent', () => {

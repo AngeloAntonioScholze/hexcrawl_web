@@ -16,7 +16,6 @@ const LOAD_TIMEOUT_MS = 4000
 const plain = (snapshot: MapSnapshot): MapSnapshot => ({
   terrain: { ...snapshot.terrain },
   worldRadius: snapshot.worldRadius,
-  allowWater: snapshot.allowWater,
   fog: snapshot.fog,
   showSight: snapshot.showSight,
   showHistory: snapshot.showHistory,
@@ -38,6 +37,9 @@ const plain = (snapshot: MapSnapshot): MapSnapshot => ({
         ? { kind: action.kind, route: [...action.route], waypoints: [...action.waypoints] }
         : { ...action },
   })),
+  notes: snapshot.notes.map((one) => ({ ...one })),
+  events: snapshot.events.map((one) => ({ ...one })),
+  locations: snapshot.locations.map((one) => ({ ...one })),
 })
 
 interface Pending {

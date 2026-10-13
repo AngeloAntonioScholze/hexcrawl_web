@@ -3,6 +3,7 @@ import { computed, ref, shallowRef, watch } from 'vue'
 import type { Action, ActionRecord } from '../entities/action'
 import {
   idleState,
+  KIND_MOVEMENT,
   newEntity,
   type Entity,
   type EntityKind,
@@ -10,16 +11,26 @@ import {
   type Owner,
 } from '../entities/entity'
 import { resolveTurn } from '../entities/resolve'
+import type { TokenShape } from '../engine/partyToken'
+import type { HexEvent, HexLocation } from '../hex/content'
 import { hexKey, parseKey, type Axial, type HexKey } from '../hex/coords'
 import type { VisionOptions } from '../hex/vision'
 import type { MapSnapshot } from '../persistence/mapState'
 import { fieldFromTiles, type TerrainField } from '../terrain/field'
 import { sightFrom, type PartySight } from '../terrain/sight'
-import { TERRAIN_DEFAULTS, type TerrainId, type TerrainTile } from '../terrain/terrain'
-import { chainRoute, joinLegs, KM_PER_HEX, type Route } from '../terrain/travel'
+import { isWater, TERRAIN_DEFAULTS, type TerrainId, type TerrainTile } from '../terrain/terrain'
+import { canEnter, chainRoute, joinLegs, KM_PER_HEX, type Route } from '../terrain/travel'
 import { clockAt, isNight, nextPhaseTurn, type Clock } from '../time/clock'
 
 const NOTHING_IN_SIGHT: PartySight = { radius: 0, visible: new Set(), blocked: new Set() }
+
+/** How each kind is carved on the board: whoever walks is a pawn. */
+const TOKEN_SHAPES: Readonly<Record<EntityKind, TokenShape>> = {
+  party: 'pawn',
+  caravan: 'wagon',
+  npc: 'pawn',
+  ship: 'boat',
+}
 
 /** What the dark leaves of an entity's sight, and the least it can ever see. */
 export const NIGHT_SIGHT = 0.3
@@ -35,6 +46,15 @@ export interface Origin {
 export interface TurnFrame {
   records: readonly ActionRecord[]
   states: ReadonlyMap<string, EntityState>
+}
+
+/** What the crawl has seen, and what came to light since the answer before. */
+export interface ExploredState {
+  seen: ReadonlySet<HexKey>
+  /** Null when the set was built from scratch, so there is no difference to draw. */
+  added: ReadonlySet<HexKey> | null
+  /** Counts the answers: a reader that skipped one knows to take the whole set. */
+  version: number
 }
 
 /** One entity's line on the map, in the colour that entity wears. */
@@ -96,12 +116,14 @@ export const MAX_SIGHT = 10
 /** What the sight slider reads with nobody on the map to ask. */
 export const DEFAULT_SIGHT = 5
 
+/** The world and entities panels on the left, the hex details on the right. */
+export type SidePanel = 'world' | 'entities' | 'details'
+
 export const useHexMapStore = defineStore('hexMap', () => {
   // The world is a function, not a stored map: only the ground near the view is
   // ever worked out, and everything that reads terrain asks the field for it.
   const field = shallowRef<TerrainField>(fieldFromTiles(new Map()))
   const hovered = ref<HexKey | null>(null)
-  const allowWater = ref(false)
 
   // Entities are held as whole records and replaced rather than mutated, so a
   // crawl hundreds of turns long never becomes hundreds of reactive proxies.
@@ -133,6 +155,10 @@ export const useHexMapStore = defineStore('hexMap', () => {
 
   /** What each entity intends to do on the next turn; spent by advancing. */
   const queue = shallowRef<ReadonlyMap<string, Action>>(new Map())
+
+  const notes = shallowRef<ReadonlyMap<HexKey, string>>(new Map())
+  const events = shallowRef<ReadonlyMap<HexKey, readonly HexEvent[]>>(new Map())
+  const locations = shallowRef<ReadonlyMap<HexKey, readonly HexLocation[]>>(new Map())
 
   const fog = ref(true)
   const showSight = ref(false)
@@ -183,6 +209,38 @@ export const useHexMapStore = defineStore('hexMap', () => {
   const stateOf = (id: string): EntityState => states.value.get(id) ?? idleState()
 
   const selectedState = computed<EntityState>(() => stateOf(selectedId.value))
+
+  /**
+   * The caravan an entity is riding in, or nothing at all. A caravan taken off
+   * the map leaves whoever was inside it standing where it stood: the record
+   * still says they were riding, and what they were riding is gone.
+   */
+  const aboard = ({ riding }: EntityState): string | null =>
+    riding && entities.value.some((one) => one.id === riding) ? riding : null
+
+  const carrierOf = (id: string): string | null => aboard(stateOf(id))
+
+  /** Who is inside each caravan this turn, in the order the entities are listed. */
+  const riders = computed<ReadonlyMap<string, readonly Entity[]>>(() => {
+    const inside = new Map<string, Entity[]>()
+    for (const one of entities.value) {
+      const carrier = carrierOf(one.id)
+      if (!carrier) continue
+      const aboard = inside.get(carrier) ?? []
+      aboard.push(one)
+      inside.set(carrier, aboard)
+    }
+    return inside
+  })
+
+  const ridersOf = (caravanId: string): readonly Entity[] => riders.value.get(caravanId) ?? []
+
+  /** A rider whose carrier is out on open water, where there is nowhere to step off to. */
+  const atSea = (id: string): boolean => {
+    const at = stateOf(id).at
+    const under = at ? tileAt(at) : undefined
+    return carrierOf(id) !== null && under !== undefined && isWater(under)
+  }
 
   /** Where the selected entity stands: what the map calls the party's hex. */
   const start = computed<HexKey | null>(() => selectedState.value.at)
@@ -278,6 +336,74 @@ export const useHexMapStore = defineStore('hexMap', () => {
     hovered.value = hex ? hexKey(hex) : null
   }
 
+  /** The hex the DM is looking at; view state, never saved. */
+  const selectedHex = ref<HexKey | null>(null)
+
+  const selectHex = (hex: Axial | null): void => {
+    selectedHex.value = hex ? hexKey(hex) : null
+  }
+
+  /** Which side panels are expanded; view state, never saved. */
+  const panelsOpen = ref<Record<SidePanel, boolean>>({ world: true, entities: true, details: true })
+
+  // On a narrow window the panels share the same strip of screen, so only one
+  // of them may be expanded at a time.
+  const setPanelOpen = (which: SidePanel, open: boolean, narrow: boolean): void => {
+    const closeOthers = open && narrow
+    panelsOpen.value = {
+      world: which === 'world' ? open : !closeOthers && panelsOpen.value.world,
+      entities: which === 'entities' ? open : !closeOthers && panelsOpen.value.entities,
+      details: which === 'details' ? open : !closeOthers && panelsOpen.value.details,
+    }
+  }
+
+  const setNote = (hex: HexKey, text: string): void => {
+    const next = new Map(notes.value)
+    if (text.trim()) next.set(hex, text)
+    else next.delete(hex)
+    notes.value = next
+  }
+
+  const appendTo = <T extends { id: string }>(
+    held: ReadonlyMap<HexKey, readonly T[]>,
+    hex: HexKey,
+    item: T,
+  ): ReadonlyMap<HexKey, readonly T[]> => new Map(held).set(hex, [...(held.get(hex) ?? []), item])
+
+  const dropFrom = <T extends { id: string }>(
+    held: ReadonlyMap<HexKey, readonly T[]>,
+    hex: HexKey,
+    id: string,
+  ): ReadonlyMap<HexKey, readonly T[]> => {
+    const list = held.get(hex)
+    if (!list?.some((one) => one.id === id)) return held
+    const next = new Map(held)
+    const remaining = list.filter((one) => one.id !== id)
+    if (remaining.length > 0) next.set(hex, remaining)
+    else next.delete(hex)
+    return next
+  }
+
+  const addEvent = (hex: HexKey, event: Omit<HexEvent, 'id'>): string => {
+    const id = crypto.randomUUID()
+    events.value = appendTo(events.value, hex, { ...event, id })
+    return id
+  }
+
+  const removeEvent = (hex: HexKey, id: string): void => {
+    events.value = dropFrom(events.value, hex, id)
+  }
+
+  const addLocation = (hex: HexKey, location: Omit<HexLocation, 'id'>): string => {
+    const id = crypto.randomUUID()
+    locations.value = appendTo(locations.value, hex, { ...location, id })
+    return id
+  }
+
+  const removeLocation = (hex: HexKey, id: string): void => {
+    locations.value = dropFrom(locations.value, hex, id)
+  }
+
   /**
    * A recorded future the entities turned away from never happened: giving an
    * order or putting somebody down after a rewind cuts the record off here.
@@ -293,18 +419,27 @@ export const useHexMapStore = defineStore('hexMap', () => {
     queue.value = next
   }
 
-  /** Puts an entity on the map at the turn the crawl stands on. */
+  /**
+   * Puts an entity on the map at the turn the crawl stands on, but only on
+   * ground its kind could stand on: no ship inland, nobody afloat on open sea.
+   */
   const place = (id: string, hex: HexKey): void => {
+    const kind = entities.value.find((one) => one.id === id)?.kind ?? 'party'
+    const under = tileAt(hex)
+    if (under && !canEnter(field.value, under, KIND_MOVEMENT[kind])) return
     truncate()
     const next = new Map(origins.value)
     next.set(id, { turn: turn.value, hex })
     origins.value = next
   }
 
-  const legsFrom = (from: HexKey, waypoints: readonly HexKey[]): Route[] | null =>
-    chainRoute(field.value, parseKey(from), waypoints.map(parseKey), {
-      allowWater: allowWater.value,
+  // Whoever does the walking decides what ground the route may cross.
+  const legsFrom = (walker: string, from: HexKey, waypoints: readonly HexKey[]): Route[] | null => {
+    const kind = entities.value.find((one) => one.id === walker)?.kind ?? 'party'
+    return chainRoute(field.value, parseKey(from), waypoints.map(parseKey), {
+      movement: KIND_MOVEMENT[kind],
     })
+  }
 
   /** The stops an entity is headed through: the queued order's, or the standing one's. */
   const waypointsFor = (id: string): readonly HexKey[] => {
@@ -314,15 +449,26 @@ export const useHexMapStore = defineStore('hexMap', () => {
   }
 
   /**
+   * Whose route an entity is actually walking. A rider chooses none of its own
+   * ground, so its panel and its line on the map read the caravan's; an order
+   * of its own is how it climbs out, and from the moment one is given the route
+   * drawn is the one it will walk away on.
+   */
+  const routeOwner = (id: string): string => (queue.value.has(id) ? id : (carrierOf(id) ?? id))
+
+  const shownWaypoints = (id: string): readonly HexKey[] => waypointsFor(routeOwner(id))
+
+  /**
    * Orders an entity through a chain of stops from where it stands. No stops at
    * all is a route of just the hex underneath, which is how an order is called
    * off without a second kind of action. A chain with a leg nobody can walk is
-   * refused whole and the order already standing is left alone.
+   * refused whole and the order already standing is left alone. A rider at
+   * sea takes no order at all: there is nowhere to step off to.
    */
   const orderChain = (id: string, waypoints: readonly HexKey[]): void => {
     const at = stateOf(id).at
-    if (!at) return
-    const legs = legsFrom(at, waypoints)
+    if (!at || atSea(id)) return
+    const legs = legsFrom(id, at, waypoints)
     if (!legs) return
     const route = joinLegs(parseKey(at), legs).hexes.map(hexKey)
     queueAction(id, { kind: 'move', route, waypoints: [...waypoints] })
@@ -351,6 +497,12 @@ export const useHexMapStore = defineStore('hexMap', () => {
 
     const stops = waypointsFor(id)
     if (key !== (stops[stops.length - 1] ?? at)) orderChain(id, [...stops, key])
+  }
+
+  /** A click on the map: the DM picks a hex to look at, a player gives an order. */
+  const click = (hex: Axial | null, append = false): void => {
+    if (dmView.value) selectHex(hex)
+    else select(hex, append)
   }
 
   const removeWaypoint = (index: number): void => {
@@ -406,13 +558,14 @@ export const useHexMapStore = defineStore('hexMap', () => {
 
   /** The order an entity is about to walk: the queued one, or the standing one. */
   const orderFor = (id: string): readonly HexKey[] => {
-    const queued = queue.value.get(id)
+    const owner = routeOwner(id)
+    const queued = queue.value.get(owner)
     if (queued?.kind === 'move') {
-      const at = stateOf(id).at
+      const at = stateOf(owner).at
       return queued.route[0] === at ? queued.route.slice(1) : queued.route
     }
     if (queued) return []
-    return stateOf(id).pending
+    return stateOf(owner).pending
   }
 
   /** What the selected entity has left to walk, drawn ahead of it as arrows. */
@@ -426,16 +579,24 @@ export const useHexMapStore = defineStore('hexMap', () => {
   /** The selected entity's order, leg by leg, from where it stands now. */
   const chain = computed<Route[]>(() => {
     const at = selectedState.value.at
-    return at ? (legsFrom(at, waypointsFor(selectedId.value)) ?? []) : []
+    return at
+      ? (legsFrom(routeOwner(selectedId.value), at, shownWaypoints(selectedId.value)) ?? [])
+      : []
+  })
+
+  /** Whoever is doing the walking: a rider is carried at the caravan's pace. */
+  const routeEntity = computed<Entity | null>(() => {
+    const owner = routeOwner(selectedId.value)
+    return entities.value.find((one) => one.id === owner) ?? selectedEntity.value
   })
 
   const turnsFor = (km: number): number => {
-    const pace = selectedEntity.value?.pacePerTurn ?? 1
+    const pace = routeEntity.value?.pacePerTurn ?? 1
     return Math.ceil(km / KM_PER_HEX / pace)
   }
 
   const legs = computed<Leg[]>(() => {
-    const stops = waypointsFor(selectedId.value)
+    const stops = shownWaypoints(selectedId.value)
     return chain.value.map((leg, index) => ({
       to: stops[index],
       steps: leg.steps,
@@ -453,10 +614,14 @@ export const useHexMapStore = defineStore('hexMap', () => {
 
   const routeTurns = computed(() => (route.value ? turnsFor(route.value.km) : 0))
 
+  const routeBySea = computed(
+    () => routeEntity.value !== null && KIND_MOVEMENT[routeEntity.value.kind] === 'sea',
+  )
+
   /** The selected entity's stops still ahead, marked on the map in its colour. */
   const stops = computed<{ hexes: Axial[]; color: string }>(() => ({
-    hexes: waypointsFor(selectedId.value).map(parseKey),
-    color: selectedEntity.value?.color ?? '#ffffff',
+    hexes: shownWaypoints(selectedId.value).map(parseKey),
+    color: routeEntity.value?.color ?? '#ffffff',
   }))
 
   const recordsFor = (id: string, upTo: number): ActionRecord[] => {
@@ -500,12 +665,16 @@ export const useHexMapStore = defineStore('hexMap', () => {
       id: one.id,
       hex: stateOf(one.id).at,
       color: one.color,
+      shape: TOKEN_SHAPES[one.kind],
+      inside: carrierOf(one.id),
     })),
   )
 
-  /** Where everybody stood at the opening of a turn, for replaying one. */
-  const positionsAt = (at: number): ReadonlyMap<string, HexKey | null> =>
-    new Map([...statesAt(at)].map(([id, state]) => [id, state.at]))
+  /** Where everybody stood, and who they rode with, at the opening of a turn. */
+  const positionsAt = (
+    at: number,
+  ): ReadonlyMap<string, { hex: HexKey | null; inside: string | null }> =>
+    new Map([...statesAt(at)].map(([id, state]) => [id, { hex: state.at, inside: aboard(state) }]))
 
   /** What every entity did on a turn already spent. */
   const recordsOn = (at: number): readonly ActionRecord[] => frames.value[at]?.records ?? []
@@ -578,8 +747,17 @@ export const useHexMapStore = defineStore('hexMap', () => {
    * invalidates it through the signature, and the set is built again.
    */
   let rolling: { signature: string; turn: number; seen: Set<HexKey> } | null = null
+  let exploredVersion = 0
 
-  const explored = computed<ReadonlySet<HexKey>>(() => {
+  const NOTHING_GAINED: ReadonlySet<HexKey> = new Set()
+
+  /**
+   * The explored set, with the ground that came to light since the last answer
+   * handed out beside it: the fog draws that difference rather than the whole
+   * set, and a step over a wide view should cost what the party saw, not what
+   * the window holds.
+   */
+  const exploredState = computed<ExploredState>(() => {
     const signature = [
       recordVersion.value,
       dmView.value,
@@ -587,19 +765,38 @@ export const useHexMapStore = defineStore('hexMap', () => {
       entities.value.map((one) => `${one.id}:${one.sight}:${one.hidden}`).join(','),
     ].join('|')
 
+    exploredVersion += 1
     const carried = rolling && rolling.signature === signature ? rolling : null
-    if (carried && carried.turn === turn.value) return carried.seen
+    if (carried && carried.turn === turn.value) {
+      return { seen: carried.seen, added: NOTHING_GAINED, version: exploredVersion }
+    }
 
     // Turns only ever arrive one at a time going forward, so the usual case is
     // adding the turn just spent to what was already worked out.
-    const seen = carried && carried.turn < turn.value ? new Set(carried.seen) : new Set<HexKey>()
-    const from = carried && carried.turn < turn.value ? carried.turn + 1 : 0
+    const stepped = carried && carried.turn < turn.value ? carried : null
+    const fresh = new Set<HexKey>()
+    for (let at = stepped ? stepped.turn + 1 : 0; at <= turn.value; at++) seenOn(at, fresh)
 
-    for (let at = from; at <= turn.value; at++) seenOn(at, seen)
+    // Anything else — a rewind, a different record, another world — is a set
+    // that has to be built again, and there is no difference worth drawing.
+    if (!stepped) {
+      rolling = { signature, turn: turn.value, seen: fresh }
+      return { seen: fresh, added: null, version: exploredVersion }
+    }
+
+    const seen = new Set(stepped.seen)
+    const added = new Set<HexKey>()
+    for (const key of fresh) {
+      if (seen.has(key)) continue
+      seen.add(key)
+      added.add(key)
+    }
 
     rolling = { signature, turn: turn.value, seen }
-    return seen
+    return { seen, added, version: exploredVersion }
   })
+
+  const explored = computed<ReadonlySet<HexKey>>(() => exploredState.value.seen)
 
   /** Where one entity has been up to this turn, in the order it went. */
   const trailOf = (id: string): Axial[] => {
@@ -678,7 +875,6 @@ export const useHexMapStore = defineStore('hexMap', () => {
   const snapshot = computed<MapSnapshot>(() => ({
     terrain: terrain.value,
     worldRadius: worldRadius.value,
-    allowWater: allowWater.value,
     fog: fog.value,
     showSight: showSight.value,
     showHistory: showHistory.value,
@@ -692,6 +888,9 @@ export const useHexMapStore = defineStore('hexMap', () => {
       [...frame.states].map(([entityId, state]) => ({ turn: at, entityId, ...state })),
     ),
     queue: [...queue.value].map(([entityId, action]) => ({ entityId, action })),
+    notes: [...notes.value].map(([hex, text]) => ({ hex, text })),
+    events: [...events.value].flatMap(([hex, list]) => list.map((one) => ({ hex, ...one }))),
+    locations: [...locations.value].flatMap(([hex, list]) => list.map((one) => ({ hex, ...one }))),
   }))
 
   // Terrain goes in first: laying down a new world is what wipes the map, so
@@ -699,7 +898,6 @@ export const useHexMapStore = defineStore('hexMap', () => {
   const restore = (saved: MapSnapshot): void => {
     setWorldRadius(saved.worldRadius)
     setTerrain(saved.terrain)
-    allowWater.value = saved.allowWater
     fog.value = saved.fog
     showSight.value = saved.showSight
     showHistory.value = saved.showHistory
@@ -730,6 +928,15 @@ export const useHexMapStore = defineStore('hexMap', () => {
     setFrames(Array.from({ length: byTurn.size }, (_, at) => frameAt(at)))
     turn.value = Math.max(0, Math.min(frames.value.length, saved.turn))
     queue.value = new Map(saved.queue.map(({ entityId, action }) => [entityId, action]))
+
+    notes.value = new Map(saved.notes.map(({ hex, text }) => [hex, text]))
+    const grouped = <T>(rows: readonly ({ hex: HexKey } & T)[]): Map<HexKey, T[]> => {
+      const byHex = new Map<HexKey, T[]>()
+      for (const { hex, ...item } of rows) byHex.set(hex, [...(byHex.get(hex) ?? []), item as T])
+      return byHex
+    }
+    events.value = grouped<HexEvent>(saved.events)
+    locations.value = grouped<HexLocation>(saved.locations)
   }
 
   // A new world is a different place, so nothing the entities learned about the
@@ -742,6 +949,18 @@ export const useHexMapStore = defineStore('hexMap', () => {
       setFrames([])
       origins.value = new Map()
       queue.value = new Map()
+      selectedHex.value = null
+      notes.value = new Map()
+      events.value = new Map()
+      locations.value = new Map()
+    },
+    { flush: 'sync' },
+  )
+
+  watch(
+    dmView,
+    (dm) => {
+      if (!dm) selectedHex.value = null
     },
     { flush: 'sync' },
   )
@@ -763,9 +982,9 @@ export const useHexMapStore = defineStore('hexMap', () => {
     start,
     goal,
     partyHex,
-    allowWater,
     route,
     routeTurns,
+    routeBySea,
     legs,
     stops,
     removeWaypoint,
@@ -811,12 +1030,30 @@ export const useHexMapStore = defineStore('hexMap', () => {
     visible,
     blocked,
     explored,
+    exploredState,
+    carrierOf,
+    riders,
+    ridersOf,
+    atSea,
     setTiles,
     setHovered,
+    selectedHex,
+    selectHex,
+    panelsOpen,
+    setPanelOpen,
     select,
+    click,
     clear,
     snapshot,
     restore,
+    notes,
+    setNote,
+    events,
+    addEvent,
+    removeEvent,
+    locations,
+    addLocation,
+    removeLocation,
   }
 })
 

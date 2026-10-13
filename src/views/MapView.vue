@@ -2,6 +2,8 @@
 import { computed, ref } from 'vue'
 import DayNightDial from '../components/DayNightDial.vue'
 import HexCanvas from '../components/HexCanvas.vue'
+import HexDetails from '../components/HexDetails.vue'
+import ViewToggle from '../components/ViewToggle.vue'
 import type { EntityKind } from '../entities/entity'
 import {
   MAX_SIGHT,
@@ -16,13 +18,20 @@ import { KM_PER_HEX } from '../terrain/travel'
 
 const store = useHexMapStore()
 
-/** Narrower than this and the panel would be most of the window. */
+/** Narrower than this and a panel would be most of the window. */
 const NARROW = 720
 
-// View state, not map state: collapsing the panel hands the map back the room
+// View state, not map state: collapsing a panel hands the map back the room
 // and the pointer, which a scroll container has to hold on to while it is open.
 // A small window opens collapsed, so a phone gets the map first.
-const collapsed = ref(window.innerWidth < NARROW)
+const narrow = (): boolean => window.innerWidth < NARROW
+
+store.setPanelOpen('world', !narrow(), narrow())
+store.setPanelOpen('entities', !narrow(), narrow())
+const worldCollapsed = computed(() => !store.panelsOpen.world)
+const entitiesCollapsed = computed(() => !store.panelsOpen.entities)
+const toggleWorld = (): void => store.setPanelOpen('world', worldCollapsed.value, narrow())
+const toggleEntities = (): void => store.setPanelOpen('entities', entitiesCollapsed.value, narrow())
 
 const onSight = (event: Event): void => {
   store.setSight(Number((event.target as HTMLInputElement).value))
@@ -40,8 +49,22 @@ const addKind = ref<EntityKind>('caravan')
 
 const worldSizes = Object.keys(WORLD_SIZES) as WorldSize[]
 
+/** Riders are listed under their caravan, not among those walking on their own. */
+const walking = computed(() => store.entities.filter((one) => !store.carrierOf(one.id)))
+
+const carrierName = computed(() => {
+  const carrier = store.carrierOf(store.selectedId)
+  return carrier ? (store.entities.find((one) => one.id === carrier)?.name ?? null) : null
+})
+
 const hint = computed(() => {
   if (!store.start) return 'click a hex to put the entity there'
+  if (carrierName.value && store.atSea(store.selectedId)) {
+    return `aboard ${carrierName.value} at sea · no orders until it puts in at a coast`
+  }
+  if (carrierName.value) {
+    return `riding in ${carrierName.value} · click a hex to climb out and walk there`
+  }
   if (!store.goal) return 'click a hex to give it a route'
   return 'shift-click adds a stop · press the arrow on the dial: it walks as the turns pass'
 })
@@ -64,289 +87,337 @@ const olderTurns = computed(() => Math.max(0, store.journey.length - TURNS_SHOWN
   <main>
     <HexCanvas />
     <DayNightDial />
-    <aside :class="{ collapsed }">
-      <header>
-        <h1>hexcrawl</h1>
-        <button
-          type="button"
-          class="toggle"
-          :aria-expanded="!collapsed"
-          :aria-label="collapsed ? 'open the panel' : 'collapse the panel'"
-          @click="collapsed = !collapsed"
-        >
-          <span aria-hidden="true">▾</span>
-        </button>
-      </header>
+    <ViewToggle />
+    <HexDetails />
+    <div class="panels">
+      <aside class="panel" :class="{ collapsed: worldCollapsed }">
+        <header>
+          <h1>world</h1>
+          <button
+            type="button"
+            class="toggle"
+            :aria-expanded="!worldCollapsed"
+            :aria-label="worldCollapsed ? 'open the world panel' : 'collapse the world panel'"
+            @click="toggleWorld"
+          >
+            <span aria-hidden="true">▾</span>
+          </button>
+        </header>
 
-      <div v-show="!collapsed" class="body">
-        <dl>
-          <dt>turn</dt>
-          <dd>
-            {{ store.turn }}
-            <span class="dim">{{ store.clock.phase }} {{ store.clock.index + 1 }}/4</span>
-          </dd>
+        <div v-show="!worldCollapsed" class="body">
+          <dl>
+            <dt>hover</dt>
+            <dd>
+              {{ store.hovered ?? '—' }}
+              <span v-if="store.hoveredTile" class="dim">
+                {{ store.hoveredTile.terrain }} · lv {{ store.hoveredTile.level }}
+              </span>
+            </dd>
+          </dl>
 
-          <dt>hover</dt>
-          <dd>
-            {{ store.hovered ?? '—' }}
-            <span v-if="store.hoveredTile" class="dim">
-              {{ store.hoveredTile.terrain }} · lv {{ store.hoveredTile.level }}
-            </span>
-          </dd>
+          <div class="control stack">
+            <div class="row">
+              <span>seed</span>
+              <span class="value">{{ store.terrain.seed }}</span>
+            </div>
+            <button type="button" @click="store.reseed">roll a new world</button>
 
-          <dt>standing</dt>
-          <dd>{{ store.start ?? '—' }}</dd>
-
-          <dt>headed</dt>
-          <dd>{{ store.goal ?? '—' }}</dd>
-        </dl>
-
-        <div class="control stack">
-          <div class="row">
-            <span>entities</span>
-            <span class="value">{{ store.entities.length }}</span>
-          </div>
-
-          <ul class="entities">
-            <li v-for="one in store.entities" :key="one.id">
+            <div class="row">
+              <span>world size</span>
+              <span class="value">{{ store.worldRadius }} hex</span>
+            </div>
+            <div class="sizes">
               <button
+                v-for="size in worldSizes"
+                :key="size"
                 type="button"
-                :class="{ here: one.id === store.selectedId }"
-                :title="`give ${one.name} the orders`"
-                @click="store.selectEntity(one.id)"
+                :class="{ here: store.worldSize === size }"
+                @click="store.setWorldSize(size)"
               >
-                <span class="pip" :style="{ background: one.color }" />
-                <span>{{ one.name }}</span>
-                <span class="dim">{{ one.kind }}</span>
-                <span class="value">{{ one.pacePerTurn }}/turn</span>
+                {{ size }}
               </button>
-            </li>
-          </ul>
+            </div>
 
-          <div class="row">
-            <select v-model="addKind">
-              <option value="party">party</option>
-              <option value="caravan">caravan</option>
-              <option value="npc">npc</option>
-            </select>
-            <button type="button" @click="store.addEntity(undefined, addKind, 'player')">
-              add
-            </button>
+            <div class="row">
+              <span>landmass size</span>
+              <span class="value">{{ store.terrain.scale }}</span>
+            </div>
+            <input
+              :value="store.terrain.scale"
+              type="range"
+              :min="TERRAIN_LIMITS.scale.min"
+              :max="TERRAIN_LIMITS.scale.max"
+              :step="TERRAIN_LIMITS.scale.step"
+              @input="onTerrain('scale', $event)"
+            />
+
+            <div class="row">
+              <span>sea level</span>
+              <span class="value">{{ store.terrain.seaLevel.toFixed(2) }}</span>
+            </div>
+            <input
+              :value="store.terrain.seaLevel"
+              type="range"
+              :min="TERRAIN_LIMITS.seaLevel.min"
+              :max="TERRAIN_LIMITS.seaLevel.max"
+              :step="TERRAIN_LIMITS.seaLevel.step"
+              @input="onTerrain('seaLevel', $event)"
+            />
+
+            <div class="row">
+              <span>relief</span>
+              <span class="value">{{ store.terrain.relief.toFixed(1) }}</span>
+            </div>
+            <input
+              :value="store.terrain.relief"
+              type="range"
+              :min="TERRAIN_LIMITS.relief.min"
+              :max="TERRAIN_LIMITS.relief.max"
+              :step="TERRAIN_LIMITS.relief.step"
+              @input="onTerrain('relief', $event)"
+            />
           </div>
+
+          <label class="control">
+            <input v-model="store.fog" type="checkbox" />
+            <span>fog of war</span>
+          </label>
+
+          <label class="control">
+            <input v-model="store.showSight" type="checkbox" />
+            <span>show the sight field</span>
+          </label>
+
+          <div v-if="store.fog || store.showSight" class="control stack">
+            <div class="row">
+              <span>sight by daylight</span>
+              <span class="value">{{ store.sight }}</span>
+            </div>
+            <input
+              :value="store.sight"
+              type="range"
+              :min="MIN_SIGHT"
+              :max="MAX_SIGHT"
+              step="1"
+              @input="onSight"
+            />
+            <div class="row">
+              <span>seeing</span>
+              <span class="value">{{ store.reach }} hex</span>
+            </div>
+            <div v-if="store.fog" class="row">
+              <span>explored</span>
+              <span class="value">{{ store.explored.size }}</span>
+            </div>
+          </div>
+
+          <p class="dim">drag to pan · wheel to zoom · Q / E to rotate</p>
+        </div>
+      </aside>
+
+      <aside class="panel" :class="{ collapsed: entitiesCollapsed }">
+        <header>
+          <h1>entities</h1>
           <button
             type="button"
-            :disabled="!store.selectedEntity"
-            @click="store.removeEntity(store.selectedId)"
+            class="toggle"
+            :aria-expanded="!entitiesCollapsed"
+            :aria-label="
+              entitiesCollapsed ? 'open the entities panel' : 'collapse the entities panel'
+            "
+            @click="toggleEntities"
           >
-            {{ store.selectedEntity ? `remove ${store.selectedEntity.name}` : 'nobody on the map' }}
+            <span aria-hidden="true">▾</span>
           </button>
-        </div>
+        </header>
 
-        <dl v-if="store.route" class="route">
-          <dt>hexes left</dt>
-          <dd>{{ store.plannedHexes.length }}</dd>
+        <div v-show="!entitiesCollapsed" class="body">
+          <dl>
+            <dt>turn</dt>
+            <dd>
+              {{ store.turn }}
+              <span class="dim">{{ store.clock.phase }} {{ store.clock.index + 1 }}/4</span>
+            </dd>
 
-          <dt>travel</dt>
-          <dd>{{ store.route.km }} km</dd>
+            <dt>standing</dt>
+            <dd>{{ store.start ?? '—' }}</dd>
 
-          <dt>turns</dt>
-          <dd>~{{ store.routeTurns }}</dd>
+            <dt>headed</dt>
+            <dd>{{ store.goal ?? '—' }}</dd>
+          </dl>
 
-          <dt>flat</dt>
-          <dd class="dim">{{ straightLine }}</dd>
-        </dl>
+          <div class="control stack">
+            <div class="row">
+              <span>entities</span>
+              <span class="value">{{ store.entities.length }}</span>
+            </div>
 
-        <ol v-if="store.legs.length" class="legs">
-          <li v-for="(leg, index) in store.legs" :key="`${index}:${leg.to}`">
-            <span class="dim">{{ index + 1 }}</span>
-            <span>{{ leg.to }}</span>
-            <span class="value">{{ leg.km }} km · ~{{ leg.turns }}t</span>
+            <ul class="entities">
+              <li v-for="one in walking" :key="one.id">
+                <button
+                  type="button"
+                  :class="{ here: one.id === store.selectedId }"
+                  :title="`give ${one.name} the orders`"
+                  @click="store.selectEntity(one.id)"
+                >
+                  <span class="pip" :style="{ background: one.color }" />
+                  <span>{{ one.name }}</span>
+                  <span class="dim">{{ one.kind }}</span>
+                  <span class="value">{{ one.pacePerTurn }}/turn</span>
+                </button>
+                <ul v-if="store.ridersOf(one.id).length" class="riders">
+                  <li v-for="rider in store.ridersOf(one.id)" :key="rider.id">
+                    <button
+                      type="button"
+                      :class="{ here: rider.id === store.selectedId }"
+                      :title="
+                        store.atSea(rider.id)
+                          ? `${rider.name} is aboard ${one.name} at sea and cannot be ordered off`
+                          : `${rider.name} rides in ${one.name}; an order takes it out`
+                      "
+                      @click="store.selectEntity(rider.id)"
+                    >
+                      <span class="pip" :style="{ background: rider.color }" />
+                      <span>{{ rider.name }}</span>
+                      <span class="dim">{{ store.atSea(rider.id) ? 'at sea' : 'riding' }}</span>
+                      <span class="value">{{ one.pacePerTurn }}/turn</span>
+                    </button>
+                  </li>
+                </ul>
+              </li>
+            </ul>
+
+            <div class="row">
+              <select v-model="addKind">
+                <option value="party">party</option>
+                <option value="caravan">caravan</option>
+                <option value="npc">npc</option>
+                <option value="ship">ship</option>
+              </select>
+              <button type="button" @click="store.addEntity(undefined, addKind, 'player')">
+                add
+              </button>
+            </div>
             <button
               type="button"
-              class="drop"
-              :title="`drop the stop at ${leg.to}`"
-              @click="store.removeWaypoint(index)"
+              :disabled="!store.selectedEntity"
+              @click="store.removeEntity(store.selectedId)"
             >
-              ×
-            </button>
-          </li>
-        </ol>
-
-        <label class="control">
-          <input v-model="store.allowWater" type="checkbox" />
-          <span>allow water crossings</span>
-        </label>
-
-        <div v-if="store.selectedEntity" class="control stack">
-          <div class="row">
-            <span>pace</span>
-            <span class="value">{{ store.selectedEntity.pacePerTurn }} hex a turn</span>
-          </div>
-          <input
-            :value="store.selectedEntity.pacePerTurn"
-            type="range"
-            :min="PACE_LIMITS.min"
-            :max="PACE_LIMITS.max"
-            :step="PACE_LIMITS.step"
-            @input="onPace"
-          />
-          <button type="button" :disabled="!store.goal" @click="store.clear">
-            call off the order
-          </button>
-          <button
-            type="button"
-            :disabled="!store.start"
-            @click="store.queueAction(store.selectedId, { kind: 'camp' })"
-          >
-            make camp this turn
-          </button>
-        </div>
-
-        <label class="control">
-          <input v-model="store.fog" type="checkbox" />
-          <span>fog of war</span>
-        </label>
-
-        <label class="control">
-          <input v-model="store.showSight" type="checkbox" />
-          <span>show the sight field</span>
-        </label>
-
-        <label class="control">
-          <input v-model="store.showHistory" type="checkbox" />
-          <span>show full path history</span>
-        </label>
-
-        <label class="control">
-          <input v-model="store.showAllPaths" type="checkbox" />
-          <span>show all entities paths</span>
-        </label>
-
-        <label class="control">
-          <input v-model="store.dmView" type="checkbox" />
-          <span>see what the DM sees</span>
-        </label>
-
-        <div v-if="store.fog || store.showSight" class="control stack">
-          <div class="row">
-            <span>sight by daylight</span>
-            <span class="value">{{ store.sight }}</span>
-          </div>
-          <input
-            :value="store.sight"
-            type="range"
-            :min="MIN_SIGHT"
-            :max="MAX_SIGHT"
-            step="1"
-            @input="onSight"
-          />
-          <div class="row">
-            <span>seeing</span>
-            <span class="value">{{ store.reach }} hex</span>
-          </div>
-          <div v-if="store.fog" class="row">
-            <span>explored</span>
-            <span class="value">{{ store.explored.size }}</span>
-          </div>
-        </div>
-
-        <div class="control stack">
-          <div class="row">
-            <span>seed</span>
-            <span class="value">{{ store.terrain.seed }}</span>
-          </div>
-          <button type="button" @click="store.reseed">roll a new world</button>
-
-          <div class="row">
-            <span>world size</span>
-            <span class="value">{{ store.worldRadius }} hex</span>
-          </div>
-          <div class="sizes">
-            <button
-              v-for="size in worldSizes"
-              :key="size"
-              type="button"
-              :class="{ here: store.worldSize === size }"
-              @click="store.setWorldSize(size)"
-            >
-              {{ size }}
+              {{
+                store.selectedEntity ? `remove ${store.selectedEntity.name}` : 'nobody on the map'
+              }}
             </button>
           </div>
 
-          <div class="row">
-            <span>landmass size</span>
-            <span class="value">{{ store.terrain.scale }}</span>
-          </div>
-          <input
-            :value="store.terrain.scale"
-            type="range"
-            :min="TERRAIN_LIMITS.scale.min"
-            :max="TERRAIN_LIMITS.scale.max"
-            :step="TERRAIN_LIMITS.scale.step"
-            @input="onTerrain('scale', $event)"
-          />
+          <dl v-if="store.route" class="route">
+            <dt>hexes left</dt>
+            <dd>{{ store.plannedHexes.length }}</dd>
 
-          <div class="row">
-            <span>sea level</span>
-            <span class="value">{{ store.terrain.seaLevel.toFixed(2) }}</span>
-          </div>
-          <input
-            :value="store.terrain.seaLevel"
-            type="range"
-            :min="TERRAIN_LIMITS.seaLevel.min"
-            :max="TERRAIN_LIMITS.seaLevel.max"
-            :step="TERRAIN_LIMITS.seaLevel.step"
-            @input="onTerrain('seaLevel', $event)"
-          />
+            <dt>travel</dt>
+            <dd>
+              {{ store.route.km }} km
+              <span v-if="store.routeBySea" class="dim">by sea</span>
+            </dd>
 
-          <div class="row">
-            <span>relief</span>
-            <span class="value">{{ store.terrain.relief.toFixed(1) }}</span>
-          </div>
-          <input
-            :value="store.terrain.relief"
-            type="range"
-            :min="TERRAIN_LIMITS.relief.min"
-            :max="TERRAIN_LIMITS.relief.max"
-            :step="TERRAIN_LIMITS.relief.step"
-            @input="onTerrain('relief', $event)"
-          />
-        </div>
+            <dt>turns</dt>
+            <dd>~{{ store.routeTurns }}</dd>
 
-        <div v-if="store.journey.length" class="control stack">
-          <div class="row">
-            <span>adventure log</span>
-            <span class="value">{{ store.travelledKm }} km</span>
-          </div>
-          <div class="row">
-            <span>hexes walked</span>
-            <span class="value">{{ store.hexesWalked }}</span>
-          </div>
+            <dt>flat</dt>
+            <dd class="dim">{{ straightLine }}</dd>
+          </dl>
 
-          <ol class="journey">
-            <li v-for="row in recentTurns" :key="row.turn">
+          <ol v-if="store.legs.length" class="legs">
+            <li v-for="(leg, index) in store.legs" :key="`${index}:${leg.to}`">
+              <span class="dim">{{ index + 1 }}</span>
+              <span>{{ leg.to }}</span>
+              <span class="value">{{ leg.km }} km · ~{{ leg.turns }}t</span>
               <button
                 type="button"
-                :class="{ here: row.turn === store.turn - 1, ahead: !row.spent }"
-                :title="`put the crawl back as it stood at the end of turn ${row.turn}`"
-                @click="store.goToTurn(row.turn + 1)"
+                class="drop"
+                :title="`drop the stop at ${leg.to}`"
+                @click="store.removeWaypoint(index)"
               >
-                <span class="dim">{{ row.turn }}</span>
-                <span>{{ row.hex }}</span>
-                <span class="dim">{{ row.terrain }}</span>
-                <span class="value">{{ row.entered === 0 ? row.kind : `${row.entered} hex` }}</span>
+                ×
               </button>
             </li>
           </ol>
-          <p v-if="olderTurns" class="dim">and {{ olderTurns }} earlier</p>
 
-          <button type="button" @click="store.clearHistory">clear the history</button>
+          <div v-if="store.selectedEntity" class="control stack">
+            <div class="row">
+              <span>pace</span>
+              <span class="value">{{ store.selectedEntity.pacePerTurn }} hex a turn</span>
+            </div>
+            <input
+              :value="store.selectedEntity.pacePerTurn"
+              type="range"
+              :min="PACE_LIMITS.min"
+              :max="PACE_LIMITS.max"
+              :step="PACE_LIMITS.step"
+              @input="onPace"
+            />
+            <button
+              type="button"
+              :disabled="!store.goal || store.atSea(store.selectedId)"
+              :title="store.atSea(store.selectedId) ? 'no orders for a rider at sea' : undefined"
+              @click="store.clear"
+            >
+              call off the order
+            </button>
+            <button
+              type="button"
+              :disabled="!store.start"
+              @click="store.queueAction(store.selectedId, { kind: 'camp' })"
+            >
+              make camp this turn
+            </button>
+          </div>
+
+          <label class="control">
+            <input v-model="store.showHistory" type="checkbox" />
+            <span>show full path history</span>
+          </label>
+
+          <label class="control">
+            <input v-model="store.showAllPaths" type="checkbox" />
+            <span>show all entities paths</span>
+          </label>
+
+          <div v-if="store.journey.length" class="control stack">
+            <div class="row">
+              <span>adventure log</span>
+              <span class="value">{{ store.travelledKm }} km</span>
+            </div>
+            <div class="row">
+              <span>hexes walked</span>
+              <span class="value">{{ store.hexesWalked }}</span>
+            </div>
+
+            <ol class="journey">
+              <li v-for="row in recentTurns" :key="row.turn">
+                <button
+                  type="button"
+                  :class="{ here: row.turn === store.turn - 1, ahead: !row.spent }"
+                  :title="`put the crawl back as it stood at the end of turn ${row.turn}`"
+                  @click="store.goToTurn(row.turn + 1)"
+                >
+                  <span class="dim">{{ row.turn }}</span>
+                  <span>{{ row.hex }}</span>
+                  <span class="dim">{{ row.terrain }}</span>
+                  <span class="value">{{
+                    row.entered === 0 ? row.kind : `${row.entered} hex`
+                  }}</span>
+                </button>
+              </li>
+            </ol>
+            <p v-if="olderTurns" class="dim">and {{ olderTurns }} earlier</p>
+
+            <button type="button" @click="store.clearHistory">clear the history</button>
+          </div>
+
+          <p>{{ hint }}</p>
         </div>
-
-        <p>{{ hint }}</p>
-        <p class="dim">drag to pan · wheel to zoom · Q / E to rotate</p>
-      </div>
-    </aside>
+      </aside>
+    </div>
   </main>
 </template>
 
@@ -358,14 +429,24 @@ main {
   touch-action: none;
 }
 
-/* The panel outgrew the viewport once the terrain knobs landed. It scrolls
-   inside itself rather than taking the page with it, which costs the drag-through
-   it used to have: a scroll container has to receive the pointer. */
-aside {
+/* The strip the panels sit in lets the pointer through to the map; only the
+   panels themselves take it. */
+.panels {
   position: absolute;
   top: 1rem;
   left: 1rem;
-  max-height: calc(100% - 2rem);
+  display: flex;
+  align-items: flex-start;
+  gap: 0.75rem;
+  height: calc(100% - 2rem);
+  pointer-events: none;
+}
+
+/* A panel outgrew the viewport once the terrain knobs landed. It scrolls
+   inside itself rather than taking the page with it, which costs the drag-through
+   it used to have: a scroll container has to receive the pointer. */
+aside:where(.panel) {
+  max-height: 100%;
   min-width: 13rem;
   max-width: min(17rem, calc(100vw - 2rem));
   padding: 0.75rem 1rem;
@@ -376,6 +457,7 @@ aside {
   overscroll-behavior: contain;
   scrollbar-width: thin;
   scrollbar-color: var(--line) transparent;
+  pointer-events: auto;
 }
 
 .journey {
@@ -456,6 +538,13 @@ aside {
   cursor: pointer;
 }
 
+.entities .riders {
+  margin: 0 0 0 0.9rem;
+  padding: 0 0 0 0.35rem;
+  border-left: 1px solid var(--line);
+  list-style: none;
+}
+
 .entities li button:hover {
   background: color-mix(in srgb, var(--line) 45%, transparent);
 }
@@ -521,7 +610,7 @@ h1 {
 
 /* Collapsed the panel is one row: no scroller, no width to speak of, and the
    map gets the pointer everywhere the row is not. */
-aside.collapsed {
+aside:where(.panel).collapsed {
   min-width: 0;
   max-height: none;
   overflow: visible;
@@ -546,7 +635,7 @@ aside.collapsed {
   transition: transform 150ms ease;
 }
 
-aside.collapsed .toggle span {
+aside:where(.panel).collapsed .toggle span {
   transform: rotate(-90deg);
 }
 
@@ -627,7 +716,7 @@ p {
   margin: 0.1rem 0;
 }
 
-button {
+:where(.panel) button {
   width: 100%;
   padding: 0.35rem 0.6rem;
   border: 1px solid var(--line);
@@ -639,22 +728,24 @@ button {
   cursor: pointer;
 }
 
-button:hover:not(:disabled) {
+:where(.panel) button:hover:not(:disabled) {
   border-color: #7aa2c8;
 }
 
-button:disabled {
+:where(.panel) button:disabled {
   color: var(--ink-dim);
   cursor: default;
 }
 
-/* Room is the scarce thing on a phone: the panel gives the map its corner back
-   and the dial shrinks rather than straddling the whole width. */
+/* Room is the scarce thing on a phone: the panels stack in the corner, only
+   one open at a time, and the dial shrinks rather than straddling the width. */
 @media (max-width: 720px) {
-  aside {
+  .panels {
     top: 0.5rem;
     left: 0.5rem;
-    max-height: calc(100% - 7rem);
+    flex-direction: column;
+    gap: 0.5rem;
+    height: calc(100% - 7rem);
   }
 }
 </style>

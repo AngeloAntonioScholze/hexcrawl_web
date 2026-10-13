@@ -1,6 +1,7 @@
 import type { Database } from '@sqlite.org/sqlite-wasm'
 import type { Action, ActionKind, ActionRecord } from '../entities/action'
 import type { Entity, EntityKind, EntityState, Owner } from '../entities/entity'
+import type { HexEvent, HexLocation } from '../hex/content'
 import type { HexKey } from '../hex/coords'
 import type { Origin, TerrainControls } from '../stores/hexMap'
 
@@ -29,7 +30,6 @@ export interface MapSnapshot {
   terrain: TerrainControls
   /** How far the world runs from the middle, in hexes. */
   worldRadius: number
-  allowWater: boolean
   fog: boolean
   showSight: boolean
   showHistory: boolean
@@ -45,13 +45,17 @@ export interface MapSnapshot {
   states: readonly SavedState[]
   /** Orders given but not yet spent. */
   queue: readonly SavedAction[]
+  notes: readonly { hex: HexKey; text: string }[]
+  /** Listed hex by hex, each hex's in the order they were added. */
+  events: readonly ({ hex: HexKey } & HexEvent)[]
+  locations: readonly ({ hex: HexKey } & HexLocation)[]
 }
 
 const SAVE_MAP = `
   INSERT OR REPLACE INTO map
-    (id, seed, scale, sea_level, relief, world_radius, allow_water, fog, show_sight,
+    (id, seed, scale, sea_level, relief, world_radius, fog, show_sight,
      show_history, dm_view, turn, selected_id)
-  VALUES (1, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+  VALUES (1, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
 `
 
 const flag = (value: boolean): number => (value ? 1 : 0)
@@ -81,7 +85,6 @@ export function saveSnapshot(db: Database, snapshot: MapSnapshot): void {
         snapshot.terrain.seaLevel,
         snapshot.terrain.relief,
         snapshot.worldRadius,
-        flag(snapshot.allowWater),
         flag(snapshot.fog),
         flag(snapshot.showSight),
         flag(snapshot.showHistory),
@@ -162,7 +165,7 @@ export function saveSnapshot(db: Database, snapshot: MapSnapshot): void {
 
     db.exec('DELETE FROM entity_turn')
     const state = db.prepare(
-      'INSERT INTO entity_turn (turn, entity_id, hex, carry, pending, waypoints) VALUES (?,?,?,?,?,?)',
+      'INSERT INTO entity_turn (turn, entity_id, hex, carry, pending, waypoints, riding) VALUES (?,?,?,?,?,?,?)',
     )
     try {
       for (const row of snapshot.states) {
@@ -174,6 +177,7 @@ export function saveSnapshot(db: Database, snapshot: MapSnapshot): void {
             row.carry,
             joinHexes(row.pending),
             joinHexes(row.waypoints),
+            row.riding,
           ])
           .stepReset()
       }
@@ -199,6 +203,38 @@ export function saveSnapshot(db: Database, snapshot: MapSnapshot): void {
       }
     } finally {
       queued.finalize()
+    }
+
+    db.exec('DELETE FROM hex_note')
+    const note = db.prepare('INSERT INTO hex_note (hex, text) VALUES (?, ?)')
+    try {
+      for (const one of snapshot.notes) note.bind([one.hex, one.text]).stepReset()
+    } finally {
+      note.finalize()
+    }
+
+    db.exec('DELETE FROM hex_event')
+    const event = db.prepare(
+      'INSERT INTO hex_event (id, hex, ord, title, description) VALUES (?, ?, ?, ?, ?)',
+    )
+    try {
+      snapshot.events.forEach((one, index) => {
+        event.bind([one.id, one.hex, index, one.title, one.description]).stepReset()
+      })
+    } finally {
+      event.finalize()
+    }
+
+    db.exec('DELETE FROM hex_location')
+    const location = db.prepare(
+      'INSERT INTO hex_location (id, hex, ord, name, kind, description) VALUES (?, ?, ?, ?, ?, ?)',
+    )
+    try {
+      snapshot.locations.forEach((one, index) => {
+        location.bind([one.id, one.hex, index, one.name, one.kind, one.description]).stepReset()
+      })
+    } finally {
+      location.finalize()
     }
   })
 }
@@ -226,7 +262,6 @@ export function loadSnapshot(db: Database): MapSnapshot | null {
       relief: Number(row.relief),
     },
     worldRadius: Number(row.world_radius),
-    allowWater: Number(row.allow_water) === 1,
     fog: Number(row.fog) === 1,
     showSight: Number(row.show_sight) === 1,
     showHistory: Number(row.show_history) === 1,
@@ -256,6 +291,7 @@ export function loadSnapshot(db: Database): MapSnapshot | null {
       carry: Number(one.carry),
       pending: splitHexes(one.pending),
       waypoints: splitHexes(one.waypoints),
+      riding: typeof one.riding === 'string' ? one.riding : null,
     })),
     queue: db.selectObjects('SELECT * FROM queued_action').map((one) => {
       const kind = String(one.kind) as ActionKind
@@ -265,5 +301,22 @@ export function loadSnapshot(db: Database): MapSnapshot | null {
           : { kind: kind as 'wait' | 'camp' }
       return { entityId: String(one.entity_id), action }
     }),
+    notes: db.selectObjects('SELECT * FROM hex_note').map((one) => ({
+      hex: String(one.hex) as HexKey,
+      text: String(one.text),
+    })),
+    events: db.selectObjects('SELECT * FROM hex_event ORDER BY ord').map((one) => ({
+      hex: String(one.hex) as HexKey,
+      id: String(one.id),
+      title: String(one.title),
+      description: String(one.description),
+    })),
+    locations: db.selectObjects('SELECT * FROM hex_location ORDER BY ord').map((one) => ({
+      hex: String(one.hex) as HexKey,
+      id: String(one.id),
+      name: String(one.name),
+      kind: String(one.kind),
+      description: String(one.description),
+    })),
   }
 }

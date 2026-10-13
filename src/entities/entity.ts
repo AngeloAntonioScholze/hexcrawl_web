@@ -1,6 +1,7 @@
 import type { HexKey } from '../hex/coords'
+import type { Movement } from '../terrain/travel'
 
-export type EntityKind = 'party' | 'caravan' | 'npc'
+export type EntityKind = 'party' | 'caravan' | 'npc' | 'ship'
 
 /** Who gives it its orders. The DM's own entities are also the hidden ones. */
 export type Owner = 'player' | 'dm'
@@ -32,6 +33,8 @@ export interface EntityState {
   pending: readonly HexKey[]
   /** The leg ends still ahead on that route, in the order they are reached. */
   waypoints: readonly HexKey[]
+  /** The carrier it is travelling inside, which does its walking for it. */
+  riding: string | null
 }
 
 // Enough to tell a handful of entities apart on the map and in the list; it
@@ -50,9 +53,27 @@ export const KIND_DEFAULTS: Readonly<Record<EntityKind, { pacePerTurn: number; s
   party: { pacePerTurn: 1, sight: 5 },
   caravan: { pacePerTurn: 0.5, sight: 4 },
   npc: { pacePerTurn: 1, sight: 4 },
+  ship: { pacePerTurn: 3, sight: 7 },
 }
 
-export const idleState = (): EntityState => ({ at: null, carry: 0, pending: [], waypoints: [] })
+/** Which ground each kind can cross; fixed by the kind, not edited per entity. */
+export const KIND_MOVEMENT: Readonly<Record<EntityKind, Movement>> = {
+  party: 'land',
+  caravan: 'land',
+  npc: 'land',
+  ship: 'sea',
+}
+
+/** Kinds that carry riders. A carrier never rides another, so nesting never arises. */
+export const isCarrier = (kind: EntityKind): boolean => kind === 'caravan' || kind === 'ship'
+
+export const idleState = (): EntityState => ({
+  at: null,
+  carry: 0,
+  pending: [],
+  waypoints: [],
+  riding: null,
+})
 
 export function newEntity(
   name: string,

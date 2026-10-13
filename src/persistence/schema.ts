@@ -112,6 +112,35 @@ const MIGRATIONS: readonly string[] = [
   ALTER TABLE entity_turn ADD COLUMN waypoints TEXT NOT NULL DEFAULT '';
   ALTER TABLE queued_action ADD COLUMN waypoints TEXT NOT NULL DEFAULT '';
   `,
+  `
+  ALTER TABLE entity_turn ADD COLUMN riding TEXT;
+  `,
+  `
+  CREATE TABLE hex_note (
+    hex TEXT PRIMARY KEY,
+    text TEXT NOT NULL
+  ) WITHOUT ROWID;
+
+  CREATE TABLE hex_event (
+    id TEXT PRIMARY KEY,
+    hex TEXT NOT NULL,
+    ord INTEGER NOT NULL,
+    title TEXT NOT NULL,
+    description TEXT NOT NULL
+  );
+
+  CREATE TABLE hex_location (
+    id TEXT PRIMARY KEY,
+    hex TEXT NOT NULL,
+    ord INTEGER NOT NULL,
+    name TEXT NOT NULL,
+    kind TEXT NOT NULL,
+    description TEXT NOT NULL
+  );
+  `,
+  `
+  ALTER TABLE map DROP COLUMN allow_water;
+  `,
 ]
 
 export const SCHEMA_VERSION = MIGRATIONS.length

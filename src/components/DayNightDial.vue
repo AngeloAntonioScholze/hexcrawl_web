@@ -102,6 +102,7 @@ const dome = [
     <div class="face">
       <div class="row">
         <button
+          v-if="store.dmView"
           type="button"
           class="step"
           title="take the last turn back"
@@ -114,7 +115,13 @@ const dome = [
 
         <strong>{{ store.clock.phase }} {{ store.clock.day }}</strong>
 
-        <button type="button" class="step" title="let a turn pass" @click="store.advanceTurn">
+        <button
+          v-if="store.dmView"
+          type="button"
+          class="step"
+          title="let a turn pass"
+          @click="store.advanceTurn"
+        >
           <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M7 4 L20 12 L7 20 Z" /></svg>
           <span class="sr">let the next turn pass</span>
         </button>

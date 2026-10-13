@@ -101,6 +101,36 @@ describe('giving orders', () => {
   })
 })
 
+describe('clicking the map', () => {
+  it('selects the hex in DM view and gives no order', () => {
+    const store = setup()
+
+    store.click({ q: 2, r: 0 })
+    expect(store.selectedHex).toBe('2,0')
+    expect(store.start).toBeNull()
+    expect(store.queue.size).toBe(0)
+  })
+
+  it('routes as before in player view and selects nothing', () => {
+    const store = setup()
+    store.dmView = false
+
+    store.click({ q: 0, r: 0 })
+    store.click({ q: 2, r: 0 })
+    expect(store.start).toBe('0,0')
+    expect(store.goal).toBe('2,0')
+    expect(store.selectedHex).toBeNull()
+  })
+
+  it('drops the selection when the DM view is switched off', () => {
+    const store = setup()
+    store.click({ q: 1, r: 1 })
+
+    store.dmView = false
+    expect(store.selectedHex).toBeNull()
+  })
+})
+
 describe('the clock', () => {
   it('turns the phase over after four turns', () => {
     const store = setup()
@@ -501,5 +531,373 @@ describe('chained orders', () => {
     store.select({ q: 0, r: 2 }, true)
 
     expect(store.legs.map((leg) => leg.to)).toEqual(['2,0', '2,2', '0,2'])
+  })
+})
+
+describe('riding in a caravan', () => {
+  /** A caravan standing at the middle, and the party two hexes east of it. */
+  const withCaravan = (store: Store): { party: string; caravan: string } => {
+    const caravan = store.addEntity('the caravan', 'caravan')
+    const party = store.entities[0].id
+
+    store.selectEntity(caravan.id)
+    store.select({ q: 0, r: 0 })
+    store.selectEntity(party)
+    store.select({ q: 2, r: 0 })
+
+    return { party, caravan: caravan.id }
+  }
+
+  /** Walks the party the two hexes onto the caravan, which is how it climbs in. */
+  const walkAboard = (store: Store, party: string): void => {
+    store.selectEntity(party)
+    store.select({ q: 0, r: 0 })
+    store.advanceTurn()
+    store.advanceTurn()
+  }
+
+  it('climbs into a caravan it walks onto', () => {
+    const store = setup()
+    const { party, caravan } = withCaravan(store)
+
+    walkAboard(store, party)
+
+    expect(store.carrierOf(party)).toBe(caravan)
+    expect(store.ridersOf(caravan).map((one) => one.id)).toEqual([party])
+  })
+
+  it('stays on its own feet a hex short of the caravan', () => {
+    const store = setup()
+    const { party } = withCaravan(store)
+
+    store.selectEntity(party)
+    store.select({ q: 1, r: 0 })
+    store.advanceTurn()
+
+    expect(store.carrierOf(party)).toBeNull()
+    expect(store.riders.size).toBe(0)
+  })
+
+  it('goes where the caravan goes, at the caravan pace', () => {
+    const store = setup()
+    const { party, caravan } = withCaravan(store)
+    walkAboard(store, party)
+
+    store.selectEntity(caravan)
+    store.select({ q: 2, r: 0 })
+    store.advanceTurn()
+    store.advanceTurn()
+
+    store.selectEntity(party)
+    expect(store.start).toBe('1,0')
+    expect(store.carrierOf(party)).toBe(caravan)
+  })
+
+  it("reads the caravan's route, and the caravan's pace, from the rider", () => {
+    const store = setup()
+    const { party, caravan } = withCaravan(store)
+    walkAboard(store, party)
+
+    store.selectEntity(caravan)
+    store.select({ q: 2, r: 0 })
+    store.selectEntity(party)
+
+    expect(store.goal).toBe('2,0')
+    expect(store.legs.map((leg) => leg.to)).toEqual(['2,0'])
+    // Two hexes at half a hex a turn: the rider is carried, not walking.
+    expect(store.routeTurns).toBe(4)
+  })
+
+  it('walks a route of its own the moment it is ordered away', () => {
+    const store = setup()
+    const { party, caravan } = withCaravan(store)
+    walkAboard(store, party)
+
+    store.selectEntity(caravan)
+    store.select({ q: 2, r: 0 })
+    store.selectEntity(party)
+    store.select({ q: 0, r: 2 })
+
+    expect(store.goal).toBe('0,2')
+
+    store.advanceTurn()
+
+    expect(store.carrierOf(party)).toBeNull()
+    expect(store.start).toBe('0,1')
+
+    store.selectEntity(caravan)
+    expect(store.start).toBe('0,0')
+    expect(store.goal).toBe('2,0')
+  })
+
+  it('un-groups on a rewind to before it climbed in', () => {
+    const store = setup()
+    const { party, caravan } = withCaravan(store)
+    walkAboard(store, party)
+
+    store.goToTurn(1)
+
+    expect(store.carrierOf(party)).toBeNull()
+    expect(store.ridersOf(caravan)).toEqual([])
+  })
+
+  it('leaves its riders standing free when the caravan is taken off the map', () => {
+    const store = setup()
+    const { party, caravan } = withCaravan(store)
+    walkAboard(store, party)
+
+    store.removeEntity(caravan)
+
+    expect(store.carrierOf(party)).toBeNull()
+    expect(store.riders.size).toBe(0)
+
+    store.selectEntity(party)
+    expect(store.start).toBe('0,0')
+  })
+})
+
+describe('riding a ship', () => {
+  /** Land west of the meridian, open sea east of it: the 0,0 column is the coast. */
+  const shore = (): Map<HexKey, TerrainTile> => {
+    const tiles = flatField(6)
+    for (const [key, one] of tiles) {
+      if (one.hex.q > 0) tiles.set(key, { ...one, height: -1, level: 0, elevation: 0 })
+    }
+    return tiles
+  }
+
+  /** A DM's ship at the coast, and the party walked aboard it with a sight of one. */
+  const aboard = (store: Store): { party: string; ship: string } => {
+    store.setTiles(shore())
+    const ship = store.addEntity('the ship', 'ship', 'dm')
+    const party = store.entities[0].id
+    store.setEntitySight(party, 1)
+
+    store.selectEntity(ship.id)
+    store.select({ q: 0, r: 0 })
+    store.selectEntity(party)
+    store.select({ q: -2, r: 0 })
+    store.select({ q: 0, r: 0 })
+    store.advanceTurn()
+    store.advanceTurn()
+
+    return { party, ship: ship.id }
+  }
+
+  const sail = (store: Store, ship: string): void => {
+    store.selectEntity(ship)
+    store.select({ q: 3, r: 0 })
+    store.advanceTurn()
+  }
+
+  it('boards at the coast and is carried three hexes of sea in a turn', () => {
+    const store = useHexMapStore()
+    const { party, ship } = aboard(store)
+    expect(store.carrierOf(party)).toBe(ship)
+
+    sail(store, ship)
+
+    store.selectEntity(party)
+    expect(store.start).toBe('3,0')
+    expect(store.carrierOf(party)).toBe(ship)
+  })
+
+  it('takes no order from a rider at sea', () => {
+    const store = useHexMapStore()
+    const { party, ship } = aboard(store)
+    sail(store, ship)
+
+    store.selectEntity(party)
+    store.select({ q: 3, r: 1 })
+    store.select({ q: 3, r: 0 })
+
+    expect(store.queue.has(party)).toBe(false)
+  })
+
+  it('lets a rider off at the coast', () => {
+    const store = useHexMapStore()
+    const { party } = aboard(store)
+
+    store.selectEntity(party)
+    store.select({ q: -1, r: 0 })
+    store.advanceTurn()
+
+    expect(store.carrierOf(party)).toBeNull()
+    expect(store.start).toBe('-1,0')
+  })
+
+  it("lets a hidden ship's riders see from every hex it crosses", () => {
+    const store = useHexMapStore()
+    const { ship } = aboard(store)
+    store.dmView = false
+
+    sail(store, ship)
+
+    // Only the first sea hex has 1,1 in a sight of one; 4,0 only the last.
+    expect(store.explored.has('1,1')).toBe(true)
+    expect(store.explored.has('4,0')).toBe(true)
+  })
+
+  it('puts a ship down only on water or coast, and nobody else on water', () => {
+    const store = useHexMapStore()
+    store.setTiles(shore())
+    const party = store.entities[0].id
+    const ship = store.addEntity('the ship', 'ship').id
+
+    store.selectEntity(ship)
+    store.select({ q: -2, r: 0 })
+    expect(store.start).toBeNull()
+    store.select({ q: 0, r: 0 })
+    expect(store.start).toBe('0,0')
+
+    store.selectEntity(party)
+    store.select({ q: 2, r: 0 })
+    expect(store.start).toBeNull()
+    store.select({ q: 0, r: 1 })
+    expect(store.start).toBe('0,1')
+
+    store.selectEntity(store.addEntity('the other ship', 'ship').id)
+    store.select({ q: 3, r: 0 })
+    expect(store.start).toBe('3,0')
+  })
+
+  it('draws a ship as a boat, and its route as by sea', () => {
+    const store = useHexMapStore()
+    const { ship } = aboard(store)
+    expect(store.tokens.find((one) => one.id === ship)?.shape).toBe('boat')
+
+    store.selectEntity(ship)
+    store.select({ q: 3, r: 0 })
+    expect(store.routeBySea).toBe(true)
+  })
+
+  it('says which riders are at sea', () => {
+    const store = useHexMapStore()
+    const { party, ship } = aboard(store)
+    expect(store.atSea(party)).toBe(false)
+
+    sail(store, ship)
+    expect(store.atSea(party)).toBe(true)
+    expect(store.atSea(ship)).toBe(false)
+  })
+
+  it('winds back to the shore, and off the ship, exactly', () => {
+    const store = useHexMapStore()
+    const { party, ship } = aboard(store)
+    sail(store, ship)
+
+    store.goToTurn(2)
+    store.selectEntity(party)
+    expect(store.start).toBe('0,0')
+    expect(store.carrierOf(party)).toBe(ship)
+
+    store.goToTurn(1)
+    expect(store.start).toBe('-1,0')
+    expect(store.carrierOf(party)).toBeNull()
+  })
+})
+
+describe('what a hex holds', () => {
+  const here = '1,0' as HexKey
+
+  it('keeps a note and forgets one written blank', () => {
+    const store = setup()
+
+    store.setNote(here, 'an old shrine')
+    expect(store.notes.get(here)).toBe('an old shrine')
+
+    store.setNote(here, '   ')
+    expect(store.notes.has(here)).toBe(false)
+  })
+
+  it('adds and removes events in the order they were written', () => {
+    const store = setup()
+
+    const first = store.addEvent(here, { title: 'ambush', description: 'goblins' })
+    const second = store.addEvent(here, { title: 'storm', description: '' })
+    expect(store.events.get(here)?.map((one) => one.id)).toEqual([first, second])
+
+    store.removeEvent(here, first)
+    expect(store.events.get(here)?.map((one) => one.title)).toEqual(['storm'])
+
+    store.removeEvent(here, second)
+    expect(store.events.has(here)).toBe(false)
+  })
+
+  it('adds and removes locations, dropping the hex once it holds none', () => {
+    const store = setup()
+
+    const id = store.addLocation(here, { name: 'Oakvale', kind: 'village', description: '' })
+    expect(store.locations.get(here)).toEqual([
+      { id, name: 'Oakvale', kind: 'village', description: '' },
+    ])
+
+    store.removeLocation(here, id)
+    expect(store.locations.has(here)).toBe(false)
+  })
+
+  it('wipes everything written on the map when the world changes', () => {
+    const store = setup()
+    store.setNote(here, 'an old shrine')
+    store.addEvent(here, { title: 'ambush', description: '' })
+    store.addLocation(here, { name: 'Oakvale', kind: 'village', description: '' })
+
+    store.setTerrain({ seed: TERRAIN_DEFAULTS.seed + 1 })
+
+    expect(store.notes.size).toBe(0)
+    expect(store.events.size).toBe(0)
+    expect(store.locations.size).toBe(0)
+  })
+
+  it('comes back from a snapshot as it was saved, on a new world too', () => {
+    const store = setup()
+    store.setTerrain({ seed: TERRAIN_DEFAULTS.seed + 7 })
+    store.setNote(here, 'an old shrine')
+    store.addEvent(here, { title: 'ambush', description: 'goblins' })
+    store.addEvent(here, { title: 'storm', description: '' })
+    store.addLocation('0,0' as HexKey, { name: 'Oakvale', kind: 'village', description: '' })
+    const saved = store.snapshot
+
+    setActivePinia(createPinia())
+    const fresh = setup()
+    fresh.restore(saved)
+
+    expect(fresh.notes).toEqual(store.notes)
+    expect(fresh.events).toEqual(store.events)
+    expect(fresh.locations).toEqual(store.locations)
+    expect(fresh.snapshot.events).toEqual(saved.events)
+  })
+})
+
+describe('the side panels', () => {
+  it('lets all three stay open on a wide window', () => {
+    const store = useHexMapStore()
+    store.setPanelOpen('world', true, false)
+    store.setPanelOpen('entities', true, false)
+    store.setPanelOpen('details', true, false)
+    expect(store.panelsOpen).toEqual({ world: true, entities: true, details: true })
+  })
+
+  it('opening one on a narrow window collapses the others', () => {
+    const store = useHexMapStore()
+    store.setPanelOpen('world', true, true)
+    expect(store.panelsOpen).toEqual({ world: true, entities: false, details: false })
+    store.setPanelOpen('details', true, true)
+    expect(store.panelsOpen).toEqual({ world: false, entities: false, details: true })
+    store.setPanelOpen('entities', true, true)
+    expect(store.panelsOpen).toEqual({ world: false, entities: true, details: false })
+  })
+
+  it('collapsing one on a narrow window leaves the others alone', () => {
+    const store = useHexMapStore()
+    store.setPanelOpen('details', true, true)
+    store.setPanelOpen('details', false, true)
+    expect(store.panelsOpen).toEqual({ world: false, entities: false, details: false })
+  })
+
+  it('collapsing one on a wide window leaves the others open', () => {
+    const store = useHexMapStore()
+    store.setPanelOpen('entities', false, false)
+    expect(store.panelsOpen).toEqual({ world: true, entities: false, details: true })
   })
 })
