@@ -4,6 +4,7 @@ import DayNightDial from '../components/DayNightDial.vue'
 import DmToolbar from '../components/DmToolbar.vue'
 import HexCanvas from '../components/HexCanvas.vue'
 import HexDetails from '../components/HexDetails.vue'
+import MapList from '../components/MapList.vue'
 import ViewToggle from '../components/ViewToggle.vue'
 import { useUndoKeys } from '../composables/useUndoKeys'
 import type { EntityKind } from '../entities/entity'
@@ -17,11 +18,13 @@ import {
   useHexMapStore,
   type WorldSize,
 } from '../stores/hexMap'
+import { useMapLibraryStore } from '../stores/mapLibrary'
 import { RESOURCE_SPACING_LIMITS, countByOrigin } from '../terrain/resources'
 import { TERRAIN_IDS, TERRAIN_LABELS, type TerrainId } from '../terrain/terrain'
 import { KM_PER_HEX } from '../terrain/travel'
 
 const store = useHexMapStore()
+const library = useMapLibraryStore()
 useUndoKeys()
 
 /** Narrower than this and a panel would be most of the window. */
@@ -100,6 +103,11 @@ const importMap = async (event: Event): Promise<void> => {
     return
   }
   importError.value = null
+  if (library.maps.length > 0) {
+    await library.importMap(file.name, result.snapshot)
+    return
+  }
+  // Without storage there is no list to add it to, only the one map to replace.
   if (!window.confirm(`Replace the current map with ${file.name}? This cannot be undone.`)) return
   store.restore(result.snapshot)
 }
@@ -179,6 +187,7 @@ const olderTurns = computed(() => Math.max(0, store.journey.length - TURNS_SHOWN
               <span class="value">{{ store.terrain.seed }}</span>
             </div>
             <button type="button" @click="store.reseed">roll a new world</button>
+            <MapList />
             <div class="row">
               <button type="button" @click="exportMap">export map</button>
               <button type="button" @click="importInput?.click()">import map</button>

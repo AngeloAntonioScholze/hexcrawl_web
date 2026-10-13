@@ -183,7 +183,7 @@ export const WORLD_SIZES = { small: 60, large: 150, huge: 300 } as const
 
 export type WorldSize = keyof typeof WORLD_SIZES
 
-const MAX_SEED = 1_000_000
+export const MAX_SEED = 1_000_000
 
 export const MIN_SIGHT = 1
 export const MAX_SIGHT = 10

@@ -1,9 +1,12 @@
 import { watch } from 'vue'
+import { cleanName, importedName, neighbourOf, nextMapName, uniqueName } from './mapIndex'
 import type { MapSnapshot } from './mapState'
-import type { MapCommand, MapResponse } from './protocol'
-import type { useHexMapStore } from '../stores/hexMap'
+import type { MapCommand, MapResponse, MapResult, MapResults, OpenedMap } from './protocol'
+import { MAX_SEED, type useHexMapStore } from '../stores/hexMap'
+import type { useMapLibraryStore } from '../stores/mapLibrary'
 
 type HexMapStore = ReturnType<typeof useHexMapStore>
+type MapLibraryStore = ReturnType<typeof useMapLibraryStore>
 
 /** Long enough that a dragged slider writes once instead of forty times. */
 const SAVE_DELAY_MS = 300
@@ -58,16 +61,16 @@ const plain = (snapshot: MapSnapshot): MapSnapshot => ({
 })
 
 interface Pending {
-  resolve: (result: MapSnapshot | null) => void
+  resolve: (result: MapResult) => void
   reject: (error: Error) => void
 }
 
 /**
- * Hands the store back the last session and keeps writing it down from there.
- * A browser that will not give us storage loses the save, not the map: the
- * sandbox runs unsaved rather than not at all.
+ * Hands the store back the map it last had open and keeps writing it down from
+ * there. A browser that will not give us storage loses the save, not the map:
+ * the sandbox runs unsaved rather than not at all.
  */
-export async function startMapSession(store: HexMapStore): Promise<void> {
+export async function startMapSession(store: HexMapStore, library: MapLibraryStore): Promise<void> {
   const worker = new Worker(new URL('./mapWorker.ts', import.meta.url), { type: 'module' })
   const pending = new Map<number, Pending>()
   let nextId = 0
@@ -95,23 +98,35 @@ export async function startMapSession(store: HexMapStore): Promise<void> {
 
   worker.addEventListener('error', (event) => abandon(event.message || 'the map worker died'))
 
-  const request = (command: MapCommand): Promise<MapSnapshot | null> =>
+  const request = <C extends MapCommand>(command: C): Promise<MapResults[C['type']]> =>
     new Promise((resolve, reject) => {
       const id = nextId++
-      pending.set(id, { resolve, reject })
+      pending.set(id, { resolve: resolve as (result: MapResult) => void, reject })
       worker.postMessage({ ...command, id })
     })
+
+  // Taken before anything is restored over it: a new map starts from the
+  // sandbox's defaults, on a world of its own.
+  const blank = plain(store.snapshot)
 
   // A worker that answers neither way would otherwise hold the app on a blank
   // page, which is a far worse trade than losing the save.
   const timeout = setTimeout(() => abandon('the map worker did not answer'), LOAD_TIMEOUT_MS)
-  const saved = await request({ type: 'load' }).catch(complain)
+  const started = await request({ type: 'start' }).catch(complain)
   clearTimeout(timeout)
 
-  if (saved) store.restore(saved)
+  if (started) {
+    library.show(started)
+    if (started.snapshot) store.restore(started.snapshot)
+  }
+
+  // Set while another map is on its way in: anything changed on the one being
+  // left after its last save is about to be replaced, and must not land in the
+  // file the worker has already moved on to.
+  let switching = false
 
   const write = (): void => {
-    if (broken) return
+    if (broken || switching) return
     void request({ type: 'save', snapshot: plain(store.snapshot) }).catch(complain)
   }
 
@@ -134,6 +149,48 @@ export async function startMapSession(store: HexMapStore): Promise<void> {
     queued = null
     write()
   }
+
+  // The map being left gets its last edits before the worker lets go of it;
+  // restore then drops its undo history along with it.
+  const switchTo = async (command: MapCommand & { type: 'open' | 'create' }): Promise<void> => {
+    flush()
+    switching = true
+    const opened: OpenedMap = await request(command).finally(() => {
+      switching = false
+    })
+    library.show(opened)
+    store.restore(
+      opened.snapshot ?? {
+        ...blank,
+        terrain: { ...blank.terrain, seed: Math.floor(Math.random() * MAX_SEED) },
+      },
+    )
+  }
+
+  const names = (): string[] => library.maps.map((one) => one.name)
+
+  const warned =
+    <A extends unknown[]>(work: (...args: A) => Promise<void>) =>
+    (...args: A): Promise<void> =>
+      work(...args).catch((error: unknown) => console.warn('hexcrawl: the map list', error))
+
+  library.connect({
+    open: warned((mapId: string) => switchTo({ type: 'open', mapId })),
+    create: warned(() => switchTo({ type: 'create', name: nextMapName(names()), snapshot: null })),
+    importMap: warned((fileName: string, snapshot: MapSnapshot) =>
+      switchTo({ type: 'create', name: uniqueName(importedName(fileName), names()), snapshot }),
+    ),
+    rename: warned(async (mapId: string, typed: string) => {
+      const name = cleanName(typed)
+      if (name) library.show(await request({ type: 'rename', mapId, name }))
+    }),
+    remove: warned(async (mapId: string) => {
+      const fallback = neighbourOf(library.maps, mapId)
+      if (!fallback) return
+      if (mapId === library.currentId) await switchTo({ type: 'open', mapId: fallback.id })
+      library.show(await request({ type: 'delete', mapId }))
+    }),
+  })
 
   // A tab closing mid-wait would otherwise drop the last few moves. pagehide is
   // the last event a desktop browser reliably gives us and visibilitychange is
