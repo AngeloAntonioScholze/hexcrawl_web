@@ -167,6 +167,11 @@ const MIGRATIONS: readonly string[] = [
     chance REAL NOT NULL
   ) WITHOUT ROWID;
   `,
+  // Spacing had no control before the default dropped to 5, so a 10 here is
+  // the old default rather than anyone's choice.
+  `
+  UPDATE map SET resource_spacing = 5 WHERE resource_spacing = 10;
+  `,
 ]
 
 export const SCHEMA_VERSION = MIGRATIONS.length

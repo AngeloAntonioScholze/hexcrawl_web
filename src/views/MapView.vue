@@ -16,6 +16,7 @@ import {
   useHexMapStore,
   type WorldSize,
 } from '../stores/hexMap'
+import { RESOURCE_SPACING_LIMITS } from '../terrain/resources'
 import { KM_PER_HEX } from '../terrain/travel'
 
 const store = useHexMapStore()
@@ -42,6 +43,10 @@ const onSight = (event: Event): void => {
 
 const onPace = (event: Event): void => {
   store.setPace(store.selectedId, Number((event.target as HTMLInputElement).value))
+}
+
+const onSpacing = (event: Event): void => {
+  store.setResourceSpacing(Number((event.target as HTMLInputElement).value))
 }
 
 const onTerrain = (key: 'scale' | 'seaLevel' | 'relief', event: Event): void => {
@@ -221,6 +226,19 @@ const olderTurns = computed(() => Math.max(0, store.journey.length - TURNS_SHOWN
               :max="TERRAIN_LIMITS.relief.max"
               :step="TERRAIN_LIMITS.relief.step"
               @input="onTerrain('relief', $event)"
+            />
+
+            <div class="row">
+              <span>resource spacing</span>
+              <span class="value">{{ store.resourceSpacing }} hex</span>
+            </div>
+            <input
+              :value="store.resourceSpacing"
+              type="range"
+              :min="RESOURCE_SPACING_LIMITS.min"
+              :max="RESOURCE_SPACING_LIMITS.max"
+              :step="RESOURCE_SPACING_LIMITS.step"
+              @input="onSpacing"
             />
           </div>
 

@@ -2,7 +2,11 @@ import { Color3 } from '@babylonjs/core/Maths/math.color'
 import { createPinia, setActivePinia } from 'pinia'
 import { beforeEach, describe, expect, it } from 'vitest'
 import { hexKey, range, type Axial, type HexKey } from '../hex/coords'
-import { DEFAULT_RESOURCE_SPACING, defaultResourceChances } from '../terrain/resources'
+import {
+  DEFAULT_RESOURCE_SPACING,
+  defaultResourceChances,
+  RESOURCE_SPACING_LIMITS,
+} from '../terrain/resources'
 import { TERRAIN_DEFAULTS, type TerrainTile } from '../terrain/terrain'
 import { TURNS_PER_PHASE } from '../time/clock'
 import { MAX_SIGHT, MIN_SIGHT, TERRAIN_LIMITS, useHexMapStore } from './hexMap'
@@ -1109,6 +1113,9 @@ describe('resources', () => {
 
     store.setResourceSpacing(-4)
     expect(store.resourceSpacing).toBe(0)
+
+    store.setResourceSpacing(99)
+    expect(store.resourceSpacing).toBe(RESOURCE_SPACING_LIMITS.max)
   })
 
   it('wipes the resources but keeps the odds when the world changes', () => {

@@ -85,7 +85,9 @@ export type ResourceChances = Readonly<Record<TerrainId, number>>
 export const DEFAULT_RESOURCE_CHANCE = 0.05
 
 /** No two resources stand closer than this many hexes. */
-export const DEFAULT_RESOURCE_SPACING = 10
+export const DEFAULT_RESOURCE_SPACING = 5
+
+export const RESOURCE_SPACING_LIMITS = { min: 0, max: 20, step: 1 } as const
 
 export const defaultResourceChances = (): ResourceChances => ({
   deepWater: DEFAULT_RESOURCE_CHANCE,

@@ -27,6 +27,7 @@ import { fieldFromTiles, type TerrainField } from '../terrain/field'
 import { scatterResources } from '../terrain/resourceGen'
 import {
   DEFAULT_RESOURCE_SPACING,
+  RESOURCE_SPACING_LIMITS,
   defaultResourceChances,
   type Resource,
   type ResourceChances,
@@ -531,7 +532,10 @@ export const useHexMapStore = defineStore('hexMap', () => {
 
   const setResourceSpacing = (hexes: number): void => {
     if (!Number.isFinite(hexes)) return
-    resourceSpacing.value = Math.max(0, Math.round(hexes))
+    resourceSpacing.value = Math.max(
+      RESOURCE_SPACING_LIMITS.min,
+      Math.min(RESOURCE_SPACING_LIMITS.max, Math.round(hexes)),
+    )
   }
 
   /**
