@@ -353,7 +353,7 @@ const onPointerCancel = (): void => {
 }
 
 .minimap.beside {
-  right: calc(1rem + var(--details-width) + 0.75rem);
+  right: calc(1rem + var(--panel-width) + 0.75rem);
 }
 
 /* Nothing is worth covering a phone's map with; the minimap sits this one out. */

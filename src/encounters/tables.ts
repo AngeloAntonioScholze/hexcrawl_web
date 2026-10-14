@@ -156,11 +156,7 @@ export function rollFor(
   return { entry, total }
 }
 
-/** The defaults with the DM's changes laid over them, then the DM's own lines. */
-export function mergeTables(
-  defaults: readonly EncounterEntry[],
-  overrides: readonly EncounterOverride[],
-): EncounterEntry[] {
+function sortOverrides(overrides: readonly EncounterOverride[]) {
   const changes = new Map<string, EncounterChange>()
   const removed = new Set<string>()
   const added: EncounterEntry[] = []
@@ -169,7 +165,15 @@ export function mergeTables(
     else if (one.kind === 'remove') removed.add(one.id)
     else added.push(one.entry)
   }
+  return { changes, removed, added }
+}
 
+/** The defaults with the DM's changes laid over them, then the DM's own lines. */
+export function mergeTables(
+  defaults: readonly EncounterEntry[],
+  overrides: readonly EncounterOverride[],
+): EncounterEntry[] {
+  const { changes, removed, added } = sortOverrides(overrides)
   return [
     ...defaults
       .filter((one) => !removed.has(one.id))
@@ -245,4 +249,35 @@ export function resetTerrain(
     if (native.has(one.id)) return false
     return one.kind !== 'change' || one.change.terrain !== terrain
   })
+}
+
+export type EncounterStatus = 'default' | 'changed' | 'added' | 'removed'
+
+/** One line of a terrain's table as the editor shows it, struck-off defaults included. */
+export interface EncounterRow {
+  entry: EncounterEntry
+  status: EncounterStatus
+}
+
+/** A terrain's whole table across the day, each line marked by what the DM did to it. */
+export function terrainRows(
+  defaults: readonly EncounterEntry[],
+  overrides: readonly EncounterOverride[],
+  terrain: TerrainId,
+): EncounterRow[] {
+  const { changes, removed, added } = sortOverrides(overrides)
+  const rows: EncounterRow[] = []
+  for (const one of defaults) {
+    if (removed.has(one.id)) {
+      if (one.terrain === terrain) rows.push({ entry: one, status: 'removed' })
+      continue
+    }
+    const change = changes.get(one.id)
+    const entry = { ...one, ...change }
+    if (entry.terrain === terrain) rows.push({ entry, status: change ? 'changed' : 'default' })
+  }
+  for (const one of added) {
+    if (one.terrain === terrain) rows.push({ entry: one, status: 'added' })
+  }
+  return rows
 }

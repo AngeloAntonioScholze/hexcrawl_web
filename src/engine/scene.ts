@@ -44,6 +44,11 @@ export interface HexSceneOptions {
   onHover?(hex: Axial | null): void
   /** `append` is a shift-click: add the hex to the order rather than replace it. */
   onSelect?(hex: Axial | null, append: boolean): void
+  /** Whether a left-button drag works the map rather than panning it; a tap is then the stroke's alone. */
+  brushing?(): boolean
+  onStrokeStart?(hex: Axial | null): void
+  onStrokeMove?(hex: Axial | null): void
+  onStrokeEnd?(): void
   /** Where the sun or moon glows over the view; called again whenever the time or the camera moves it. */
   onGlow?(glow: SkyGlow): void
 }
@@ -166,7 +171,7 @@ export function createHexScene(canvas: HTMLCanvasElement, options: HexSceneOptio
     maxZoom: options.maxZoom,
     panBounds: bounds,
   })
-  const detachControls = attachIsoControls(canvas, iso)
+  const detachControls = attachIsoControls(canvas, iso, { brushing: options.brushing })
 
   const grid = createHexGrid(scene, options.layout, {
     capacity: options.capacity,
@@ -208,10 +213,23 @@ export function createHexScene(canvas: HTMLCanvasElement, options: HexSceneOptio
     return hexUnderPointer(grid, options.layout, pointerRay)
   }
 
+  let stroking = false
   const pointerObserver = scene.onPointerObservable.add((info) => {
-    if (info.type === PointerEventTypes.POINTERMOVE) options.onHover?.(pickHex())
-    else if (info.type === PointerEventTypes.POINTERTAP)
+    if (info.type === PointerEventTypes.POINTERMOVE) {
+      const hex = pickHex()
+      options.onHover?.(hex)
+      if (stroking) options.onStrokeMove?.(hex)
+    } else if (info.type === PointerEventTypes.POINTERDOWN) {
+      if (info.event.button !== 0 || !options.brushing?.()) return
+      stroking = true
+      options.onStrokeStart?.(pickHex())
+    } else if (info.type === PointerEventTypes.POINTERUP) {
+      if (!stroking || info.event.button !== 0) return
+      stroking = false
+      options.onStrokeEnd?.()
+    } else if (info.type === PointerEventTypes.POINTERTAP && !options.brushing?.()) {
       options.onSelect?.(pickHex(), info.event.shiftKey)
+    }
   })
 
   const redrawOnCall = <T extends object>(target: T, methods: readonly (keyof T)[]): void => {

@@ -127,6 +127,14 @@ export function isCoast(field: TerrainField, tile: TerrainTile): boolean {
   })
 }
 
+/** Where a hex sits against the sea: what a ship may reach and where its riders may step off. */
+export type Shore = 'water' | 'coast' | 'inland'
+
+export function shoreOf(field: TerrainField, tile: TerrainTile): Shore {
+  if (isWater(tile)) return 'water'
+  return isCoast(field, tile) ? 'coast' : 'inland'
+}
+
 export function canEnter(field: TerrainField, tile: TerrainTile, movement: Movement): boolean {
   const rule = MOVEMENT_RULES[movement]
   if (isWater(tile)) return rule.water

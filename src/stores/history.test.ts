@@ -119,6 +119,40 @@ describe('history', () => {
     expect(history.canUndo.value).toBe(false)
   })
 
+  it('records everything between begin and end as one step, however long it runs', () => {
+    const { count, history, tick, bump } = setup()
+    history.begin()
+    bump(1)
+    tick(500)
+    bump(2)
+    history.end()
+
+    expect(count.value).toBe(3)
+    history.undo()
+    expect(count.value).toBe(0)
+    expect(history.canUndo.value).toBe(false)
+  })
+
+  it('leaves no step for an open step that changed nothing', () => {
+    const { history } = setup()
+    history.begin()
+    history.end()
+    expect(history.canUndo.value).toBe(false)
+  })
+
+  it('will not undo or redo while a step is open', () => {
+    const { count, history, bump } = setup()
+    bump(1)
+    history.begin()
+    bump(1)
+
+    expect(history.undo()).toBe(false)
+    expect(count.value).toBe(2)
+    history.end()
+    history.undo()
+    expect(count.value).toBe(1)
+  })
+
   it('drops the oldest steps past the limit', () => {
     const { count, history, bump } = setup({ limit: 2 })
     bump(1)

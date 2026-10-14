@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import { computed, ref } from 'vue'
-import CaravanSupplies from '../components/CaravanSupplies.vue'
+import CaravanPanel from '../components/CaravanPanel.vue'
 import DayNightDial from '../components/DayNightDial.vue'
 import DmToolbar from '../components/DmToolbar.vue'
 import HexCanvas from '../components/HexCanvas.vue'
@@ -9,7 +9,6 @@ import MapList from '../components/MapList.vue'
 import ViewToggle from '../components/ViewToggle.vue'
 import { useUndoKeys } from '../composables/useUndoKeys'
 import type { EntityKind } from '../entities/entity'
-import { carriesSupplies } from '../entities/supplies'
 import { MAP_FILE_EXTENSION, parseMapFile, serialiseMap } from '../persistence/mapFile'
 import {
   MAX_SIGHT,
@@ -125,6 +124,9 @@ const carrierName = computed(() => {
 })
 
 const hint = computed(() => {
+  if (!store.start && store.selectedEntity?.kind === 'ship') {
+    return 'click a water or coast hex to put the ship there'
+  }
   if (!store.start) return 'click a hex to put the entity there'
   if (carrierName.value && store.atSea(store.selectedId)) {
     return `aboard ${carrierName.value} at sea · no orders until it puts in at a coast`
@@ -452,7 +454,12 @@ const olderTurns = computed(() => Math.max(0, store.adventureLog.length - TURNS_
             <li v-for="(leg, index) in store.legs" :key="`${index}:${leg.to}`">
               <span class="dim">{{ index + 1 }}</span>
               <span>{{ leg.to }}</span>
-              <span class="value">{{ leg.km }} km · ~{{ leg.turns }}t</span>
+              <span class="value">
+                {{ leg.km }} km · ~{{ leg.turns }}t
+                <span v-if="leg.landfall" class="dim" title="riders can step off here">
+                  · puts in
+                </span>
+              </span>
               <button
                 type="button"
                 class="drop"
@@ -493,11 +500,6 @@ const olderTurns = computed(() => Math.max(0, store.adventureLog.length - TURNS_
               make camp this turn
             </button>
           </div>
-
-          <CaravanSupplies
-            v-if="store.selectedEntity && carriesSupplies(store.selectedEntity.kind)"
-            :caravan-id="store.selectedEntity.id"
-          />
 
           <label class="control">
             <input v-model="store.showHistory" type="checkbox" />
@@ -563,6 +565,8 @@ const olderTurns = computed(() => Math.max(0, store.adventureLog.length - TURNS_
           <p>{{ hint }}</p>
         </div>
       </aside>
+
+      <CaravanPanel />
     </div>
   </main>
 </template>
@@ -592,9 +596,9 @@ main {
    inside itself rather than taking the page with it, which costs the drag-through
    it used to have: a scroll container has to receive the pointer. */
 aside:where(.panel) {
+  box-sizing: border-box;
   max-height: 100%;
-  min-width: 13rem;
-  max-width: min(17rem, calc(100vw - 2rem));
+  width: min(var(--panel-width), calc(100vw - 2rem));
   padding: 0.75rem 1rem;
   border: 1px solid var(--line);
   border-radius: 0.5rem;
@@ -784,7 +788,7 @@ h1 {
 /* Collapsed the panel is one row: no scroller, no width to speak of, and the
    map gets the pointer everywhere the row is not. */
 aside:where(.panel).collapsed {
-  min-width: 0;
+  width: auto;
   max-height: none;
   overflow: visible;
 }
@@ -916,7 +920,7 @@ p {
 }
 
 /* Room is the scarce thing on a phone: the panels stack in the corner, only
-   one open at a time, and the dial shrinks rather than straddling the width. */
+   one open at a time, and the dial drops below them rather than straddling them. */
 @media (max-width: 720px) {
   .panels {
     top: 0.5rem;

@@ -1,8 +1,18 @@
+import { editsText } from '../input/editsText'
 import type { IsoCamera } from './camera'
 
 const ZOOM_STEP = 1.12
 
-export function attachIsoControls(canvas: HTMLCanvasElement, iso: IsoCamera): () => void {
+export interface IsoControlOptions {
+  /** While this holds, a left-button drag belongs to the brush and the camera pans by the right or middle button. */
+  brushing?(): boolean
+}
+
+export function attachIsoControls(
+  canvas: HTMLCanvasElement,
+  iso: IsoCamera,
+  { brushing }: IsoControlOptions = {},
+): () => void {
   let panPointer: number | null = null
   let lastX = 0
   let lastY = 0
@@ -13,7 +23,7 @@ export function attachIsoControls(canvas: HTMLCanvasElement, iso: IsoCamera): ()
   }
 
   const onPointerDown = (event: PointerEvent): void => {
-    if (event.button !== 0 && event.button !== 1) return
+    if (event.button === 0 ? brushing?.() : event.button !== 1 && event.button !== 2) return
     panPointer = event.pointerId
     lastX = event.clientX
     lastY = event.clientY
@@ -33,7 +43,12 @@ export function attachIsoControls(canvas: HTMLCanvasElement, iso: IsoCamera): ()
     canvas.releasePointerCapture(event.pointerId)
   }
 
+  const onContextMenu = (event: MouseEvent): void => {
+    event.preventDefault()
+  }
+
   const onKeyDown = (event: KeyboardEvent): void => {
+    if (editsText(event.target)) return
     if (event.key === 'q' || event.key === 'Q') iso.rotate(-1)
     else if (event.key === 'e' || event.key === 'E') iso.rotate(1)
     else return
@@ -45,6 +60,7 @@ export function attachIsoControls(canvas: HTMLCanvasElement, iso: IsoCamera): ()
   canvas.addEventListener('pointermove', onPointerMove)
   canvas.addEventListener('pointerup', onPointerUp)
   canvas.addEventListener('pointercancel', onPointerUp)
+  canvas.addEventListener('contextmenu', onContextMenu)
   window.addEventListener('keydown', onKeyDown)
 
   return () => {
@@ -53,6 +69,7 @@ export function attachIsoControls(canvas: HTMLCanvasElement, iso: IsoCamera): ()
     canvas.removeEventListener('pointermove', onPointerMove)
     canvas.removeEventListener('pointerup', onPointerUp)
     canvas.removeEventListener('pointercancel', onPointerUp)
+    canvas.removeEventListener('contextmenu', onContextMenu)
     window.removeEventListener('keydown', onKeyDown)
   }
 }

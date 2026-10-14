@@ -15,6 +15,7 @@ import {
   RIVER_CROSSING_KM,
   RIVERS_SLOW,
   ROADS_GRADED,
+  shoreOf,
   stepCostKm,
   stepKmOn,
 } from './travel'
@@ -427,6 +428,13 @@ describe('sea movement', () => {
     expect(isCoast(field, field.at({ q: 0, r: 0 })!)).toBe(true)
     expect(isCoast(field, field.at({ q: -1, r: 0 })!)).toBe(false)
     expect(isCoast(field, field.at({ q: 1, r: 0 })!)).toBe(false)
+  })
+
+  it('names the shore a hex sits on', () => {
+    const field = fieldFromTiles(shore())
+    expect(shoreOf(field, field.at({ q: 1, r: 0 })!)).toBe('water')
+    expect(shoreOf(field, field.at({ q: 0, r: 0 })!)).toBe('coast')
+    expect(shoreOf(field, field.at({ q: -1, r: 0 })!)).toBe('inland')
   })
 
   it('lets a ship onto water and coast but not inland', () => {

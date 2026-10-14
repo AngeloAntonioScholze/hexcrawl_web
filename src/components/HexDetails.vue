@@ -21,6 +21,8 @@ const toggle = (): void => store.setPanelOpen('details', collapsed.value, narrow
 const hex = computed(() => store.selectedHex)
 const tile = computed(() => (hex.value ? store.tileAt(hex.value) : undefined))
 const position = computed(() => (hex.value ? parseKey(hex.value) : null))
+const shore = computed(() => (hex.value ? store.shoreAt(hex.value) : null))
+const SHORE_LABELS = { water: 'open water · ships only', coast: 'coast · ships put in here' }
 const note = computed(() => (hex.value ? (store.notes.get(hex.value) ?? '') : ''))
 
 // A phone keeps whatever the DM last chose: popping open on every tap would
@@ -68,6 +70,11 @@ const onNote = (event: Event): void => {
           <span v-if="tile" class="dim">lv {{ tile.level }}</span>
         </dd>
 
+        <template v-if="shore === 'water' || shore === 'coast'">
+          <dt>shore</dt>
+          <dd>{{ SHORE_LABELS[shore] }}</dd>
+        </template>
+
         <dt>position</dt>
         <dd v-if="position">q {{ position.q }} · r {{ position.r }}</dd>
       </dl>
@@ -94,7 +101,8 @@ aside {
   top: 56px;
   right: 1rem;
   bottom: 1rem;
-  width: min(var(--details-width), calc(100vw - 2rem));
+  box-sizing: border-box;
+  width: min(var(--panel-width), calc(100vw - 2rem));
   padding: 0.75rem 1rem;
   border: 1px solid var(--line);
   border-radius: 0.5rem;

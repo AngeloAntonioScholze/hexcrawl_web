@@ -12,6 +12,7 @@ import {
   rollEncounter,
   rollFor,
   tableFor,
+  terrainRows,
   type EncounterEntry,
   type EncounterOverride,
 } from './tables'
@@ -203,5 +204,49 @@ describe('overrides', () => {
     ]
     expect(resetTerrain(defaults, overrides, 'grass')).toEqual([overrides[1]])
     expect(resetTerrain(defaults, overrides, 'water')).toEqual([overrides[0], overrides[2]])
+  })
+})
+
+describe('terrain rows', () => {
+  const defaults = [
+    line('grass.a', 4),
+    line('grass.b', 2, 'night'),
+    line('grass.c', 1),
+    { ...line('water.d', 1), terrain: 'water' as const },
+  ]
+
+  it('list every default of the terrain, day and night alike', () => {
+    expect(terrainRows(defaults, [], 'grass')).toEqual([
+      { entry: defaults[0], status: 'default' },
+      { entry: defaults[1], status: 'default' },
+      { entry: defaults[2], status: 'default' },
+    ])
+  })
+
+  it('mark changed, struck and added lines, keeping struck ones where they stood', () => {
+    const mine = line('mine', 3, 'day')
+    const overrides: EncounterOverride[] = [
+      { kind: 'change', id: 'grass.a', change: { weight: 9 } },
+      { kind: 'remove', id: 'grass.b' },
+      { kind: 'add', entry: mine },
+      { kind: 'add', entry: { ...line('wet', 1), terrain: 'water' } },
+    ]
+    expect(terrainRows(defaults, overrides, 'grass')).toEqual([
+      { entry: { ...defaults[0], weight: 9 }, status: 'changed' },
+      { entry: defaults[1], status: 'removed' },
+      { entry: defaults[2], status: 'default' },
+      { entry: mine, status: 'added' },
+    ])
+  })
+
+  it('follow a default moved to another terrain', () => {
+    const overrides: EncounterOverride[] = [
+      { kind: 'change', id: 'water.d', change: { terrain: 'grass' } },
+    ]
+    expect(terrainRows(defaults, overrides, 'water')).toEqual([])
+    expect(terrainRows(defaults, overrides, 'grass').at(-1)).toEqual({
+      entry: { ...defaults[3], terrain: 'grass' },
+      status: 'changed',
+    })
   })
 })

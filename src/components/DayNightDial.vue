@@ -148,10 +148,14 @@ const dome = [
 </template>
 
 <style scoped>
+/* Centred, unless that would put it over the world and entities panels: their
+   open row runs 45.75rem from the left edge (MapView), so the centre keeps
+   that plus a gap and half the dial clear of it. On a window too narrow for
+   both, it stops short of the view toggle instead and slides under the panels. */
 .dial {
   position: absolute;
-  top: 0.75rem;
-  left: 50%;
+  top: 1rem;
+  left: min(max(50%, 54.6rem), 100% - 15.1rem);
   translate: -50% 0;
   pointer-events: none;
   text-align: center;
@@ -164,7 +168,7 @@ const dome = [
 
 svg {
   display: block;
-  width: 14rem;
+  width: 16.2rem;
   overflow: visible;
 }
 
@@ -219,7 +223,7 @@ svg {
   text-shadow:
     0 0 4px rgba(8, 10, 16, 0.95),
     0 1px 2px rgba(8, 10, 16, 0.95);
-  font-size: 1rem;
+  font-size: 1.17rem;
   font-weight: 600;
   text-transform: uppercase;
   letter-spacing: 0.1em;
@@ -269,7 +273,7 @@ button:disabled {
 }
 
 .step svg {
-  width: 1.15rem;
+  width: 1.3rem;
   fill: currentColor;
 }
 
@@ -277,7 +281,7 @@ button:disabled {
    never pushes the arrows either side of the label below. */
 .time {
   color: var(--phase-ink);
-  font-size: 0.72rem;
+  font-size: 0.81rem;
   text-transform: uppercase;
   letter-spacing: 0.12em;
   white-space: nowrap;
@@ -285,7 +289,7 @@ button:disabled {
 }
 
 .skip {
-  font-size: 0.7rem;
+  font-size: 0.77rem;
   text-transform: uppercase;
   letter-spacing: 0.08em;
   color: rgba(230, 232, 236, 0.7);
@@ -300,9 +304,16 @@ button:disabled {
   clip-path: inset(50%);
 }
 
+/* On a phone the collapsed panels stack down the left as far as the middle of
+   the screen, so the dial drops below them rather than squeezing in beside. */
 @media (max-width: 720px) {
+  .dial {
+    top: 9.25rem;
+    left: 50%;
+  }
+
   svg {
-    width: 10rem;
+    width: 13.5rem;
   }
 }
 </style>

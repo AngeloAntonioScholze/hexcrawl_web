@@ -38,6 +38,12 @@ export interface History {
     action: (...args: A) => R,
     mergeKey?: (...args: A) => string,
   ): (...args: A) => R
+  /**
+   * Opens a step that stays open across calls until `end`, for an edit spread
+   * over many events, such as a drag; tracked actions inside it join it.
+   */
+  begin(): void
+  end(): void
   undo(): boolean
   redo(): boolean
   clear(): void
@@ -103,7 +109,27 @@ export function createHistory(
       return result
     }
 
+  let opened: unknown[] | null = null
+
+  const begin = (): void => {
+    if (opened) return
+    opened = capture()
+    depth += 1
+  }
+
+  const end = (): void => {
+    if (!opened) return
+    const before = opened
+    opened = null
+    depth -= 1
+    const after = capture()
+    if (changed(before, after)) push(before, after, null)
+  }
+
+  // Putting a step back in the middle of an open one would leave the open
+  // step's before pointing at state that no longer stands.
   const undo = (): boolean => {
+    if (opened) return false
     const last = past.value[past.value.length - 1]
     if (!last) return false
     apply(last, 'before')
@@ -114,6 +140,7 @@ export function createHistory(
   }
 
   const redo = (): boolean => {
+    if (opened) return false
     const next = future.value[future.value.length - 1]
     if (!next) return false
     apply(next, 'after')
@@ -130,6 +157,8 @@ export function createHistory(
 
   return {
     track,
+    begin,
+    end,
     undo,
     redo,
     clear,

@@ -501,6 +501,79 @@ describe('rivers', () => {
   })
 })
 
+describe('a brush stroke', () => {
+  it('belongs to the brush tools in the DM view alone', () => {
+    const store = setup()
+    expect(store.brushing).toBe(false)
+    store.setDmTool('paint')
+    expect(store.brushing).toBe(true)
+    store.setDmTool('fog')
+    expect(store.brushing).toBe(true)
+    store.setDmTool('road')
+    expect(store.brushing).toBe(false)
+    store.setDmTool('fog')
+    store.dmView = false
+    expect(store.brushing).toBe(false)
+  })
+
+  it('paints every hex the drag crosses, gaps between moves and all', () => {
+    const store = setup()
+    store.setDmTool('paint')
+    store.setPaintTerrain('forest')
+    store.setBrushSize(0)
+
+    store.startStroke({ q: -3, r: 0 })
+    store.continueStroke({ q: 0, r: 0 })
+    store.continueStroke({ q: 3, r: 0 })
+    store.endStroke()
+
+    expect([...store.terrainOverrides.keys()].sort()).toEqual(
+      [-3, -2, -1, 0, 1, 2, 3].map((q) => hexKey({ q, r: 0 })).sort(),
+    )
+  })
+
+  it('does not bridge a stretch spent off the map', () => {
+    const store = setup()
+    store.setDmTool('paint')
+    store.setPaintTerrain('forest')
+    store.setBrushSize(0)
+
+    store.startStroke({ q: -2, r: 0 })
+    store.continueStroke(null)
+    store.continueStroke({ q: 2, r: 0 })
+    store.endStroke()
+
+    expect([...store.terrainOverrides.keys()].sort()).toEqual(['-2,0', '2,0'])
+  })
+
+  it('takes a whole stroke back in one undo, however long it took', () => {
+    const store = setup()
+    store.setDmTool('fog')
+    store.setFogMode('reveal')
+    store.setBrushSize(1)
+
+    store.startStroke({ q: -4, r: 0 })
+    for (let q = -3; q <= 4; q++) store.continueStroke({ q, r: 0 })
+    store.endStroke()
+    expect(store.known.has('4,0')).toBe(true)
+
+    store.undo()
+    expect(store.known.size).toBe(0)
+    expect(store.canUndo).toBe(false)
+  })
+
+  it('does nothing with a tool that is not a brush', () => {
+    const store = setup()
+    store.setDmTool('road')
+    store.startStroke({ q: 0, r: 0 })
+    store.continueStroke({ q: 2, r: 0 })
+    store.endStroke()
+
+    expect(store.roadTail).toBeNull()
+    expect(store.canUndo).toBe(false)
+  })
+})
+
 describe('painting terrain', () => {
   const paint = (store: Store, hex: Axial, terrain: TerrainId, brush = 0): void => {
     store.setDmTool('paint')
@@ -1017,7 +1090,7 @@ describe('chained orders', () => {
     const store = setup()
     sendEast(store, 3)
 
-    expect(store.legs).toEqual([{ to: '3,0', steps: 3, km: 30, turns: 3 }])
+    expect(store.legs).toEqual([{ to: '3,0', steps: 3, km: 30, turns: 3, landfall: false }])
     expect(store.route?.km).toBe(30)
   })
 
@@ -1233,6 +1306,37 @@ describe('riding in a caravan', () => {
     store.selectEntity(party)
     expect(store.start).toBe('0,0')
   })
+
+  it('shows the caravan in the panel when it is selected', () => {
+    const store = setup()
+    const { party, caravan } = withCaravan(store)
+
+    store.selectEntity(caravan)
+    expect(store.shownCaravan?.id).toBe(caravan)
+
+    store.selectEntity(party)
+    expect(store.shownCaravan).toBeNull()
+  })
+
+  it('shows the caravan a selected rider is riding in', () => {
+    const store = setup()
+    const { party, caravan } = withCaravan(store)
+
+    walkAboard(store, party)
+
+    expect(store.selectedId).toBe(party)
+    expect(store.shownCaravan?.id).toBe(caravan)
+  })
+
+  it('keeps a hidden caravan out of the players panel', () => {
+    const store = setup()
+    const hidden = store.addEntity('the smugglers', 'caravan', 'dm')
+    store.selectEntity(hidden.id)
+
+    expect(store.shownCaravan?.id).toBe(hidden.id)
+    store.dmView = false
+    expect(store.shownCaravan).toBeNull()
+  })
 })
 
 describe('riding a ship', () => {
@@ -1348,6 +1452,28 @@ describe('riding a ship', () => {
     store.selectEntity(ship)
     store.select({ q: 3, r: 0 })
     expect(store.routeBySea).toBe(true)
+  })
+
+  it('marks the sailed legs that put in at a coast', () => {
+    const store = useHexMapStore()
+    const { party, ship } = aboard(store)
+
+    store.selectEntity(ship)
+    store.select({ q: 3, r: 0 })
+    store.select({ q: 0, r: 2 }, true)
+    expect(store.legs.map((leg) => leg.landfall)).toEqual([false, true])
+
+    store.selectEntity(party)
+    store.select({ q: -2, r: 0 })
+    expect(store.legs.map((leg) => leg.landfall)).toEqual([false])
+  })
+
+  it('tells water, coast and inland apart', () => {
+    const store = useHexMapStore()
+    store.setTiles(shore())
+    expect(store.shoreAt('1,0')).toBe('water')
+    expect(store.shoreAt('0,0')).toBe('coast')
+    expect(store.shoreAt('-2,0')).toBe('inland')
   })
 
   it('says which riders are at sea', () => {
@@ -1827,35 +1953,56 @@ describe('resources', () => {
 })
 
 describe('the side panels', () => {
-  it('lets all three stay open on a wide window', () => {
+  it('lets all four stay open on a wide window', () => {
     const store = useHexMapStore()
     store.setPanelOpen('world', true, false)
     store.setPanelOpen('entities', true, false)
+    store.setPanelOpen('caravan', true, false)
     store.setPanelOpen('details', true, false)
-    expect(store.panelsOpen).toEqual({ world: true, entities: true, details: true })
+    expect(store.panelsOpen).toEqual({ world: true, entities: true, caravan: true, details: true })
   })
 
   it('opening one on a narrow window collapses the others', () => {
     const store = useHexMapStore()
     store.setPanelOpen('world', true, true)
-    expect(store.panelsOpen).toEqual({ world: true, entities: false, details: false })
+    expect(store.panelsOpen).toEqual({
+      world: true,
+      entities: false,
+      caravan: false,
+      details: false,
+    })
     store.setPanelOpen('details', true, true)
-    expect(store.panelsOpen).toEqual({ world: false, entities: false, details: true })
-    store.setPanelOpen('entities', true, true)
-    expect(store.panelsOpen).toEqual({ world: false, entities: true, details: false })
+    expect(store.panelsOpen).toEqual({
+      world: false,
+      entities: false,
+      caravan: false,
+      details: true,
+    })
+    store.setPanelOpen('caravan', true, true)
+    expect(store.panelsOpen).toEqual({
+      world: false,
+      entities: false,
+      caravan: true,
+      details: false,
+    })
   })
 
   it('collapsing one on a narrow window leaves the others alone', () => {
     const store = useHexMapStore()
     store.setPanelOpen('details', true, true)
     store.setPanelOpen('details', false, true)
-    expect(store.panelsOpen).toEqual({ world: false, entities: false, details: false })
+    expect(store.panelsOpen).toEqual({
+      world: false,
+      entities: false,
+      caravan: false,
+      details: false,
+    })
   })
 
   it('collapsing one on a wide window leaves the others open', () => {
     const store = useHexMapStore()
     store.setPanelOpen('entities', false, false)
-    expect(store.panelsOpen).toEqual({ world: true, entities: false, details: true })
+    expect(store.panelsOpen).toEqual({ world: true, entities: false, caravan: true, details: true })
   })
 })
 

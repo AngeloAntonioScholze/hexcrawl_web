@@ -3,6 +3,7 @@ import { computed, ref } from 'vue'
 import type { HexKey } from '../hex'
 import type { HexEvent } from '../hex/content'
 import { useHexMapStore } from '../stores/hexMap'
+import PopupDialog from './PopupDialog.vue'
 
 const props = defineProps<{ hex: HexKey }>()
 
@@ -12,6 +13,7 @@ const events = computed<readonly HexEvent[]>(() => store.events.get(props.hex) ?
 
 const title = ref('')
 const description = ref('')
+const adding = ref(false)
 
 const canAdd = computed(() => title.value.trim().length > 0)
 
@@ -20,6 +22,7 @@ const add = (): void => {
   store.addEvent(props.hex, { title: title.value.trim(), description: description.value.trim() })
   title.value = ''
   description.value = ''
+  adding.value = false
 }
 </script>
 
@@ -52,11 +55,15 @@ const add = (): void => {
     </ul>
     <p v-else class="dim">nothing happens here yet</p>
 
-    <form class="add" @submit.prevent="add">
-      <input v-model="title" type="text" placeholder="title" />
-      <textarea v-model="description" rows="2" placeholder="description"></textarea>
-      <button type="submit" :disabled="!canAdd">add event</button>
-    </form>
+    <button type="button" class="open" @click="adding = true">add event</button>
+
+    <PopupDialog v-model="adding" :title="`new event · hex ${props.hex}`">
+      <form class="add" @submit.prevent="add">
+        <input v-model="title" type="text" placeholder="title" />
+        <textarea v-model="description" rows="3" placeholder="description"></textarea>
+        <button type="submit" :disabled="!canAdd">add event</button>
+      </form>
+    </PopupDialog>
   </section>
 </template>
 
@@ -132,6 +139,10 @@ h2 {
   display: flex;
   flex-direction: column;
   gap: 0.4rem;
+  font-size: 0.78rem;
+}
+
+.open {
   margin-top: 0.5rem;
 }
 

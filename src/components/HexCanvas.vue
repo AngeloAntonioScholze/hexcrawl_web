@@ -100,6 +100,10 @@ const { hexScene } = useHexScene(canvas, {
   bevel: props.bevel,
   onHover: store.setHovered,
   onSelect: store.click,
+  brushing: () => store.brushing,
+  onStrokeStart: store.startStroke,
+  onStrokeMove: store.continueStroke,
+  onStrokeEnd: store.endStroke,
   onGlow: (next) => (glow.value = next),
 })
 

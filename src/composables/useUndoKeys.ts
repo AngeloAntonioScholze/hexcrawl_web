@@ -1,33 +1,9 @@
 import { onBeforeUnmount, onMounted } from 'vue'
+import { editsText } from '../input/editsText'
 import { useHexMapStore } from '../stores/hexMap'
-
-/** Inputs that hold no text of their own, so there is no native undo to keep. */
-const TEXTLESS_INPUTS = new Set([
-  'checkbox',
-  'radio',
-  'range',
-  'button',
-  'submit',
-  'reset',
-  'color',
-])
-
-interface KeyTarget {
-  tagName?: string
-  type?: string
-  isContentEditable?: boolean
-}
 
 type UndoKeyEvent = Pick<KeyboardEvent, 'key' | 'ctrlKey' | 'metaKey' | 'shiftKey'> & {
   target: unknown
-}
-
-const editsText = (target: unknown): boolean => {
-  if (typeof target !== 'object' || target === null) return false
-  const { tagName, type, isContentEditable } = target as KeyTarget
-  if (isContentEditable) return true
-  if (tagName === 'TEXTAREA') return true
-  return tagName === 'INPUT' && !TEXTLESS_INPUTS.has(type ?? 'text')
 }
 
 /**

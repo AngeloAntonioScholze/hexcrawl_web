@@ -2,6 +2,7 @@
 import { computed, ref } from 'vue'
 import type { HexKey } from '../hex'
 import { useHexMapStore } from '../stores/hexMap'
+import PopupDialog from './PopupDialog.vue'
 
 const props = defineProps<{ hex: HexKey }>()
 
@@ -14,6 +15,7 @@ const locations = computed(() => store.locations.get(props.hex) ?? [])
 const name = ref('')
 const kind = ref('')
 const description = ref('')
+const adding = ref(false)
 
 const canAdd = computed(() => name.value.trim() !== '')
 
@@ -27,6 +29,7 @@ const add = (): void => {
   name.value = ''
   kind.value = ''
   description.value = ''
+  adding.value = false
 }
 
 const listId = computed(() => `location-kinds-${props.hex}`)
@@ -55,15 +58,19 @@ const listId = computed(() => `location-kinds-${props.hex}`)
     </ul>
     <p v-else class="dim">no locations here</p>
 
-    <form class="add" @submit.prevent="add">
-      <input v-model="name" type="text" placeholder="name" required />
-      <input v-model="kind" type="text" placeholder="kind" :list="listId" />
-      <datalist :id="listId">
-        <option v-for="k in KINDS" :key="k" :value="k" />
-      </datalist>
-      <textarea v-model="description" rows="2" placeholder="description" />
-      <button type="submit" :disabled="!canAdd">add location</button>
-    </form>
+    <button type="button" class="open" @click="adding = true">add location</button>
+
+    <PopupDialog v-model="adding" :title="`new location · hex ${hex}`">
+      <form class="add" @submit.prevent="add">
+        <input v-model="name" type="text" placeholder="name" required />
+        <input v-model="kind" type="text" placeholder="kind" :list="listId" />
+        <datalist :id="listId">
+          <option v-for="k in KINDS" :key="k" :value="k" />
+        </datalist>
+        <textarea v-model="description" rows="3" placeholder="description" />
+        <button type="submit" :disabled="!canAdd">add location</button>
+      </form>
+    </PopupDialog>
   </section>
 </template>
 
@@ -131,6 +138,10 @@ li + li {
   display: flex;
   flex-direction: column;
   gap: 0.35rem;
+  font-size: 0.78rem;
+}
+
+.open {
   margin-top: 0.6rem;
 }
 

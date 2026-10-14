@@ -1,12 +1,18 @@
 <script setup lang="ts">
-import { ref, watch } from 'vue'
+import { computed, ref, watch } from 'vue'
 import type { EncounterRoll } from '../encounters/tables'
 import type { HexKey } from '../hex'
 import { useHexMapStore } from '../stores/hexMap'
+import { TERRAIN_LABELS } from '../terrain/terrain'
+import EncounterTableEditor from './EncounterTableEditor.vue'
+import PopupDialog from './PopupDialog.vue'
 
 const props = defineProps<{ hex: HexKey }>()
 
 const store = useHexMapStore()
+
+const terrain = computed(() => store.tileAt(props.hex)?.terrain)
+const editing = ref(false)
 
 /** Undefined before a roll; null when the table had nothing to draw. */
 const roll = ref<EncounterRoll | null | undefined>(undefined)
@@ -33,7 +39,10 @@ const accept = (): void => {
 
 <template>
   <section class="encounter">
-    <h2>encounter</h2>
+    <div class="heading">
+      <h2>encounter</h2>
+      <button v-if="terrain" type="button" class="link" @click="editing = true">edit table</button>
+    </div>
 
     <button v-if="roll === undefined" type="button" @click="draw">roll encounter</button>
 
@@ -53,6 +62,14 @@ const accept = (): void => {
         <button type="button" @click="dismiss">dismiss</button>
       </div>
     </template>
+
+    <PopupDialog
+      v-if="terrain"
+      v-model="editing"
+      :title="`${TERRAIN_LABELS[terrain]} encounters`"
+    >
+      <EncounterTableEditor :terrain="terrain" />
+    </PopupDialog>
   </section>
 </template>
 
@@ -64,8 +81,16 @@ const accept = (): void => {
   font-size: 0.78rem;
 }
 
+.heading {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 0.4rem;
+  margin-bottom: 0.4rem;
+}
+
 h2 {
-  margin: 0 0 0.4rem;
+  margin: 0;
   color: var(--ink-dim);
   font-size: 0.72rem;
   font-weight: normal;
@@ -130,5 +155,19 @@ button {
 
 button:hover {
   border-color: #7aa2c8;
+}
+
+button.link {
+  width: auto;
+  padding: 0;
+  border: none;
+  background: none;
+  color: var(--ink-dim);
+  font-size: 0.72rem;
+  text-decoration: underline;
+}
+
+button.link:hover {
+  color: var(--ink);
 }
 </style>

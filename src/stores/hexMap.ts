@@ -88,7 +88,9 @@ import {
   findRoute,
   joinLegs,
   KM_PER_HEX,
+  shoreOf,
   type Route,
+  type Shore,
 } from '../terrain/travel'
 import { clockAt, isNight, nextPhaseTurn, type Clock, type Phase } from '../time/clock'
 import {
@@ -160,6 +162,8 @@ export interface Leg {
   km: number
   /** Turns the leg takes at the entity's pace, ignoring what it carries in. */
   turns: number
+  /** A leg sailed that ends ashore, where whoever rides aboard can step off. */
+  landfall: boolean
 }
 
 /** The terrain knobs the map panel is allowed to turn. */
@@ -205,8 +209,8 @@ export const MAX_SIGHT = 10
 /** What the sight slider reads with nobody on the map to ask. */
 export const DEFAULT_SIGHT = 5
 
-/** The world and entities panels on the left, the hex details on the right. */
-export type SidePanel = 'world' | 'entities' | 'details'
+/** The world, entities and caravan panels on the left, the hex details on the right. */
+export type SidePanel = 'world' | 'entities' | 'caravan' | 'details'
 
 export const useHexMapStore = defineStore('hexMap', () => {
   // The world is a function, not a stored map: only the ground near the view is
@@ -406,6 +410,22 @@ export const useHexMapStore = defineStore('hexMap', () => {
 
   const ridersOf = (caravanId: string): readonly Entity[] => riders.value.get(caravanId) ?? []
 
+  /**
+   * The caravan the panel shows: the selected one, or the one the selected
+   * entity rides in, so a party aboard still sees its wagons. The players
+   * never get a hidden one.
+   */
+  const shownCaravan = computed<Entity | null>(() => {
+    const selected = selectedEntity.value
+    if (!selected) return null
+    const carrier = carrierOf(selected.id)
+    const caravan =
+      selected.kind === 'caravan'
+        ? selected
+        : (entities.value.find((one) => one.id === carrier && one.kind === 'caravan') ?? null)
+    return caravan && (dmView.value || !caravan.hidden) ? caravan : null
+  })
+
   /** A rider whose carrier is out on open water, where there is nowhere to step off to. */
   const atSea = (id: string): boolean => {
     const at = stateOf(id).at
@@ -511,6 +531,11 @@ export const useHexMapStore = defineStore('hexMap', () => {
 
   const tileAt = (hex: HexKey): TerrainTile | undefined => field.value.at(parseKey(hex))
 
+  const shoreAt = (hex: HexKey): Shore | null => {
+    const tile = tileAt(hex)
+    return tile ? shoreOf(field.value, tile) : null
+  }
+
   const setHovered = (hex: Axial | null): void => {
     hovered.value = hex ? hexKey(hex) : null
   }
@@ -556,7 +581,12 @@ export const useHexMapStore = defineStore('hexMap', () => {
   })
 
   /** Which side panels are expanded; view state, never saved. */
-  const panelsOpen = ref<Record<SidePanel, boolean>>({ world: true, entities: true, details: true })
+  const panelsOpen = ref<Record<SidePanel, boolean>>({
+    world: true,
+    entities: true,
+    caravan: true,
+    details: true,
+  })
 
   // On a narrow window the panels share the same strip of screen, so only one
   // of them may be expanded at a time.
@@ -565,6 +595,7 @@ export const useHexMapStore = defineStore('hexMap', () => {
     panelsOpen.value = {
       world: which === 'world' ? open : !closeOthers && panelsOpen.value.world,
       entities: which === 'entities' ? open : !closeOthers && panelsOpen.value.entities,
+      caravan: which === 'caravan' ? open : !closeOthers && panelsOpen.value.caravan,
       details: which === 'details' ? open : !closeOthers && panelsOpen.value.details,
     }
   }
@@ -1017,6 +1048,41 @@ export const useHexMapStore = defineStore('hexMap', () => {
     select(hex, append)
   }
 
+  /** Whether a drag works the map with the tool in hand rather than panning it. */
+  const brushing = computed(() => dmView.value && BRUSH_TOOLS.has(dmTool.value))
+
+  // The hex the stroke reached last, or null off the map; the move after it is
+  // filled in along the line between, so a fast drag skips nothing it crossed.
+  let strokeAt: Axial | null = null
+  let stroking = false
+
+  const continueStroke = (hex: Axial | null): void => {
+    if (!stroking) return
+    const from = strokeAt
+    strokeAt = hex
+    if (!hex || (from && hexKey(from) === hexKey(hex))) return
+    const tool = dmTool.value
+    if (tool === 'select') return
+    const crossed = from ? line(from, hex).slice(1) : [hex]
+    toolHandlers[tool]?.([...new Set(crossed.flatMap(brushHexes))])
+  }
+
+  /** A drag with a brush in hand: everything it works until it ends undoes as one. */
+  const startStroke = (hex: Axial | null): void => {
+    if (stroking || !brushing.value) return
+    history.begin()
+    stroking = true
+    strokeAt = null
+    continueStroke(hex)
+  }
+
+  const endStroke = (): void => {
+    if (!stroking) return
+    stroking = false
+    strokeAt = null
+    history.end()
+  }
+
   const removeWaypoint = (index: number): void => {
     const id = selectedId.value
     orderChain(
@@ -1122,6 +1188,10 @@ export const useHexMapStore = defineStore('hexMap', () => {
     return Math.ceil(km / KM_PER_HEX / pace)
   }
 
+  const routeBySea = computed(
+    () => routeEntity.value !== null && KIND_MOVEMENT[routeEntity.value.kind] === 'sea',
+  )
+
   const legs = computed<Leg[]>(() => {
     const stops = shownWaypoints(selectedId.value)
     return chain.value.map((leg, index) => ({
@@ -1129,6 +1199,7 @@ export const useHexMapStore = defineStore('hexMap', () => {
       steps: leg.steps,
       km: leg.km,
       turns: turnsFor(leg.km),
+      landfall: routeBySea.value && shoreAt(stops[index]) === 'coast',
     }))
   })
 
@@ -1140,10 +1211,6 @@ export const useHexMapStore = defineStore('hexMap', () => {
   })
 
   const routeTurns = computed(() => (route.value ? turnsFor(route.value.km) : 0))
-
-  const routeBySea = computed(
-    () => routeEntity.value !== null && KIND_MOVEMENT[routeEntity.value.kind] === 'sea',
-  )
 
   /** The selected entity's stops still ahead, marked on the map in its colour. */
   const stops = computed<{ hexes: Axial[]; color: string }>(() => ({
@@ -1579,6 +1646,7 @@ export const useHexMapStore = defineStore('hexMap', () => {
     setField,
     terrainOverrides,
     tileAt,
+    shoreAt,
     hovered,
     entities,
     selectedId,
@@ -1651,6 +1719,7 @@ export const useHexMapStore = defineStore('hexMap', () => {
     carrierOf,
     riders,
     ridersOf,
+    shownCaravan,
     atSea,
     setTiles,
     setHovered,
@@ -1666,6 +1735,10 @@ export const useHexMapStore = defineStore('hexMap', () => {
     setPanelOpen,
     select: history.track(select),
     click: history.track(click),
+    brushing,
+    startStroke,
+    continueStroke,
+    endStroke,
     clear: history.track(clear),
     snapshot,
     restore,
