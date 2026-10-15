@@ -3,6 +3,7 @@ import { computed, ref } from 'vue'
 import type { MapEntry } from '../persistence/mapIndex'
 import type { MapSnapshot } from '../persistence/mapState'
 import type { MapList } from '../persistence/protocol'
+import { useHexMapStore } from './hexMap'
 
 /** What the map session does on the list's behalf; it alone talks to the worker. */
 export interface MapLibraryBackend {
@@ -19,6 +20,8 @@ export const useMapLibraryStore = defineStore('mapLibrary', () => {
   const currentId = ref<string | null>(null)
   const busy = ref(false)
   let backend: MapLibraryBackend | null = null
+  // Asked who is acting, so a player is held to the same rules here as on the map.
+  const map = useHexMapStore()
 
   const current = computed(() => maps.value.find((one) => one.id === currentId.value) ?? null)
 
@@ -34,7 +37,7 @@ export const useMapLibraryStore = defineStore('mapLibrary', () => {
   // One change at a time: a second click mid-switch would otherwise race the
   // first for which map ends up open.
   const run = async (work: (to: MapLibraryBackend) => Promise<void>): Promise<void> => {
-    if (!backend || busy.value) return
+    if (!backend || busy.value || !map.may('maps')) return
     busy.value = true
     try {
       await work(backend)

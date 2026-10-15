@@ -14,6 +14,7 @@ import { resourceMarks } from '../engine/resourceMarkers'
 import { roadSpans } from '../engine/roadSegments'
 import type { SkyGlow } from '../engine/sky'
 import { useHexScene } from '../engine/useHexScene'
+import { DM } from '../session/permissions'
 import { useHexMapStore } from '../stores/hexMap'
 import { createTerrainField, repainted } from '../terrain/field'
 import { TERRAIN_COLORS } from '../terrain/terrain'
@@ -59,14 +60,17 @@ const layout = createLayout(props.hexSize)
 
 // The world is a function of the controls, so laying out a new one is making a
 // new field rather than generating thousands of tiles: the ground is worked out
-// as the window reaches it.
+// as the window reaches it. Laying it out follows controls only the DM can turn,
+// so it runs as the DM whichever view the map was saved in.
 const makeWorld = (): void => {
-  store.setField(
-    createTerrainField(layout, {
-      ...store.terrain,
-      octaves: props.octaves,
-      radius: store.worldRadius,
-    }),
+  store.actAs(DM, () =>
+    store.setField(
+      createTerrainField(layout, {
+        ...store.terrain,
+        octaves: props.octaves,
+        radius: store.worldRadius,
+      }),
+    ),
   )
 }
 

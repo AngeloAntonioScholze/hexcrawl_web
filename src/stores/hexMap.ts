@@ -6,6 +6,7 @@ import {
   isCarrier,
   KIND_MOVEMENT,
   newEntity,
+  sightAt,
   type Entity,
   type EntityKind,
   type EntityState,
@@ -103,7 +104,7 @@ import {
   type Route,
   type Shore,
 } from '../terrain/travel'
-import { clockAt, isNight, nextPhaseTurn, type Clock, type Phase } from '../time/clock'
+import { clockAt, nextPhaseTurn, type Clock, type Phase } from '../time/clock'
 import {
   createPainter,
   isWater,
@@ -111,6 +112,14 @@ import {
   type TerrainId,
   type TerrainTile,
 } from '../terrain/terrain'
+import {
+  allowed,
+  DM,
+  PLAYER,
+  type Action as Permission,
+  type Target,
+  type Viewer,
+} from '../session/permissions'
 import { createHistory, slotOf } from './history'
 
 const NOTHING_IN_SIGHT: PartySight = { radius: 0, visible: new Set(), blocked: new Set() }
@@ -122,10 +131,6 @@ const TOKEN_SHAPES: Readonly<Record<EntityKind, TokenShape>> = {
   npc: 'pawn',
   ship: 'boat',
 }
-
-/** What the dark leaves of an entity's sight, and the least it can ever see. */
-export const NIGHT_SIGHT = 0.3
-export const MIN_NIGHT_SIGHT = 1
 
 /** Where an entity was first put on the map, and the turn it appeared on. */
 export interface Origin {
@@ -321,6 +326,32 @@ export const useHexMapStore = defineStore('hexMap', () => {
   const showAllPaths = ref(false)
   const dmView = ref(true)
 
+  /** Who this browser is acting as: the view switch decides it. */
+  const viewer = computed<Viewer>(() => (dmView.value ? DM : PLAYER))
+
+  // Set only for the length of an actAs call, so an order a player sends in is
+  // judged as theirs rather than as whoever is sitting at this browser.
+  let actingFor: Viewer | null = null
+
+  /**
+   * Whether whoever is acting may do the action, to the target when it has one.
+   * Every action that changes something asks this first and does nothing when
+   * refused, so a hidden button is never the only thing in the way.
+   */
+  const may = (action: Permission, target?: Target): boolean =>
+    allowed(actingFor ?? viewer.value, action, target)
+
+  /** Runs store calls as someone else, such as a player whose order came in from afar. */
+  const actAs = <R>(who: Viewer, work: () => R): R => {
+    const outer = actingFor
+    actingFor = who
+    try {
+      return work()
+    } finally {
+      actingFor = outer
+    }
+  }
+
   const worldRadius = ref<number>(WORLD_SIZES.large)
 
   const terrain = ref<TerrainControls>({
@@ -458,6 +489,8 @@ export const useHexMapStore = defineStore('hexMap', () => {
   const start = computed<HexKey | null>(() => selectedState.value.at)
   const partyHex = start
 
+  const entityOf = (id: string): Entity | undefined => entities.value.find((one) => one.id === id)
+
   const patch = (id: string, change: Partial<Entity>): void => {
     entities.value = entities.value.map((one) => (one.id === id ? { ...one, ...change } : one))
   }
@@ -470,7 +503,8 @@ export const useHexMapStore = defineStore('hexMap', () => {
     name?: string,
     kind: EntityKind = 'party',
     owner: Owner = 'player',
-  ): Entity => {
+  ): Entity | null => {
+    if (!may('addEntity')) return null
     const made = newEntity(
       name ?? `party ${entities.value.length + 1}`,
       entities.value.length,
@@ -486,6 +520,7 @@ export const useHexMapStore = defineStore('hexMap', () => {
    * the board is not an error state, it is an empty board.
    */
   const removeEntity = (id: string): void => {
+    if (!may('removeEntity', entityOf(id))) return
     const remaining = entities.value.filter((one) => one.id !== id)
     if (remaining.length === entities.value.length) return
 
@@ -513,6 +548,7 @@ export const useHexMapStore = defineStore('hexMap', () => {
   }
 
   const renameEntity = (id: string, name: string): void => {
+    if (!may('renameEntity', entityOf(id))) return
     const trimmed = name.trim()
     if (trimmed) patch(id, { name: trimmed })
   }
@@ -521,10 +557,12 @@ export const useHexMapStore = defineStore('hexMap', () => {
     Math.min(max, Math.max(min, value))
 
   const setPace = (id: string, pace: number): void => {
+    if (!may('entitySettings', entityOf(id))) return
     patch(id, { pacePerTurn: clamp(pace, PACE_LIMITS) })
   }
 
   const setEntitySight = (id: string, sight: number): void => {
+    if (!may('entitySettings', entityOf(id))) return
     patch(id, { sight: clamp(Math.round(sight), { min: MIN_SIGHT, max: MAX_SIGHT }) })
   }
 
@@ -532,24 +570,19 @@ export const useHexMapStore = defineStore('hexMap', () => {
   const sight = computed(() => selectedEntity.value?.sight ?? DEFAULT_SIGHT)
   const setSight = (next: number): void => setEntitySight(selectedId.value, next)
 
-  /**
-   * Dark does not slow anybody down, it blinds them: an entity keeps its pace
-   * after nightfall and loses most of its horizon.
-   */
-  const sightAt = (entity: Entity, at: number): number =>
-    isNight(at) ? Math.max(MIN_NIGHT_SIGHT, Math.round(entity.sight * NIGHT_SIGHT)) : entity.sight
-
   const vision = computed<VisionOptions>(() => {
     const one = selectedEntity.value
     return { radius: one ? sightAt(one, turn.value) : DEFAULT_SIGHT }
   })
 
   const setField = (next: TerrainField): void => {
+    if (!may('terrain')) return
     ground.value = next
   }
 
   /** Fixtures and tests still speak in whole maps; the field wraps one. */
   const setTiles = (next: ReadonlyMap<HexKey, TerrainTile>): void => {
+    if (!may('terrain')) return
     ground.value = fieldFromTiles(next)
   }
 
@@ -576,11 +609,12 @@ export const useHexMapStore = defineStore('hexMap', () => {
   const brushSize = ref(1)
 
   const setDmTool = (tool: DmTool): void => {
+    if (!may('mapTools')) return
     dmTool.value = tool
   }
 
   const setBrushSize = (radius: number): void => {
-    if (!Number.isFinite(radius)) return
+    if (!may('mapTools') || !Number.isFinite(radius)) return
     brushSize.value = Math.max(BRUSH_LIMITS.min, Math.min(BRUSH_LIMITS.max, Math.round(radius)))
   }
 
@@ -625,6 +659,7 @@ export const useHexMapStore = defineStore('hexMap', () => {
   }
 
   const setNote = (hex: HexKey, text: string): void => {
+    if (!may('notes')) return
     const next = new Map(notes.value)
     if (text.trim()) next.set(hex, text)
     else next.delete(hex)
@@ -651,23 +686,27 @@ export const useHexMapStore = defineStore('hexMap', () => {
     return next
   }
 
-  const addEvent = (hex: HexKey, event: Omit<HexEvent, 'id'>): string => {
+  const addEvent = (hex: HexKey, event: Omit<HexEvent, 'id'>): string | null => {
+    if (!may('events')) return null
     const id = crypto.randomUUID()
     events.value = appendTo(events.value, hex, { ...event, id })
     return id
   }
 
   const removeEvent = (hex: HexKey, id: string): void => {
+    if (!may('events')) return
     events.value = dropFrom(events.value, hex, id)
   }
 
-  const addLocation = (hex: HexKey, location: Omit<HexLocation, 'id'>): string => {
+  const addLocation = (hex: HexKey, location: Omit<HexLocation, 'id'>): string | null => {
+    if (!may('locations')) return null
     const id = crypto.randomUUID()
     locations.value = appendTo(locations.value, hex, { ...location, id })
     return id
   }
 
   const removeLocation = (hex: HexKey, id: string): void => {
+    if (!may('locations')) return
     locations.value = dropFrom(locations.value, hex, id)
   }
 
@@ -681,6 +720,7 @@ export const useHexMapStore = defineStore('hexMap', () => {
     name?: string,
     level?: number,
   ): Merchant | null => {
+    if (!may('merchants')) return null
     if (entities.value.find((one) => one.id === caravanId)?.kind !== 'caravan') return null
     const made = newMerchant(caravanId, name?.trim() || MERCHANT_INFO[type].label, type, level)
     merchants.value = [...merchants.value, made]
@@ -688,6 +728,7 @@ export const useHexMapStore = defineStore('hexMap', () => {
   }
 
   const removeMerchant = (id: string): void => {
+    if (!may('merchants')) return
     const remaining = merchants.value.filter((one) => one.id !== id)
     if (remaining.length !== merchants.value.length) merchants.value = remaining
   }
@@ -697,11 +738,13 @@ export const useHexMapStore = defineStore('hexMap', () => {
   }
 
   const renameMerchant = (id: string, name: string): void => {
+    if (!may('merchants')) return
     const trimmed = name.trim()
     if (trimmed) patchMerchant(id, { name: trimmed })
   }
 
   const setMerchantLevel = (id: string, level: number): void => {
+    if (!may('merchants')) return
     patchMerchant(id, { level: clampLevel(level) })
   }
 
@@ -717,14 +760,21 @@ export const useHexMapStore = defineStore('hexMap', () => {
     ownerId: string,
     fields: Partial<ItemFields> & { name: string },
   ): Item | null => {
+    if (!may('editInventory', entityOf(ownerId))) return null
     if (!keepsInventory(ownerId) || !fields.name.trim()) return null
     const made = newItem(ownerId, fields)
     items.value = [...items.value, made]
     return made
   }
 
+  const holderOf = (itemId: string): Entity | undefined => {
+    const item = items.value.find((one) => one.id === itemId)
+    return item && entityOf(item.ownerId)
+  }
+
   /** A blank name is ignored rather than leaving a line nobody can read. */
   const editItem = (id: string, change: Partial<ItemFields>): void => {
+    if (!may('editInventory', holderOf(id))) return
     const clean: Partial<ItemFields> = {}
     if (change.name !== undefined && change.name.trim()) clean.name = change.name.trim()
     if (change.quantity !== undefined) clean.quantity = clampQuantity(change.quantity)
@@ -735,6 +785,7 @@ export const useHexMapStore = defineStore('hexMap', () => {
   }
 
   const removeItem = (id: string): void => {
+    if (!may('editInventory', holderOf(id))) return
     const remaining = items.value.filter((one) => one.id !== id)
     if (remaining.length !== items.value.length) items.value = remaining
   }
@@ -751,6 +802,9 @@ export const useHexMapStore = defineStore('hexMap', () => {
   }
 
   const transferItem = (id: string, toId: string, quantity: number): void => {
+    const giver = holderOf(id)
+    const taker = entityOf(toId)
+    if (!may('transferItem', giver && taker && { from: giver, to: taker })) return
     const from = items.value.find((one) => one.id === id)
     if (!from || !inventoryPartners(from.ownerId).some((one) => one.id === toId)) return
     items.value = moveItem(items.value, id, toId, quantity)
@@ -764,24 +818,29 @@ export const useHexMapStore = defineStore('hexMap', () => {
    * spent by the clock; a rewind reads back whatever was set for that turn.
    */
   const setSupply = (id: string, supply: Supply, value: number): void => {
+    if (!may('supplies')) return
     const kind = entities.value.find((one) => one.id === id)?.kind
     if (!kind || !carriesSupplies(kind)) return
     supplies.value = editSupply(supplies.value, id, turn.value, supply, value)
   }
 
   const editCatalogEntry = (id: string, patch: CatalogPatch): void => {
+    if (!may('merchants')) return
     catalogOverrides.value = editOverride(catalogOverrides.value, id, patch)
   }
 
   const removeCatalogEntry = (id: string): void => {
+    if (!may('merchants')) return
     catalogOverrides.value = removeOverride(catalogOverrides.value, id)
   }
 
   const resetCatalogEntry = (id: string): void => {
+    if (!may('merchants')) return
     catalogOverrides.value = resetOverride(catalogOverrides.value, id)
   }
 
-  const addCatalogEntry = (merchant: MerchantType, fields?: CatalogPatch): CatalogEntry => {
+  const addCatalogEntry = (merchant: MerchantType, fields?: CatalogPatch): CatalogEntry | null => {
+    if (!may('merchants')) return null
     const entry = customEntry(merchant, fields)
     catalogOverrides.value = [...catalogOverrides.value, { id: entry.id, op: 'add', entry }]
     return entry
@@ -793,19 +852,22 @@ export const useHexMapStore = defineStore('hexMap', () => {
     hex: HexKey,
     type: ResourceType,
     origin: ResourceOrigin = 'manual',
-  ): string => {
+  ): string | null => {
+    if (!may('resources')) return null
     const id = crypto.randomUUID()
     resources.value = [...resources.value, { id, hex, type, origin }]
     return id
   }
 
   const removeResource = (id: string): void => {
+    if (!may('resources')) return
     if (!resources.value.some((one) => one.id === id)) return
     resources.value = resources.value.filter((one) => one.id !== id)
   }
 
   /** Lays the generated resources down afresh, around the ones placed by hand. */
   const generateResources = (seed = Math.floor(Math.random() * MAX_SEED)): void => {
+    if (!may('resources')) return
     const manual = resources.value.filter((one) => one.origin === 'manual')
     const made = scatterResources(field.value, {
       chances: resourceChances.value,
@@ -817,7 +879,7 @@ export const useHexMapStore = defineStore('hexMap', () => {
   }
 
   const setResourceChance = (terrainId: TerrainId, chance: number): void => {
-    if (!Number.isFinite(chance)) return
+    if (!may('resources') || !Number.isFinite(chance)) return
     resourceChances.value = {
       ...resourceChances.value,
       [terrainId]: Math.max(0, Math.min(1, chance)),
@@ -825,7 +887,7 @@ export const useHexMapStore = defineStore('hexMap', () => {
   }
 
   const setResourceSpacing = (hexes: number): void => {
-    if (!Number.isFinite(hexes)) return
+    if (!may('resources') || !Number.isFinite(hexes)) return
     resourceSpacing.value = Math.max(
       RESOURCE_SPACING_LIMITS.min,
       Math.min(RESOURCE_SPACING_LIMITS.max, Math.round(hexes)),
@@ -840,12 +902,15 @@ export const useHexMapStore = defineStore('hexMap', () => {
     hex: HexKey,
     random: () => number = Math.random,
   ): EncounterRoll | null => {
+    if (!may('encounters')) return null
     const under = tileAt(hex)
     return under ? rollFor(under.terrain, clock.value.phase, encounters.value, random) : null
   }
 
-  const acceptEncounter = (hex: HexKey, entry: EncounterEntry): string =>
-    addEvent(hex, { title: entry.title, description: entry.description, turn: turn.value })
+  const acceptEncounter = (hex: HexKey, entry: EncounterEntry): string | null =>
+    may('encounters')
+      ? addEvent(hex, { title: entry.title, description: entry.description, turn: turn.value })
+      : null
 
   const setOverrides = (next: EncounterOverride[]): void => {
     const now = encounterOverrides.value
@@ -855,6 +920,7 @@ export const useHexMapStore = defineStore('hexMap', () => {
   }
 
   const setEncounter = (id: string, change: EncounterChange): void => {
+    if (!may('encounters')) return
     if (change.weight !== undefined && !(Number.isFinite(change.weight) && change.weight >= 0)) {
       return
     }
@@ -862,14 +928,17 @@ export const useHexMapStore = defineStore('hexMap', () => {
   }
 
   const removeEncounter = (id: string): void => {
+    if (!may('encounters')) return
     setOverrides(dropEncounter(DEFAULT_ENCOUNTERS, encounterOverrides.value, id))
   }
 
   const restoreEncounter = (id: string): void => {
+    if (!may('encounters')) return
     setOverrides(undoEncounterOverride(encounterOverrides.value, id))
   }
 
-  const addEncounter = (entry: Omit<EncounterEntry, 'id'>): string => {
+  const addEncounter = (entry: Omit<EncounterEntry, 'id'>): string | null => {
+    if (!may('encounters')) return null
     const id = crypto.randomUUID()
     encounterOverrides.value = [
       ...encounterOverrides.value,
@@ -879,6 +948,7 @@ export const useHexMapStore = defineStore('hexMap', () => {
   }
 
   const resetEncounters = (terrainId: TerrainId): void => {
+    if (!may('encounters')) return
     setOverrides(resetTerrain(DEFAULT_ENCOUNTERS, encounterOverrides.value, terrainId))
   }
 
@@ -894,6 +964,7 @@ export const useHexMapStore = defineStore('hexMap', () => {
   }
 
   const queueAction = (id: string, action: Action): void => {
+    if (!may('order', entityOf(id))) return
     truncate()
     const next = new Map(queue.value)
     next.set(id, action)
@@ -905,6 +976,7 @@ export const useHexMapStore = defineStore('hexMap', () => {
    * ground its kind could stand on: no ship on land, nobody afloat on open sea.
    */
   const place = (id: string, hex: HexKey): void => {
+    if (!may('place', entityOf(id))) return
     const kind = entities.value.find((one) => one.id === id)?.kind ?? 'party'
     const under = tileAt(hex)
     if (under && !canEnter(under, KIND_MOVEMENT[kind])) return
@@ -979,6 +1051,7 @@ export const useHexMapStore = defineStore('hexMap', () => {
     const id = selectedId.value
     const key = hexKey(hex)
     const at = selectedState.value.at
+    if (!may(at ? 'order' : 'place', selectedEntity.value)) return
 
     if (!at) {
       place(id, key)
@@ -1011,6 +1084,7 @@ export const useHexMapStore = defineStore('hexMap', () => {
   const fogMode = ref<FogMode>('reveal')
 
   const setFogMode = (mode: FogMode): void => {
+    if (!may('fog')) return
     fogMode.value = mode
   }
 
@@ -1051,10 +1125,12 @@ export const useHexMapStore = defineStore('hexMap', () => {
   }
 
   const finishRoad = (): void => {
+    if (!may('roads')) return
     roadTail.value = null
   }
 
   const setRoadErase = (on: boolean): void => {
+    if (!may('roads')) return
     roadErase.value = on
     roadTail.value = null
   }
@@ -1085,6 +1161,7 @@ export const useHexMapStore = defineStore('hexMap', () => {
   const paintTerrain = ref<TerrainId>('grass')
 
   const setPaintTerrain = (terrainId: TerrainId): void => {
+    if (!may('terrain')) return
     paintTerrain.value = terrainId
   }
 
@@ -1110,11 +1187,13 @@ export const useHexMapStore = defineStore('hexMap', () => {
    * A click on the map: the DM picks a hex to look at or works it with a tool, a
    * player gives an order.
    * Clicking the picked hex again, or the goal of the order just given, takes
-   * the pick back.
+   * the pick back. Which of the two follows who is acting rather than the view
+   * alone, so a player's click never reaches the DM's tools.
    */
   const click = (hex: Axial | null, append = false): void => {
+    if (!may('order', selectedEntity.value ?? undefined)) return
     const key = hex ? hexKey(hex) : null
-    if (dmView.value) {
+    if (may('mapTools')) {
       const tool = dmTool.value
       if (tool === 'select') selectHex(key === selectedHex.value ? null : hex)
       else if (hex) toolHandlers[tool]?.(brushHexes(hex))
@@ -1144,7 +1223,7 @@ export const useHexMapStore = defineStore('hexMap', () => {
   let stroking = false
 
   const continueStroke = (hex: Axial | null): void => {
-    if (!stroking) return
+    if (!stroking || !may('mapTools')) return
     const from = strokeAt
     strokeAt = hex
     if (!hex || (from && hexKey(from) === hexKey(hex))) return
@@ -1156,7 +1235,7 @@ export const useHexMapStore = defineStore('hexMap', () => {
 
   /** A drag with a brush in hand: everything it works until it ends undoes as one. */
   const startStroke = (hex: Axial | null): void => {
-    if (stroking || !brushing.value) return
+    if (stroking || !brushing.value || !may('mapTools')) return
     history.begin()
     stroking = true
     strokeAt = null
@@ -1164,13 +1243,14 @@ export const useHexMapStore = defineStore('hexMap', () => {
   }
 
   const endStroke = (): void => {
-    if (!stroking) return
+    if (!stroking || !may('mapTools')) return
     stroking = false
     strokeAt = null
     history.end()
   }
 
   const removeWaypoint = (index: number): void => {
+    if (!may('order', selectedEntity.value ?? undefined)) return
     const id = selectedId.value
     orderChain(
       id,
@@ -1178,10 +1258,13 @@ export const useHexMapStore = defineStore('hexMap', () => {
     )
   }
 
-  const clear = (): void => orderChain(selectedId.value, [])
+  const clear = (): void => {
+    if (may('order', selectedEntity.value ?? undefined)) orderChain(selectedId.value, [])
+  }
 
   /** Spends a turn: every entity resolves, ordered or not, and is written down. */
   const advanceTurn = (): void => {
+    if (!may('clock')) return
     truncate()
     const outcome = resolveTurn(
       turn.value,
@@ -1200,13 +1283,14 @@ export const useHexMapStore = defineStore('hexMap', () => {
 
   /** Winds the world back a turn; the record it is read out of is left alone. */
   const rewindTurn = (): void => {
-    if (turn.value === 0) return
+    if (!may('clock') || turn.value === 0) return
     turn.value -= 1
     queue.value = new Map()
     history.clear()
   }
 
   const goToTurn = (at: number): void => {
+    if (!may('clock')) return
     turn.value = Math.max(0, Math.min(frames.value.length, Math.floor(at)))
     queue.value = new Map()
     history.clear()
@@ -1214,6 +1298,7 @@ export const useHexMapStore = defineStore('hexMap', () => {
 
   /** Camps out the rest of the phase: standing orders keep being walked. */
   const skipPhase = (): void => {
+    if (!may('clock')) return
     const until = nextPhaseTurn(turn.value)
     while (turn.value < until) advanceTurn()
   }
@@ -1227,6 +1312,7 @@ export const useHexMapStore = defineStore('hexMap', () => {
    * the encounters met were part of the crawl.
    */
   const clearHistory = (): void => {
+    if (!may('clearHistory')) return
     turn.value = 0
     setFrames([])
     events.value = encountersUpTo(events.value, -1)
@@ -1542,6 +1628,7 @@ export const useHexMapStore = defineStore('hexMap', () => {
     a.seed === b.seed && a.scale === b.scale && a.seaLevel === b.seaLevel && a.relief === b.relief
 
   const setTerrain = (change: Partial<TerrainControls>): void => {
+    if (!may('terrain')) return
     const merged = { ...terrain.value, ...change }
     const next: TerrainControls = {
       seed: Math.round(merged.seed),
@@ -1557,6 +1644,7 @@ export const useHexMapStore = defineStore('hexMap', () => {
   }
 
   const setWorldRadius = (next: number): void => {
+    if (!may('terrain')) return
     const radius = Math.max(10, Math.round(next))
     if (radius === worldRadius.value) return
     worldRadius.value = radius
@@ -1571,6 +1659,7 @@ export const useHexMapStore = defineStore('hexMap', () => {
   })
 
   const reseed = (): void => {
+    if (!may('terrain')) return
     setTerrain({ seed: Math.floor(Math.random() * MAX_SEED) })
   }
 
@@ -1619,6 +1708,7 @@ export const useHexMapStore = defineStore('hexMap', () => {
   // Terrain goes in first: laying down a new world is what wipes the map, so
   // the remembered crawl has to be handed back after it, not before.
   const restore = (saved: MapSnapshot): void => {
+    if (!may('maps')) return
     setWorldRadius(saved.worldRadius)
     setTerrain(saved.terrain)
     fog.value = saved.fog
@@ -1792,6 +1882,9 @@ export const useHexMapStore = defineStore('hexMap', () => {
     showSight,
     showHistory,
     dmView,
+    viewer,
+    may,
+    actAs,
     sight,
     setSight: history.track(setSight, () => `sight:${selectedId.value}`),
     sightAt,
@@ -1822,6 +1915,7 @@ export const useHexMapStore = defineStore('hexMap', () => {
     setPaintTerrain,
     panelsOpen,
     setPanelOpen,
+    place: history.track(place),
     select: history.track(select),
     click: history.track(click),
     brushing,
@@ -1886,8 +1980,8 @@ export const useHexMapStore = defineStore('hexMap', () => {
     finishRoad,
     setRoadErase,
     rivers,
-    undo: history.undo,
-    redo: history.redo,
+    undo: (): boolean => may('undo') && history.undo(),
+    redo: (): boolean => may('undo') && history.redo(),
     canUndo: history.canUndo,
     canRedo: history.canRedo,
   }

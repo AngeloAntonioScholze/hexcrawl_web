@@ -13,6 +13,8 @@ import { riverKey } from '../terrain/rivers'
 import { roadHexes } from '../terrain/roads'
 import { TERRAIN_DEFAULTS, type TerrainId, type TerrainTile } from '../terrain/terrain'
 import { TURNS_PER_PHASE } from '../time/clock'
+import { DM, PLAYER } from '../session/permissions'
+import { fieldFromTiles } from '../terrain/field'
 import { BRUSH_LIMITS, MAX_SIGHT, MIN_SIGHT, TERRAIN_LIMITS, useHexMapStore } from './hexMap'
 
 // The number is the mechanical level; sight and climbs read that, and the
@@ -35,6 +37,11 @@ const setup = (): Store => {
   const store = useHexMapStore()
   store.setTiles(flatField(6))
   return store
+}
+
+/** Does what only the DM may, such as passing a turn, while the players' view is up. */
+const asDm = (store: Store, work: () => unknown): void => {
+  store.actAs(DM, work)
 }
 
 /** Puts the party down and sends it east, which is what a click pair does. */
@@ -98,7 +105,7 @@ describe('giving orders', () => {
 
   it('takes a caravan two turns over the hex a party crosses in one', () => {
     const store = setup()
-    const caravan = store.addEntity('the caravan', 'caravan')
+    const caravan = store.addEntity('the caravan', 'caravan')!
     store.selectEntity(caravan.id)
     sendEast(store, 2)
 
@@ -403,8 +410,10 @@ describe('roads', () => {
     expect(store.route!.km).toBe(20)
 
     store.dmView = false
-    store.advanceTurn()
-    store.advanceTurn()
+    asDm(store, () => {
+      store.advanceTurn()
+      store.advanceTurn()
+    })
     expect(store.start).toBe('2,0')
   })
 
@@ -469,11 +478,11 @@ describe('rivers', () => {
     // Down the whole of row 1.
     store.click({ q: -6, r: 1 })
     store.click({ q: 5, r: 1 })
-    store.dmView = false
     store.select({ q: 0, r: 0 })
+    store.dmView = false
     store.select({ q: 0, r: 1 })
     expect(store.route!.km).toBe(20)
-    store.advanceTurn()
+    asDm(store, () => store.advanceTurn())
     expect(store.start).toBe('0,0')
 
     store.dmView = true
@@ -632,9 +641,10 @@ describe('painting terrain', () => {
     paint(store, { q: 1, r: 0 }, 'deepWater')
     paint(store, { q: 0, r: 1 }, 'peaks')
     store.setDmTool('select')
+    store.select({ q: 0, r: 0 })
     store.dmView = false
 
-    sendEast(store, 2)
+    store.select({ q: 2, r: 0 })
     expect(store.route?.hexes.map(hexKey)).not.toContain('1,0')
     expect(store.blocked.has('0,2')).toBe(true)
   })
@@ -660,9 +670,9 @@ describe('clicking the map', () => {
 
   it('routes as before in player view and selects nothing', () => {
     const store = setup()
+    store.select({ q: 0, r: 0 })
     store.dmView = false
 
-    store.click({ q: 0, r: 0 })
     store.click({ q: 2, r: 0 })
     expect(store.start).toBe('0,0')
     expect(store.goal).toBe('2,0')
@@ -684,8 +694,8 @@ describe('clicking the map', () => {
 
   it('takes back the order just given when its goal is clicked again', () => {
     const store = setup()
+    store.select({ q: 0, r: 0 })
     store.dmView = false
-    store.click({ q: 0, r: 0 })
 
     store.click({ q: 2, r: 0 })
     store.click({ q: 2, r: 0 })
@@ -699,23 +709,23 @@ describe('clicking the map', () => {
 
   it('leaves the standing order behind the one taken back', () => {
     const store = setup()
+    store.select({ q: 0, r: 0 })
     store.dmView = false
-    store.click({ q: 0, r: 0 })
     store.click({ q: 4, r: 0 })
-    store.advanceTurn()
+    asDm(store, () => store.advanceTurn())
 
     store.click({ q: 1, r: 2 })
     store.click({ q: 1, r: 2 })
     expect(store.goal).toBe('4,0')
 
-    store.advanceTurn()
+    asDm(store, () => store.advanceTurn())
     expect(store.start).toBe('2,0')
   })
 
   it('takes the whole chain back from its last stop, but not on shift-click', () => {
     const store = setup()
+    store.select({ q: 0, r: 0 })
     store.dmView = false
-    store.click({ q: 0, r: 0 })
     store.click({ q: 2, r: 0 })
     store.click({ q: 2, r: 2 }, true)
 
@@ -728,10 +738,10 @@ describe('clicking the map', () => {
 
   it('still calls the order off however often the entity is clicked where it stands', () => {
     const store = setup()
+    store.select({ q: 0, r: 0 })
     store.dmView = false
-    store.click({ q: 0, r: 0 })
     store.click({ q: 3, r: 0 })
-    store.advanceTurn()
+    asDm(store, () => store.advanceTurn())
 
     store.click({ q: 1, r: 0 })
     store.click({ q: 1, r: 0 })
@@ -741,14 +751,14 @@ describe('clicking the map', () => {
 
   it('undoes taking an order back as one step', () => {
     const store = setup()
+    store.select({ q: 0, r: 0 })
     store.dmView = false
-    store.click({ q: 0, r: 0 })
     store.click({ q: 2, r: 0 })
     store.click({ q: 2, r: 0 })
 
-    store.undo()
+    asDm(store, () => store.undo())
     expect(store.goal).toBe('2,0')
-    store.redo()
+    asDm(store, () => store.redo())
     expect(store.goal).toBeNull()
   })
 
@@ -931,7 +941,7 @@ describe('entities', () => {
 
   it('hands the map back to whoever is left when one is removed', () => {
     const store = setup()
-    const scout = store.addEntity('the scout')
+    const scout = store.addEntity('the scout')!
     store.selectEntity(scout.id)
 
     store.removeEntity(scout.id)
@@ -942,7 +952,7 @@ describe('entities', () => {
 
   it('moves everybody on the same turn', () => {
     const store = setup()
-    const scout = store.addEntity('the scout')
+    const scout = store.addEntity('the scout')!
     store.setPace(scout.id, 2)
 
     sendEast(store, 4)
@@ -958,7 +968,7 @@ describe('entities', () => {
 
   it('keeps every entity to its own sight', () => {
     const store = setup()
-    const caravan = store.addEntity('the caravan', 'caravan')
+    const caravan = store.addEntity('the caravan', 'caravan')!
 
     store.setSight(MAX_SIGHT)
     store.selectEntity(caravan.id)
@@ -1034,7 +1044,7 @@ describe('the adventure log', () => {
 describe('the paths drawn on the map', () => {
   it('draws only the selected entity by default', () => {
     const store = setup()
-    const scout = store.addEntity('the scout')
+    const scout = store.addEntity('the scout')!
     sendEast(store, 2)
     store.selectEntity(scout.id)
     sendEast(store, 2)
@@ -1044,7 +1054,7 @@ describe('the paths drawn on the map', () => {
 
   it('draws a line for every entity once asked to', () => {
     const store = setup()
-    const scout = store.addEntity('the scout')
+    const scout = store.addEntity('the scout')!
     sendEast(store, 2)
     store.selectEntity(scout.id)
     store.select({ q: 0, r: 1 })
@@ -1058,7 +1068,7 @@ describe('the paths drawn on the map', () => {
 
   it('leaves hidden entities off the player map', () => {
     const store = setup()
-    const lurker = store.addEntity('the lurker', 'npc', 'dm')
+    const lurker = store.addEntity('the lurker', 'npc', 'dm')!
     sendEast(store, 2)
     store.selectEntity(lurker.id)
     store.select({ q: 0, r: 1 })
@@ -1189,7 +1199,7 @@ describe('chained orders', () => {
 describe('riding in a caravan', () => {
   /** A caravan standing at the middle, and the party two hexes east of it. */
   const withCaravan = (store: Store): { party: string; caravan: string } => {
-    const caravan = store.addEntity('the caravan', 'caravan')
+    const caravan = store.addEntity('the caravan', 'caravan')!
     const party = store.entities[0].id
 
     store.selectEntity(caravan.id)
@@ -1330,7 +1340,7 @@ describe('riding in a caravan', () => {
 
   it('keeps a hidden caravan out of the players panel', () => {
     const store = setup()
-    const hidden = store.addEntity('the smugglers', 'caravan', 'dm')
+    const hidden = store.addEntity('the smugglers', 'caravan', 'dm')!
     store.selectEntity(hidden.id)
 
     expect(store.shownCaravan?.id).toBe(hidden.id)
@@ -1352,7 +1362,7 @@ describe('riding a ship', () => {
   /** A DM's ship moored off the coast, and the party walked aboard it with a sight of one. */
   const aboard = (store: Store): { party: string; ship: string } => {
     store.setTiles(shore())
-    const ship = store.addEntity('the ship', 'ship', 'dm')
+    const ship = store.addEntity('the ship', 'ship', 'dm')!
     const party = store.entities[0].id
     store.setEntitySight(party, 1)
 
@@ -1389,7 +1399,7 @@ describe('riding a ship', () => {
   it('leaves a party on the shore when the ship sails off as it steps aboard', () => {
     const store = useHexMapStore()
     store.setTiles(shore())
-    const ship = store.addEntity('the ship', 'ship', 'dm').id
+    const ship = store.addEntity('the ship', 'ship', 'dm')!.id
     const party = store.entities[0].id
 
     store.selectEntity(ship)
@@ -1444,9 +1454,8 @@ describe('riding a ship', () => {
   it("lets a hidden ship's riders see from every hex it crosses", () => {
     const store = useHexMapStore()
     const { ship } = aboard(store)
-    store.dmView = false
-
     sail(store, ship)
+    store.dmView = false
 
     // In a sight of one, 2,1 shows only from the hexes sailed through, 5,0 only from the last.
     expect(store.explored.has('2,1')).toBe(true)
@@ -1457,7 +1466,7 @@ describe('riding a ship', () => {
     const store = useHexMapStore()
     store.setTiles(shore())
     const party = store.entities[0].id
-    const ship = store.addEntity('the ship', 'ship').id
+    const ship = store.addEntity('the ship', 'ship')!.id
 
     store.selectEntity(ship)
     store.select({ q: -2, r: 0 })
@@ -1557,8 +1566,8 @@ describe('what a hex holds', () => {
   it('adds and removes events in the order they were written', () => {
     const store = setup()
 
-    const first = store.addEvent(here, { title: 'ambush', description: 'goblins' })
-    const second = store.addEvent(here, { title: 'storm', description: '' })
+    const first = store.addEvent(here, { title: 'ambush', description: 'goblins' })!
+    const second = store.addEvent(here, { title: 'storm', description: '' })!
     expect(store.events.get(here)?.map((one) => one.id)).toEqual([first, second])
 
     store.removeEvent(here, first)
@@ -1571,7 +1580,7 @@ describe('what a hex holds', () => {
   it('adds and removes locations, dropping the hex once it holds none', () => {
     const store = setup()
 
-    const id = store.addLocation(here, { name: 'Oakvale', kind: 'village', description: '' })
+    const id = store.addLocation(here, { name: 'Oakvale', kind: 'village', description: '' })!
     expect(store.locations.get(here)).toEqual([
       { id, name: 'Oakvale', kind: 'village', description: '' },
     ])
@@ -1616,8 +1625,8 @@ describe('what a hex holds', () => {
 describe('a caravan crew', () => {
   it('takes merchants on in order and hands each caravan only its own', () => {
     const store = setup()
-    const caravan = store.addEntity('the caravan', 'caravan').id
-    const other = store.addEntity('the other', 'caravan').id
+    const caravan = store.addEntity('the caravan', 'caravan')!.id
+    const other = store.addEntity('the other', 'caravan')!.id
 
     const smith = store.addMerchant(caravan, 'smith', 'Bram', 4)!
     const cook = store.addMerchant(caravan, 'cook')!
@@ -1632,7 +1641,7 @@ describe('a caravan crew', () => {
 
   it('names an unnamed merchant after its type', () => {
     const store = setup()
-    const caravan = store.addEntity('the caravan', 'caravan').id
+    const caravan = store.addEntity('the caravan', 'caravan')!.id
 
     store.addMerchant(caravan, 'leatherworker')
     store.addMerchant(caravan, 'stablemaster', '   ')
@@ -1642,7 +1651,7 @@ describe('a caravan crew', () => {
 
   it('takes no merchants onto anything but a caravan', () => {
     const store = setup()
-    const ship = store.addEntity('the ship', 'ship').id
+    const ship = store.addEntity('the ship', 'ship')!.id
 
     expect(store.addMerchant(store.selectedId, 'smith')).toBeNull()
     expect(store.addMerchant(ship, 'smith')).toBeNull()
@@ -1652,7 +1661,7 @@ describe('a caravan crew', () => {
 
   it('keeps every level a whole number from 1 to 10', () => {
     const store = setup()
-    const caravan = store.addEntity('the caravan', 'caravan').id
+    const caravan = store.addEntity('the caravan', 'caravan')!.id
     const id = store.addMerchant(caravan, 'priest', 'Odo', 14)!.id
     const level = (): number | undefined => store.merchants.find((one) => one.id === id)?.level
 
@@ -1665,7 +1674,7 @@ describe('a caravan crew', () => {
 
   it('renames a merchant but never to nothing', () => {
     const store = setup()
-    const caravan = store.addEntity('the caravan', 'caravan').id
+    const caravan = store.addEntity('the caravan', 'caravan')!.id
     const id = store.addMerchant(caravan, 'hunter', 'Kell')!.id
 
     store.renameMerchant(id, '  Kestrel ')
@@ -1676,8 +1685,8 @@ describe('a caravan crew', () => {
 
   it('lets a merchant go, and the whole crew with its caravan', () => {
     const store = setup()
-    const caravan = store.addEntity('the caravan', 'caravan').id
-    const other = store.addEntity('the other', 'caravan').id
+    const caravan = store.addEntity('the caravan', 'caravan')!.id
+    const other = store.addEntity('the other', 'caravan')!.id
     const smith = store.addMerchant(caravan, 'smith')!.id
     store.addMerchant(caravan, 'cook')
     store.addMerchant(other, 'mage')
@@ -1691,7 +1700,7 @@ describe('a caravan crew', () => {
 
   it('is not wound back by the clock, nor wiped by a new world', () => {
     const store = setup()
-    const caravan = store.addEntity('the caravan', 'caravan').id
+    const caravan = store.addEntity('the caravan', 'caravan')!.id
     const id = store.addMerchant(caravan, 'doctor', 'Mira', 2)!.id
     sendEast(store, 2)
     store.advanceTurn()
@@ -1707,7 +1716,7 @@ describe('a caravan crew', () => {
 
   it('comes back from a snapshot as it was saved', () => {
     const store = setup()
-    const caravan = store.addEntity('the caravan', 'caravan').id
+    const caravan = store.addEntity('the caravan', 'caravan')!.id
     store.addMerchant(caravan, 'alchemist', 'Vey', 7)
     store.addMerchant(caravan, 'curio')
     const saved = store.snapshot
@@ -1723,7 +1732,7 @@ describe('a caravan crew', () => {
 describe("a caravan's stores", () => {
   it('are set by hand on a caravan and nothing else', () => {
     const store = setup()
-    const caravan = store.addEntity('the caravan', 'caravan').id
+    const caravan = store.addEntity('the caravan', 'caravan')!.id
 
     store.setSupply(caravan, 'food', 40)
     store.setSupply(caravan, 'gold', 120)
@@ -1735,7 +1744,7 @@ describe("a caravan's stores", () => {
 
   it('never drain as the turns pass', () => {
     const store = setup()
-    const caravan = store.addEntity('the caravan', 'caravan').id
+    const caravan = store.addEntity('the caravan', 'caravan')!.id
     store.setSupply(caravan, 'food', 40)
 
     store.advanceTurn()
@@ -1746,7 +1755,7 @@ describe("a caravan's stores", () => {
 
   it('wind back exactly with the clock, and forward again', () => {
     const store = setup()
-    const caravan = store.addEntity('the caravan', 'caravan').id
+    const caravan = store.addEntity('the caravan', 'caravan')!.id
     store.setSupply(caravan, 'food', 40)
     store.advanceTurn()
     store.setSupply(caravan, 'food', 25)
@@ -1763,7 +1772,7 @@ describe("a caravan's stores", () => {
 
   it('forget what was set in a future an order turned away from', () => {
     const store = setup()
-    const caravan = store.addEntity('the caravan', 'caravan').id
+    const caravan = store.addEntity('the caravan', 'caravan')!.id
     sendEast(store, 3)
     store.advanceTurn()
     store.setSupply(caravan, 'gold', 50)
@@ -1777,7 +1786,7 @@ describe("a caravan's stores", () => {
 
   it('go with their caravan, and come back with an undo', () => {
     const store = setup()
-    const caravan = store.addEntity('the caravan', 'caravan').id
+    const caravan = store.addEntity('the caravan', 'caravan')!.id
     store.setSupply(caravan, 'food', 40)
 
     store.removeEntity(caravan)
@@ -1792,7 +1801,7 @@ describe("a caravan's stores", () => {
 
   it('come back from a snapshot as they were saved', () => {
     const store = setup()
-    const caravan = store.addEntity('the caravan', 'caravan').id
+    const caravan = store.addEntity('the caravan', 'caravan')!.id
     store.setSupply(caravan, 'food', 40)
     store.advanceTurn()
     store.setSupply(caravan, 'gold', 90)
@@ -1811,7 +1820,7 @@ describe("a caravan's stores", () => {
 describe('an inventory', () => {
   /** A caravan at the middle with the party walked aboard it from two hexes east. */
   const aboard = (store: Store): { party: string; caravan: string } => {
-    const caravan = store.addEntity('the caravan', 'caravan').id
+    const caravan = store.addEntity('the caravan', 'caravan')!.id
     const party = store.entities[0].id
 
     store.selectEntity(caravan)
@@ -1828,7 +1837,7 @@ describe('an inventory', () => {
   it('lists what each party and caravan carries, in the order it was added', () => {
     const store = setup()
     const party = store.selectedId
-    const caravan = store.addEntity('the caravan', 'caravan').id
+    const caravan = store.addEntity('the caravan', 'caravan')!.id
 
     const rope = store.addItem(party, { name: 'rope', quantity: 2, notes: '50 ft', weight: 1.5 })!
     const torch = store.addItem(party, { name: 'torch' })!
@@ -1843,7 +1852,7 @@ describe('an inventory', () => {
 
   it('takes nothing nameless, nor onto an npc or nobody', () => {
     const store = setup()
-    const npc = store.addEntity('the hermit', 'npc').id
+    const npc = store.addEntity('the hermit', 'npc')!.id
 
     expect(store.addItem(store.selectedId, { name: '   ' })).toBeNull()
     expect(store.addItem(npc, { name: 'staff' })).toBeNull()
@@ -1872,7 +1881,7 @@ describe('an inventory', () => {
   it('removes a line, and goes with the entity that carried it', () => {
     const store = setup()
     const party = store.selectedId
-    const caravan = store.addEntity('the caravan', 'caravan').id
+    const caravan = store.addEntity('the caravan', 'caravan')!.id
     const rope = store.addItem(party, { name: 'rope' })!.id
     store.addItem(party, { name: 'torch' })
     store.addItem(caravan, { name: 'grain' })
@@ -1925,7 +1934,7 @@ describe('an inventory', () => {
   it('hands nothing across to a caravan the party is not riding in', () => {
     const store = setup()
     const party = store.selectedId
-    const caravan = store.addEntity('the caravan', 'caravan').id
+    const caravan = store.addEntity('the caravan', 'caravan')!.id
     const torch = store.addItem(party, { name: 'torch' })!.id
 
     store.transferItem(torch, caravan, 1)
@@ -1936,7 +1945,7 @@ describe('an inventory', () => {
 
   it('comes back from a snapshot as it was saved', () => {
     const store = setup()
-    const caravan = store.addEntity('the caravan', 'caravan').id
+    const caravan = store.addEntity('the caravan', 'caravan')!.id
     store.addItem(store.selectedId, { name: 'rope', quantity: 2, weight: 1.5 })
     store.addItem(caravan, { name: 'grain', quantity: 40, notes: 'sacks' })
     const saved = store.snapshot
@@ -1976,7 +1985,7 @@ describe('the services catalog', () => {
 
   it('adds an entry of the DM’s own and lets it go again', () => {
     const store = setup()
-    const made = store.addCatalogEntry('cook', { name: 'Pickled eel', level: 2 })
+    const made = store.addCatalogEntry('cook', { name: 'Pickled eel', level: 2 })!
 
     expect(catalogFor('cook', store.catalog)).toContainEqual(made)
     store.editCatalogEntry(made.id, { description: 'Keeps a month.' })
@@ -2013,7 +2022,7 @@ describe('the services catalog', () => {
   it('comes back from a snapshot', () => {
     const store = setup()
     store.editCatalogEntry('mage.teleport', { price: '2,000 gp' })
-    const made = store.addCatalogEntry('mage')
+    const made = store.addCatalogEntry('mage')!
 
     setActivePinia(createPinia())
     const fresh = setup()
@@ -2029,8 +2038,8 @@ describe('resources', () => {
   it('adds and removes resources, read back hex by hex', () => {
     const store = setup()
 
-    const timber = store.addResource(here, 'timber')
-    const herbs = store.addResource(here, 'herbs', 'generated')
+    const timber = store.addResource(here, 'timber')!
+    const herbs = store.addResource(here, 'herbs', 'generated')!
     store.addResource('0,0' as HexKey, 'iron')
 
     expect(store.resourcesOn(here)).toEqual([
@@ -2093,7 +2102,7 @@ describe('resources', () => {
     store.setTiles(flatField(30))
     store.setResourceChance('grass', 1)
     store.setResourceSpacing(5)
-    const kept = store.addResource('0,0' as HexKey, 'iron')
+    const kept = store.addResource('0,0' as HexKey, 'iron')!
     store.addResource('3,0' as HexKey, 'clay', 'generated')
 
     store.generateResources(7)
@@ -2192,7 +2201,7 @@ describe('undo and redo', () => {
 
   it('takes back merchant and resource edits', () => {
     const store = setup()
-    const caravan = store.addEntity('the caravan', 'caravan').id
+    const caravan = store.addEntity('the caravan', 'caravan')!.id
     const smith = store.addMerchant(caravan, 'smith')!.id
     store.setMerchantLevel(smith, 5)
     store.addResource(here, 'timber')
@@ -2271,7 +2280,7 @@ describe('undo and redo', () => {
 
   it('takes back adding, removing and renaming an entity', () => {
     const store = setup()
-    const added = store.addEntity('the caravan', 'caravan')
+    const added = store.addEntity('the caravan', 'caravan')!
     store.undo()
     expect(store.entities.some((one) => one.id === added.id)).toBe(false)
 
@@ -2314,8 +2323,8 @@ describe('undo and redo', () => {
 
   it('takes back events and locations added or removed', () => {
     const store = setup()
-    const event = store.addEvent(here, { title: 'ambush', description: '' })
-    const location = store.addLocation(here, { name: 'Oakvale', kind: 'village', description: '' })
+    const event = store.addEvent(here, { title: 'ambush', description: '' })!
+    const location = store.addLocation(here, { name: 'Oakvale', kind: 'village', description: '' })!
     store.removeEvent(here, event)
 
     store.undo()
@@ -2472,7 +2481,7 @@ describe('encounter tables', () => {
     store.advanceTurn()
     const { entry } = store.rollEncounterOn('2,0', () => 0)!
 
-    const id = store.acceptEncounter('2,0', entry)
+    const id = store.acceptEncounter('2,0', entry)!
 
     expect(store.events.get('2,0')?.[0]).toMatchObject({ id, turn: 2 })
     expect(
@@ -2539,5 +2548,323 @@ describe('encounter tables', () => {
     expect(fresh.encounterTable('water', 'day').some((one) => one.id === 'water.pirates')).toBe(
       false,
     )
+  })
+})
+
+describe("the store's permissions", () => {
+  /**
+   * A table set up by the DM before the players take the screen: the party
+   * riding the players' wagon, and the DM's bandits riding a hidden caravan.
+   */
+  const table = (store: Store) => {
+    const party = store.selectedId
+    const wagon = store.addEntity('the wagon', 'caravan')!.id
+    const caravan = store.addEntity('the smugglers', 'caravan', 'dm')!.id
+    const bandits = store.addEntity('the bandits', 'party', 'dm')!.id
+    const scout = store.addEntity('the scout')!.id
+
+    const putDown = (id: string, at: Axial, boarding?: Axial): void => {
+      store.selectEntity(id)
+      store.select(at)
+      if (boarding) store.select(boarding)
+    }
+    putDown(wagon, { q: 0, r: 0 })
+    putDown(party, { q: 2, r: 0 }, { q: 0, r: 0 })
+    putDown(caravan, { q: -3, r: 0 })
+    putDown(bandits, { q: -3, r: 2 }, { q: -3, r: 0 })
+    store.advanceTurn()
+    store.advanceTurn()
+    store.selectEntity(party)
+
+    const rope = store.addItem(party, { name: 'rope' })!.id
+    const loot = store.addItem(bandits, { name: 'loot', quantity: 5 })!.id
+    const merchant = store.addMerchant(caravan, 'smith', 'Hild', 1)!.id
+    // A step to undo and a step to redo.
+    store.setNote('1,1', 'a well')
+    store.setNote('2,2', 'a cairn')
+    store.undo()
+    store.setDmTool('paint')
+    store.setPaintTerrain('forest')
+
+    store.dmView = false
+    return { party, wagon, caravan, bandits, scout, rope, loot, merchant }
+  }
+
+  type Table = ReturnType<typeof table>
+
+  /** Everything a call could change, shared or not. */
+  const state = (store: Store) => ({
+    saved: store.snapshot,
+    field: store.field,
+    dmTool: store.dmTool,
+    brushSize: store.brushSize,
+    paintTerrain: store.paintTerrain,
+    fogMode: store.fogMode,
+    roadErase: store.roadErase,
+    roadTail: store.roadTail,
+    canUndo: store.canUndo,
+    canRedo: store.canRedo,
+  })
+
+  // A forbidden call, and whatever the DM does first to give it something to change.
+  type Case = [
+    name: string,
+    act: (store: Store, its: Table) => unknown,
+    prepare?: (store: Store, its: Table) => unknown,
+  ]
+
+  const grassEncounter = (store: Store): string => store.encounterTable('grass', 'day')[0].id
+  const oakvale = { name: 'Oakvale', kind: 'village', description: '' } as const
+
+  const FORBIDDEN: Record<string, Case[]> = {
+    place: [
+      ['place', (s, t) => s.place(t.scout, '1,1')],
+      ['select', (s) => s.select({ q: 1, r: 1 }), (s, t) => s.selectEntity(t.scout)],
+      ['click', (s) => s.click({ q: 1, r: 1 }), (s, t) => s.selectEntity(t.scout)],
+    ],
+    order: [
+      ['queueAction', (s, t) => s.queueAction(t.caravan, { kind: 'wait' })],
+      ['select', (s) => s.select({ q: -4, r: 0 }), (s, t) => s.selectEntity(t.caravan)],
+      ['click', (s) => s.click({ q: -4, r: 0 }), (s, t) => s.selectEntity(t.caravan)],
+      ['clear', (s) => s.clear(), (s, t) => s.selectEntity(t.caravan)],
+      ['removeWaypoint', (s) => s.removeWaypoint(0), (s, t) => s.selectEntity(t.caravan)],
+    ],
+    renameEntity: [['renameEntity', (s, t) => s.renameEntity(t.caravan, 'the friends')]],
+    editInventory: [
+      ['addItem', (s, t) => s.addItem(t.bandits, { name: 'knife' })],
+      ['editItem', (s, t) => s.editItem(t.loot, { name: 'gold' })],
+      ['removeItem', (s, t) => s.removeItem(t.loot)],
+    ],
+    transferItem: [['transferItem', (s, t) => s.transferItem(t.loot, t.caravan, 2)]],
+    addEntity: [['addEntity', (s) => s.addEntity('the stranger')]],
+    removeEntity: [['removeEntity', (s, t) => s.removeEntity(t.party)]],
+    entitySettings: [
+      ['setPace', (s, t) => s.setPace(t.party, 2)],
+      ['setEntitySight', (s, t) => s.setEntitySight(t.party, 9)],
+      ['setSight', (s) => s.setSight(9)],
+    ],
+    clock: [
+      ['advanceTurn', (s) => s.advanceTurn()],
+      ['rewindTurn', (s) => s.rewindTurn()],
+      ['goToTurn', (s) => s.goToTurn(0)],
+      ['skipPhase', (s) => s.skipPhase()],
+    ],
+    supplies: [['setSupply', (s, t) => s.setSupply(t.wagon, 'food', 5)]],
+    merchants: [
+      ['addMerchant', (s, t) => s.addMerchant(t.caravan, 'cook')],
+      ['removeMerchant', (s, t) => s.removeMerchant(t.merchant)],
+      ['renameMerchant', (s, t) => s.renameMerchant(t.merchant, 'Brand')],
+      ['setMerchantLevel', (s, t) => s.setMerchantLevel(t.merchant, 3)],
+      ['editCatalogEntry', (s) => s.editCatalogEntry('smith.sharpen', { price: '1 gp' })],
+      ['removeCatalogEntry', (s) => s.removeCatalogEntry('smith.sharpen')],
+      ['addCatalogEntry', (s) => s.addCatalogEntry('cook')],
+      [
+        'resetCatalogEntry',
+        (s) => s.resetCatalogEntry('smith.sharpen'),
+        (s) => s.editCatalogEntry('smith.sharpen', { price: '1 gp' }),
+      ],
+    ],
+    fog: [['setFogMode', (s) => s.setFogMode('hide')]],
+    terrain: [
+      ['setField', (s) => s.setField(fieldFromTiles(flatField(2)))],
+      ['setTiles', (s) => s.setTiles(flatField(2))],
+      ['setTerrain', (s) => s.setTerrain({ seed: 7 })],
+      ['reseed', (s) => s.reseed()],
+      ['setWorldRadius', (s) => s.setWorldRadius(20)],
+      ['setWorldSize', (s) => s.setWorldSize('small')],
+      ['setPaintTerrain', (s) => s.setPaintTerrain('water')],
+    ],
+    roads: [
+      ['setRoadErase', (s) => s.setRoadErase(true)],
+      [
+        'finishRoad',
+        (s) => s.finishRoad(),
+        (s) => {
+          s.setDmTool('road')
+          s.click({ q: 1, r: 1 })
+        },
+      ],
+    ],
+    mapTools: [
+      ['setDmTool', (s) => s.setDmTool('fog')],
+      ['setBrushSize', (s) => s.setBrushSize(3)],
+      [
+        'a brush stroke',
+        (s) => {
+          s.startStroke({ q: 3, r: 0 })
+          s.continueStroke({ q: 4, r: 0 })
+          s.endStroke()
+        },
+      ],
+    ],
+    resources: [
+      ['addResource', (s) => s.addResource('1,1', 'timber')],
+      [
+        'removeResource',
+        (s) => s.removeResource(s.resources[0].id),
+        (s) => s.addResource('1,1', 'timber'),
+      ],
+      ['generateResources', (s) => s.generateResources(1), (s) => s.setResourceChance('grass', 1)],
+      ['setResourceChance', (s) => s.setResourceChance('grass', 0.9)],
+      ['setResourceSpacing', (s) => s.setResourceSpacing(RESOURCE_SPACING_LIMITS.min)],
+    ],
+    notes: [['setNote', (s) => s.setNote('3,3', 'a ruin')]],
+    locations: [
+      ['addLocation', (s) => s.addLocation('1,1', oakvale)],
+      [
+        'removeLocation',
+        (s) => s.removeLocation('1,1', s.locations.get('1,1')![0].id),
+        (s) => s.addLocation('1,1', oakvale),
+      ],
+    ],
+    events: [
+      ['addEvent', (s) => s.addEvent('1,1', { title: 'ambush', description: '' })],
+      [
+        'removeEvent',
+        (s) => s.removeEvent('1,1', s.events.get('1,1')![0].id),
+        (s) => s.addEvent('1,1', { title: 'ambush', description: '' }),
+      ],
+    ],
+    encounters: [
+      ['acceptEncounter', (s) => s.acceptEncounter('1,1', s.encounters[0])],
+      ['setEncounter', (s) => s.setEncounter(grassEncounter(s), { weight: 99 })],
+      ['removeEncounter', (s) => s.removeEncounter(grassEncounter(s))],
+      [
+        'restoreEncounter',
+        (s) => s.restoreEncounter('grass.wolves'),
+        (s) => s.removeEncounter('grass.wolves'),
+      ],
+      [
+        'addEncounter',
+        (s) =>
+          s.addEncounter({
+            terrain: 'grass',
+            when: 'any',
+            weight: 1,
+            title: 'a fox',
+            description: '',
+          }),
+      ],
+      [
+        'resetEncounters',
+        (s) => s.resetEncounters('grass'),
+        (s) => s.removeEncounter(grassEncounter(s)),
+      ],
+    ],
+    maps: [['restore', (s) => s.restore({ ...s.snapshot, notes: [], turn: 0 })]],
+    clearHistory: [['clearHistory', (s) => s.clearHistory()]],
+    undo: [
+      ['undo', (s) => s.undo()],
+      ['redo', (s) => s.redo()],
+    ],
+  }
+
+  const cases = Object.entries(FORBIDDEN).flatMap(([group, list]) =>
+    list.map(([name, act, prepare]) => [group, name, act, prepare] as const),
+  )
+
+  it.each(cases)('%s: a player calling %s changes nothing', (_, __, act, prepare) => {
+    const store = setup()
+    const its = table(store)
+    if (prepare) store.actAs(DM, () => prepare(store, its))
+    const before = state(store)
+
+    act(store, its)
+
+    expect(state(store)).toEqual(before)
+  })
+
+  it.each(cases)('%s: the DM calling %s still changes something', (_, __, act, prepare) => {
+    const store = setup()
+    const its = table(store)
+    store.dmView = true
+    prepare?.(store, its)
+    const before = state(store)
+
+    act(store, its)
+
+    expect(state(store)).not.toEqual(before)
+  })
+
+  it('rolls no encounter for a player', () => {
+    const store = setup()
+    table(store)
+    expect(store.rollEncounterOn('0,0', () => 0)).toBeNull()
+    store.dmView = true
+    expect(store.rollEncounterOn('0,0', () => 0)).not.toBeNull()
+  })
+
+  it('lets a player order their own party, by click or by call', () => {
+    const store = setup()
+    const { party } = table(store)
+
+    store.click({ q: 1, r: 1 })
+    expect(store.goal).toBe('1,1')
+    store.clear()
+    expect(store.goal).toBeNull()
+    store.queueAction(party, { kind: 'camp' })
+    expect(store.queue.get(party)).toEqual({ kind: 'camp' })
+  })
+
+  it('gives an order rather than working the ground, whatever tool the DM left in hand', () => {
+    const store = setup()
+    table(store)
+    expect(store.dmTool).toBe('paint')
+
+    store.click({ q: 1, r: 1 })
+
+    expect(store.terrainOverrides.size).toBe(0)
+    expect(store.goal).toBe('1,1')
+  })
+
+  it('lets a player rename their own party and keep its inventory', () => {
+    const store = setup()
+    const { party, rope } = table(store)
+
+    store.renameEntity(party, 'the company')
+    const torch = store.addItem(party, { name: 'torch' })!.id
+    store.editItem(rope, { quantity: 3 })
+    store.removeItem(torch)
+
+    expect(store.entities.find((one) => one.id === party)?.name).toBe('the company')
+    expect(store.itemsOf(party)).toMatchObject([{ id: rope, quantity: 3 }])
+  })
+
+  it('lets a player hand things to the wagon they ride in', () => {
+    const store = setup()
+    const { party, wagon, rope } = table(store)
+
+    store.transferItem(rope, wagon, 1)
+
+    expect(store.itemsOf(party)).toEqual([])
+    expect(store.itemsOf(wagon).map((one) => one.name)).toEqual(['rope'])
+  })
+
+  it('judges a call made as somebody else by who they are, not by the view', () => {
+    const store = setup()
+    const { party, caravan } = table(store)
+    store.dmView = true
+
+    store.actAs(PLAYER, () => {
+      store.renameEntity(caravan, 'the friends')
+      store.renameEntity(party, 'the company')
+      store.setDmTool('select')
+      store.click({ q: 1, r: 1 })
+    })
+
+    expect(store.entities.find((one) => one.id === caravan)?.name).toBe('the smugglers')
+    expect(store.entities.find((one) => one.id === party)?.name).toBe('the company')
+    expect(store.dmTool).toBe('paint')
+    expect(store.goal).toBe('1,1')
+    expect(store.terrainOverrides.size).toBe(0)
+    expect(store.viewer).toEqual(DM)
+  })
+
+  it('follows the view switch, which anyone may turn', () => {
+    const store = setup()
+    table(store)
+    expect(store.viewer).toEqual(PLAYER)
+    store.dmView = true
+    expect(store.viewer).toEqual(DM)
   })
 })

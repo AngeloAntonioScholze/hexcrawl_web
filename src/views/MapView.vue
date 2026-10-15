@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed, ref } from 'vue'
+import { computed, ref, watchEffect } from 'vue'
 import CaravanPanel from '../components/CaravanPanel.vue'
 import DayNightDial from '../components/DayNightDial.vue'
 import DmToolbar from '../components/DmToolbar.vue'
@@ -7,7 +7,9 @@ import HexCanvas from '../components/HexCanvas.vue'
 import HexDetails from '../components/HexDetails.vue'
 import InventoryList from '../components/InventoryList.vue'
 import MapList from '../components/MapList.vue'
+import SessionProbe from '../components/SessionProbe.vue'
 import ViewToggle from '../components/ViewToggle.vue'
+import { useDebugMode } from '../composables/useDebugMode'
 import { MIN_MAX_ZOOM } from '../composables/useHexWindow'
 import { useUndoKeys } from '../composables/useUndoKeys'
 import { useZoomLimit } from '../composables/useZoomLimit'
@@ -62,6 +64,14 @@ const onSpacing = (event: Event): void => {
 const onChance = (terrainId: TerrainId, event: Event): void => {
   store.setResourceChance(terrainId, Number((event.target as HTMLInputElement).value) / 100)
 }
+
+const debug = useDebugMode()
+
+// The host is always the DM; peeking at the players' view is a debugging aid,
+// and turning it off hands the DM their own view back.
+watchEffect(() => {
+  if (!debug.value && !store.dmView) store.dmView = true
+})
 
 const zoomLimit = useZoomLimit()
 
@@ -174,7 +184,7 @@ const olderTurns = computed(() => Math.max(0, store.adventureLog.length - TURNS_
   <main>
     <HexCanvas />
     <DayNightDial />
-    <ViewToggle />
+    <ViewToggle v-if="debug" />
     <DmToolbar />
     <HexDetails />
     <div class="panels">
@@ -367,6 +377,13 @@ const olderTurns = computed(() => Math.max(0, store.adventureLog.length - TURNS_
               @input="onZoomLimit"
             />
           </div>
+
+          <SessionProbe />
+
+          <label class="control">
+            <input v-model="debug" type="checkbox" />
+            <span>debug mode</span>
+          </label>
 
           <p class="dim">drag to pan · wheel to zoom · Q / E to rotate</p>
         </div>

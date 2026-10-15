@@ -1,5 +1,6 @@
 import type { HexKey } from '../hex/coords'
 import type { Movement } from '../terrain/travel'
+import { isNight } from '../time/clock'
 
 export type EntityKind = 'party' | 'caravan' | 'npc' | 'ship'
 
@@ -47,6 +48,17 @@ export const ENTITY_COLORS: readonly string[] = [
   '#d98b5f',
   '#7fc4bd',
 ]
+
+/** What the dark leaves of an entity's sight, and the least it can ever see. */
+export const NIGHT_SIGHT = 0.3
+export const MIN_NIGHT_SIGHT = 1
+
+/**
+ * Dark does not slow anybody down, it blinds them: an entity keeps its pace
+ * after nightfall and loses most of its horizon.
+ */
+export const sightAt = (entity: Entity, turn: number): number =>
+  isNight(turn) ? Math.max(MIN_NIGHT_SIGHT, Math.round(entity.sight * NIGHT_SIGHT)) : entity.sight
 
 /** What each kind is worth before anyone edits it: pace, then daylight sight. */
 export const KIND_DEFAULTS: Readonly<Record<EntityKind, { pacePerTurn: number; sight: number }>> = {

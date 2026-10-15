@@ -1,6 +1,7 @@
 {
   "name": "hexcrawl-web",
   "private": true,
+  "license": "AGPL-3.0-or-later",
   "type": "module",
   "scripts": {
     "bench": "bun run scripts/bench-fog.ts",
@@ -35,6 +36,7 @@
   "dependencies": {
     "@babylonjs/core": "^9.25.0",
     "@sqlite.org/sqlite-wasm": "^3.53.4-build1",
+    "peerjs": "^1.5.5",
     "pinia": "^4.0.3",
     "vue": "^3.5.42",
     "vue-router": "^5.3.1"
