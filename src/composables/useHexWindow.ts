@@ -5,6 +5,7 @@ import {
   rectCorners,
   sameSpan,
   spanCapacity,
+  spanCost,
   tilesAmong,
   tilesEntering,
   tilesInSpan,
@@ -21,8 +22,8 @@ const WIDEST = 3
 
 /**
  * The most hexes the grid will ever be asked to hold, whatever the world. Sized
- * so a world too big to see whole reaches FARTHEST_ZOOM at the default hex size;
- * 205 would need 295k.
+ * so a world too big to hold reaches zoom 200 at the default hex size; 205
+ * would need 295k. The huge world fits in it whole.
  */
 export const ZOOM_BUDGET = 290_000
 
@@ -30,10 +31,11 @@ export const ZOOM_BUDGET = 290_000
 export const WHOLE_WORLD = 80_000
 
 /**
- * How far back a world too big to see whole may be pulled. Past zoom 195 the
- * grid could hold the whole huge world, so frame rate sets this, not the buffers.
+ * How far back a world too big to see whole may be pulled. The huge world fits
+ * in the grid whole, so frame rate sets this, not the buffers; past it the view
+ * is a smear of hexes a pixel or two across. Viewers can hold it closer.
  */
-export const FARTHEST_ZOOM = 200
+export const FARTHEST_ZOOM = 300
 
 /** And the least, so even a tiny world gets a view worth having. */
 export const MIN_BUDGET = 20_000
@@ -125,13 +127,19 @@ export const gridCapacity = (layout: Layout): number =>
  * can ask for more; an overflow would throw inside the render loop and stop it
  * for good, so such a view is narrowed until it fits and its sides lose a
  * sliver instead. It is never narrowed past square, which at the map's lean
- * sits well inside the circle the grid was sized for.
+ * sits well inside the circle the grid was sized for. Only ground inside the
+ * rim is charged for, so a world that fits the grid whole is never squeezed.
  */
-export function viewSpan(layout: Layout, view: View, capacity = Infinity): ChunkSpan {
+export function viewSpan(
+  layout: Layout,
+  view: View,
+  capacity = Infinity,
+  radius = Infinity,
+): ChunkSpan {
   let aspect = view.aspect
   let span = chunkSpanFor(layout, viewFootprint(view))
 
-  while (spanCapacity(span) > capacity && aspect > 1) {
+  while (spanCost(span, radius) > capacity && aspect > 1) {
     aspect = Math.max(1, aspect * SQUEEZE)
     span = chunkSpanFor(layout, viewFootprint({ ...view, aspect }))
   }
@@ -225,6 +233,7 @@ export function useHexWindow(
         beta: camera.beta,
       },
       scene.grid.capacity,
+      field().radius,
     )
     if (sameSpan(span, next)) return
 

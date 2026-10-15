@@ -8,6 +8,7 @@ import {
 import type { Action, ActionKind, ActionRecord } from '../entities/action'
 import type { CatalogEntry, CatalogKind, CatalogOverride, CatalogPatch } from '../entities/catalog'
 import type { Entity, EntityKind, Owner } from '../entities/entity'
+import { QUANTITY_LIMITS, type Item } from '../entities/inventory'
 import {
   MERCHANT_LEVELS,
   MERCHANT_TYPES,
@@ -60,6 +61,11 @@ const isSupply =
     Number.isInteger(value) &&
     (value as number) >= 0 &&
     (value as number) <= SUPPLY_LIMITS[supply].max
+
+const isQuantity: Guard<number> = (value): value is number =>
+  Number.isInteger(value) &&
+  (value as number) >= QUANTITY_LIMITS.min &&
+  (value as number) <= QUANTITY_LIMITS.max
 
 const isChance: Guard<number> = (value): value is number =>
   isNumber(value) && value >= 0 && value <= 1
@@ -266,6 +272,16 @@ const SNAPSHOT_FIELDS: { [K in keyof MapSnapshot]-?: Guard<MapSnapshot[K]> } = {
       level: isLevel,
     }),
   ),
+  items: listOf(
+    shape<Item>({
+      id: isString,
+      ownerId: isString,
+      name: isString,
+      quantity: isQuantity,
+      notes: isString,
+      weight: nullable(isWeight),
+    }),
+  ),
   catalogOverrides: isCatalogOverrides,
   resources: listOf(
     shape<Resource>({
@@ -336,6 +352,7 @@ const ADDED_FIELD_DEFAULTS: {
   rivers: () => [],
   terrainOverrides: () => [],
   supplies: () => [],
+  items: () => [],
 }
 
 const withDefault = (key: string, value: unknown): unknown => {

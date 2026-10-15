@@ -90,6 +90,10 @@ const snapshot = (): MapSnapshot => ({
     { hex: '0,0' as HexKey, id: 'loc-1', name: 'Oakvale', kind: 'village', description: '' },
   ],
   merchants: [{ id: 'merchant-1', caravanId: 'party-1', name: 'Bram', type: 'smith', level: 4 }],
+  items: [
+    { id: 'item-1', ownerId: 'party-1', name: 'rope', quantity: 2, notes: '', weight: 1.5 },
+    { id: 'item-2', ownerId: 'party-1', name: 'map', quantity: 1, notes: 'torn', weight: null },
+  ],
   catalogOverrides: [
     { id: 'smith.sharpen', op: 'edit', patch: { price: '12 gp', materials: [] } },
     { id: 'smith.armour', op: 'remove' },
@@ -213,6 +217,10 @@ describe('parseMapFile', () => {
     ['a null location', (map) => (map.locations[0] = null), 'locations'],
     ['an unknown merchant type', (map) => (map.merchants[0].type = 'jester'), 'merchants'],
     ['a merchant level past 10', (map) => (map.merchants[0].level = 11), 'merchants'],
+    ['an item of none', (map) => (map.items[0].quantity = 0), 'items'],
+    ['an item of half a rope', (map) => (map.items[0].quantity = 1.5), 'items'],
+    ['an item weighing less than nothing', (map) => (map.items[0].weight = -1), 'items'],
+    ['an item with no notes', (map) => delete map.items[1].notes, 'items'],
     [
       'an unknown catalog change',
       (map) => (map.catalogOverrides[1].op = 'hide'),
@@ -332,6 +340,7 @@ describe('parseMapFile', () => {
     ['rivers', []],
     ['terrainOverrides', []],
     ['supplies', []],
+    ['items', []],
   ])('opens a file from before %s existed with the default', (field, fallback) => {
     const result = parseMapFile(tampered((file) => delete file.map[field]))
     expect(result).toEqual({ ok: true, snapshot: { ...snapshot(), [field]: fallback } })

@@ -1,8 +1,9 @@
+import { ArcRotateCamera } from '@babylonjs/core/Cameras/arcRotateCamera'
 import { NullEngine } from '@babylonjs/core/Engines/nullEngine'
 import { Vector3 } from '@babylonjs/core/Maths/math.vector'
 import { Scene } from '@babylonjs/core/scene'
 import { afterEach, beforeEach, describe, expect, it } from 'vitest'
-import { createIsoCamera, type IsoCamera } from './camera'
+import { createIsoCamera, OrbitCamera, type IsoCamera } from './camera'
 
 // Enough of a canvas for the rig: it only reads client dimensions and never
 // touches a rendering context, which NullEngine provides.
@@ -27,6 +28,47 @@ afterEach(() => {
   iso.dispose()
   scene.dispose()
   engine.dispose()
+})
+
+describe('OrbitCamera', () => {
+  const poses = [
+    { alpha: -Math.PI / 2, beta: 0.8, radius: 100, target: new Vector3(0, 0, 0) },
+    { alpha: 1.3, beta: 1.2, radius: 100, target: new Vector3(12, 0, -7) },
+    { alpha: -4.1, beta: 0.4, radius: 35, target: new Vector3(-3, 2, 40) },
+  ]
+
+  it('sits where the ArcRotateCamera formula puts it', () => {
+    for (const { alpha, beta, radius, target } of poses) {
+      const camera = new OrbitCamera('orbit', alpha, beta, radius, target.clone(), scene)
+      camera.getViewMatrix()
+      expect(camera.position.x).toBeCloseTo(target.x + radius * Math.cos(alpha) * Math.sin(beta), 10)
+      expect(camera.position.y).toBeCloseTo(target.y + radius * Math.cos(beta), 10)
+      expect(camera.position.z).toBeCloseTo(target.z + radius * Math.sin(alpha) * Math.sin(beta), 10)
+      camera.dispose()
+    }
+  })
+
+  it('sees exactly what an ArcRotateCamera at the same pose sees', () => {
+    for (const { alpha, beta, radius, target } of poses) {
+      const orbit = new OrbitCamera('orbit', alpha, beta, radius, target.clone(), scene)
+      const arc = new ArcRotateCamera('arc', alpha, beta, radius, target.clone(), scene)
+      // ArcRotateCamera adds its (zero) screen offset, which turns -0 into 0.
+      const entries = (camera: OrbitCamera | ArcRotateCamera): number[] =>
+        camera.getViewMatrix().asArray().map((value) => value + 0)
+      expect(entries(orbit)).toEqual(entries(arc))
+      orbit.dispose()
+      arc.dispose()
+    }
+  })
+
+  it('follows a target moved in place', () => {
+    const camera = new OrbitCamera('orbit', 1, 0.8, 100, Vector3.Zero(), scene)
+    const before = camera.getViewMatrix().clone()
+    camera.target.x = 10
+    expect(camera.getViewMatrix().asArray()).not.toEqual(before.asArray())
+    expect(camera.position.x).toBeCloseTo(10 + 100 * Math.cos(1) * Math.sin(0.8), 10)
+    camera.dispose()
+  })
 })
 
 describe('settling', () => {
@@ -188,11 +230,6 @@ describe('tilt', () => {
     expect(midway).toBeGreaterThan(start)
     expect(midway).toBeLessThan(rig.camera.beta)
     rig.dispose()
-  })
-
-  it('keeps beta limits wide enough for the range it uses', () => {
-    expect(iso.camera.lowerBetaLimit).toBeLessThanOrEqual(iso.camera.beta)
-    expect(iso.camera.upperBetaLimit).toBeGreaterThanOrEqual(iso.camera.beta)
   })
 })
 

@@ -223,6 +223,17 @@ const MIGRATIONS: readonly string[] = [
     PRIMARY KEY (a, b)
   ) WITHOUT ROWID;
   `,
+  `
+  CREATE TABLE item (
+    id TEXT PRIMARY KEY,
+    owner_id TEXT NOT NULL,
+    ord INTEGER NOT NULL,
+    name TEXT NOT NULL,
+    quantity INTEGER NOT NULL,
+    notes TEXT NOT NULL,
+    weight REAL
+  );
+  `,
 ]
 
 export const SCHEMA_VERSION = MIGRATIONS.length

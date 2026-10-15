@@ -22,6 +22,15 @@ import {
   type CatalogPatch,
 } from '../entities/catalog'
 import {
+  carriesInventory,
+  clampQuantity,
+  cleanWeight,
+  moveItem,
+  newItem,
+  type Item,
+  type ItemFields,
+} from '../entities/inventory'
+import {
   clampLevel,
   MERCHANT_INFO,
   newMerchant,
@@ -259,6 +268,9 @@ export const useHexMapStore = defineStore('hexMap', () => {
   /** Every caravan's crew, in the order they were taken on. */
   const merchants = shallowRef<readonly Merchant[]>([])
 
+  /** What every party, caravan and ship carries, each owner's in the order it was added. */
+  const items = shallowRef<readonly Item[]>([])
+
   /** What each caravan's wagons hold, turn by turn, as the DM has set it. */
   const supplies = shallowRef<SupplyLedger>(new Map())
 
@@ -339,6 +351,7 @@ export const useHexMapStore = defineStore('hexMap', () => {
     events: slotOf(events),
     locations: slotOf(locations),
     merchants: slotOf(merchants),
+    items: slotOf(items),
     supplies: slotOf(supplies),
     catalogOverrides: slotOf(catalogOverrides),
     resources: slotOf(resources),
@@ -480,6 +493,9 @@ export const useHexMapStore = defineStore('hexMap', () => {
     queue.value = orders
 
     merchants.value = merchants.value.filter((one) => one.caravanId !== id)
+    if (items.value.some((one) => one.ownerId === id)) {
+      items.value = items.value.filter((one) => one.ownerId !== id)
+    }
 
     if (supplies.value.has(id)) {
       const stores = new Map(supplies.value)
@@ -679,6 +695,57 @@ export const useHexMapStore = defineStore('hexMap', () => {
 
   const setMerchantLevel = (id: string, level: number): void => {
     patchMerchant(id, { level: clampLevel(level) })
+  }
+
+  const itemsOf = (ownerId: string): readonly Item[] =>
+    items.value.filter((one) => one.ownerId === ownerId)
+
+  const keepsInventory = (id: string): boolean => {
+    const kind = entities.value.find((one) => one.id === id)?.kind
+    return kind !== undefined && carriesInventory(kind)
+  }
+
+  const addItem = (
+    ownerId: string,
+    fields: Partial<ItemFields> & { name: string },
+  ): Item | null => {
+    if (!keepsInventory(ownerId) || !fields.name.trim()) return null
+    const made = newItem(ownerId, fields)
+    items.value = [...items.value, made]
+    return made
+  }
+
+  /** A blank name is ignored rather than leaving a line nobody can read. */
+  const editItem = (id: string, change: Partial<ItemFields>): void => {
+    const clean: Partial<ItemFields> = {}
+    if (change.name !== undefined && change.name.trim()) clean.name = change.name.trim()
+    if (change.quantity !== undefined) clean.quantity = clampQuantity(change.quantity)
+    if (change.notes !== undefined) clean.notes = change.notes.trim()
+    if (change.weight !== undefined) clean.weight = cleanWeight(change.weight)
+    if (Object.keys(clean).length === 0) return
+    items.value = items.value.map((one) => (one.id === id ? { ...one, ...clean } : one))
+  }
+
+  const removeItem = (id: string): void => {
+    const remaining = items.value.filter((one) => one.id !== id)
+    if (remaining.length !== items.value.length) items.value = remaining
+  }
+
+  /**
+   * Who an entity can hand things to this turn: the carrier it rides in, or
+   * whoever rides in it. Nobody reaches into a caravan from the next hex.
+   */
+  const inventoryPartners = (id: string): readonly Entity[] => {
+    if (!keepsInventory(id)) return []
+    const carrier = carrierOf(id)
+    const partners = carrier ? entities.value.filter((one) => one.id === carrier) : ridersOf(id)
+    return partners.filter((one) => carriesInventory(one.kind))
+  }
+
+  const transferItem = (id: string, toId: string, quantity: number): void => {
+    const from = items.value.find((one) => one.id === id)
+    if (!from || !inventoryPartners(from.ownerId).some((one) => one.id === toId)) return
+    items.value = moveItem(items.value, id, toId, quantity)
   }
 
   /** What a caravan's wagons hold on the turn the crawl stands on. */
@@ -1508,6 +1575,7 @@ export const useHexMapStore = defineStore('hexMap', () => {
     events: [...events.value].flatMap(([hex, list]) => list.map((one) => ({ hex, ...one }))),
     locations: [...locations.value].flatMap(([hex, list]) => list.map((one) => ({ hex, ...one }))),
     merchants: merchants.value,
+    items: items.value,
     supplies: [...supplies.value].flatMap(([entityId, entries]) =>
       entries.map((entry) => ({ entityId, ...entry })),
     ),
@@ -1573,6 +1641,7 @@ export const useHexMapStore = defineStore('hexMap', () => {
     events.value = grouped<HexEvent>(saved.events)
     locations.value = grouped<HexLocation>(saved.locations)
     merchants.value = saved.merchants.map((one) => ({ ...one }))
+    items.value = saved.items.map((one) => ({ ...one }))
     const stores = new Map<string, SupplyEntry[]>()
     for (const { entityId, ...entry } of saved.supplies) {
       stores.set(entityId, [...(stores.get(entityId) ?? []), entry])
@@ -1756,6 +1825,13 @@ export const useHexMapStore = defineStore('hexMap', () => {
     removeMerchant: history.track(removeMerchant),
     renameMerchant: history.track(renameMerchant, (id) => `merchant-name:${id}`),
     setMerchantLevel: history.track(setMerchantLevel, (id) => `merchant-level:${id}`),
+    items,
+    itemsOf,
+    inventoryPartners,
+    addItem: history.track(addItem),
+    editItem: history.track(editItem, (id, change) => `item:${id}:${Object.keys(change).join()}`),
+    removeItem: history.track(removeItem),
+    transferItem: history.track(transferItem),
     supplies,
     suppliesOf,
     setSupply: history.track(setSupply, (id, supply) => `supply:${id}:${supply}`),

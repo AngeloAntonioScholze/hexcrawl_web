@@ -1769,6 +1769,148 @@ describe("a caravan's stores", () => {
   })
 })
 
+describe('an inventory', () => {
+  /** A caravan at the middle with the party walked aboard it from two hexes east. */
+  const aboard = (store: Store): { party: string; caravan: string } => {
+    const caravan = store.addEntity('the caravan', 'caravan').id
+    const party = store.entities[0].id
+
+    store.selectEntity(caravan)
+    store.select({ q: 0, r: 0 })
+    store.selectEntity(party)
+    store.select({ q: 2, r: 0 })
+    store.select({ q: 0, r: 0 })
+    store.advanceTurn()
+    store.advanceTurn()
+
+    return { party, caravan }
+  }
+
+  it('lists what each party and caravan carries, in the order it was added', () => {
+    const store = setup()
+    const party = store.selectedId
+    const caravan = store.addEntity('the caravan', 'caravan').id
+
+    const rope = store.addItem(party, { name: 'rope', quantity: 2, notes: '50 ft', weight: 1.5 })!
+    const torch = store.addItem(party, { name: 'torch' })!
+    store.addItem(caravan, { name: 'grain', quantity: 40 })
+
+    expect(store.itemsOf(party)).toEqual([
+      { id: rope.id, ownerId: party, name: 'rope', quantity: 2, notes: '50 ft', weight: 1.5 },
+      { id: torch.id, ownerId: party, name: 'torch', quantity: 1, notes: '', weight: null },
+    ])
+    expect(store.itemsOf(caravan).map((one) => one.name)).toEqual(['grain'])
+  })
+
+  it('takes nothing nameless, nor onto an npc or nobody', () => {
+    const store = setup()
+    const npc = store.addEntity('the hermit', 'npc').id
+
+    expect(store.addItem(store.selectedId, { name: '   ' })).toBeNull()
+    expect(store.addItem(npc, { name: 'staff' })).toBeNull()
+    expect(store.addItem('nobody', { name: 'staff' })).toBeNull()
+    expect(store.items).toEqual([])
+  })
+
+  it('edits a line, keeping its count whole and its name readable', () => {
+    const store = setup()
+    const id = store.addItem(store.selectedId, { name: 'rope', weight: 2 })!.id
+
+    store.editItem(id, { name: ' silk rope ', quantity: 3.4, notes: ' knotted ', weight: null })
+    store.editItem(id, { name: '  ' })
+    store.editItem(id, { quantity: -2 })
+
+    expect(store.items[0]).toEqual({
+      id,
+      ownerId: store.selectedId,
+      name: 'silk rope',
+      quantity: 1,
+      notes: 'knotted',
+      weight: null,
+    })
+  })
+
+  it('removes a line, and goes with the entity that carried it', () => {
+    const store = setup()
+    const party = store.selectedId
+    const caravan = store.addEntity('the caravan', 'caravan').id
+    const rope = store.addItem(party, { name: 'rope' })!.id
+    store.addItem(party, { name: 'torch' })
+    store.addItem(caravan, { name: 'grain' })
+
+    store.removeItem(rope)
+    expect(store.itemsOf(party).map((one) => one.name)).toEqual(['torch'])
+
+    store.removeEntity(caravan)
+    expect(store.items.map((one) => one.name)).toEqual(['torch'])
+  })
+
+  it('undoes every change, a run of edits to one field as one', () => {
+    const store = setup()
+    const id = store.addItem(store.selectedId, { name: 'rope' })!.id
+    store.editItem(id, { quantity: 2 })
+    store.editItem(id, { quantity: 3 })
+
+    store.undo()
+    expect(store.items[0].quantity).toBe(1)
+
+    store.undo()
+    expect(store.items).toEqual([])
+
+    store.redo()
+    store.removeItem(id)
+    store.undo()
+    expect(store.items.map((one) => one.name)).toEqual(['rope'])
+  })
+
+  it('hands things between a rider and its caravan, both ways', () => {
+    const store = setup()
+    const { party, caravan } = aboard(store)
+    const torch = store.addItem(party, { name: 'torch', quantity: 5 })!.id
+
+    expect(store.inventoryPartners(party).map((one) => one.id)).toEqual([caravan])
+    expect(store.inventoryPartners(caravan).map((one) => one.id)).toEqual([party])
+
+    store.transferItem(torch, caravan, 2)
+    expect(store.itemsOf(party).map((one) => one.quantity)).toEqual([3])
+    expect(store.itemsOf(caravan).map((one) => [one.name, one.quantity])).toEqual([['torch', 2]])
+
+    store.transferItem(store.itemsOf(caravan)[0].id, party, 2)
+    expect(store.itemsOf(caravan)).toEqual([])
+    expect(store.itemsOf(party).map((one) => one.quantity)).toEqual([5])
+
+    store.undo()
+    expect(store.itemsOf(caravan).map((one) => one.quantity)).toEqual([2])
+  })
+
+  it('hands nothing across to a caravan the party is not riding in', () => {
+    const store = setup()
+    const party = store.selectedId
+    const caravan = store.addEntity('the caravan', 'caravan').id
+    const torch = store.addItem(party, { name: 'torch' })!.id
+
+    store.transferItem(torch, caravan, 1)
+
+    expect(store.inventoryPartners(party)).toEqual([])
+    expect(store.itemsOf(party).map((one) => one.id)).toEqual([torch])
+  })
+
+  it('comes back from a snapshot as it was saved', () => {
+    const store = setup()
+    const caravan = store.addEntity('the caravan', 'caravan').id
+    store.addItem(store.selectedId, { name: 'rope', quantity: 2, weight: 1.5 })
+    store.addItem(caravan, { name: 'grain', quantity: 40, notes: 'sacks' })
+    const saved = store.snapshot
+
+    setActivePinia(createPinia())
+    const fresh = setup()
+    fresh.restore(saved)
+
+    expect(fresh.items).toEqual(saved.items)
+    expect(fresh.itemsOf(caravan).map((one) => one.name)).toEqual(['grain'])
+  })
+})
+
 describe('the services catalog', () => {
   const find = (store: Store, id: string) => store.catalog.find((one) => one.id === id)
 

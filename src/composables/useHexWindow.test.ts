@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest'
 import { FAR_BETA } from '../engine/camera'
-import { chunkSpanFor, rectCorners, spanCapacity } from '../engine/hexWindow'
+import { chunkSpanFor, rectCorners, spanCapacity, spanCost } from '../engine/hexWindow'
 import { createLayout } from '../hex/layout'
 import { WORLD_SIZES } from '../stores/hexMap'
 import {
@@ -135,32 +135,54 @@ describe('gridCapacity', () => {
     }
   })
 
-  // The frozen map: the large world's limit left standing on the huge one.
-  it('cannot hold a view the huge world was never allowed', () => {
+  // The frozen map: a smaller world's limit left standing on one too big to hold.
+  it('cannot hold a view a world too big for it was never allowed', () => {
+    const radius = 400
     const stale = maxZoomFor(layout, WORLD_SIZES.large)
     const span = viewSpan(layout, { ...MAP_VIEW, zoom: stale })
-    expect(spanCapacity(span)).toBeGreaterThan(gridCapacity(layout))
+    expect(stale).toBeGreaterThan(maxZoomFor(layout, radius))
+    expect(spanCost(span, radius)).toBeGreaterThan(gridCapacity(layout))
+  })
+
+  it('holds the whole huge world, so no view of it can overrun the grid', () => {
+    expect(hexCount(WORLD_SIZES.huge)).toBeLessThanOrEqual(gridCapacity(layout))
   })
 })
 
 describe('viewSpan', () => {
   it('never outgrows the grid, at any turn or lean the camera can take', () => {
     const capacity = gridCapacity(layout)
-    const widest = maxZoomFor(layout, WORLD_SIZES.huge)
 
-    for (let step = 0; step < 36; step++) {
-      const alpha = (step / 36) * Math.PI
-      for (const aspect of [0.5, 16 / 9, 3.5, 5]) {
-        const far = viewSpan(layout, { ...MAP_VIEW, zoom: widest, aspect, alpha }, capacity)
-        const near = viewSpan(
-          layout,
-          { ...MAP_VIEW, zoom: 20, aspect, alpha, beta: NEAR_BETA },
-          capacity,
-        )
-        expect(spanCapacity(far)).toBeLessThanOrEqual(capacity)
-        expect(spanCapacity(near)).toBeLessThanOrEqual(capacity)
+    for (const radius of [WORLD_SIZES.huge, 400]) {
+      const widest = maxZoomFor(layout, radius)
+      for (let step = 0; step < 36; step++) {
+        const alpha = (step / 36) * Math.PI
+        for (const aspect of [0.5, 16 / 9, 3.5, 5]) {
+          const far = viewSpan(
+            layout,
+            { ...MAP_VIEW, zoom: widest, aspect, alpha },
+            capacity,
+            radius,
+          )
+          const near = viewSpan(
+            layout,
+            { ...MAP_VIEW, zoom: 20, aspect, alpha, beta: NEAR_BETA },
+            capacity,
+            radius,
+          )
+          expect(spanCost(far, radius)).toBeLessThanOrEqual(capacity)
+          expect(spanCost(near, radius)).toBeLessThanOrEqual(capacity)
+        }
       }
     }
+  })
+
+  // A box that wide is mostly void past the rim, and the void costs nothing.
+  it('keeps the sides of the widest view of the huge world', () => {
+    const view = { ...MAP_VIEW, zoom: maxZoomFor(layout, WORLD_SIZES.huge) }
+    expect(viewSpan(layout, view, gridCapacity(layout), WORLD_SIZES.huge)).toEqual(
+      viewSpan(layout, view),
+    )
   })
 
   it('squeezes only a view that would not fit', () => {

@@ -13,6 +13,7 @@ import {
   rectCorners,
   sameSpan,
   spanCapacity,
+  spanCost,
   tilesAmong,
   tilesEntering,
   tilesInSpan,
@@ -100,6 +101,23 @@ describe('tilesInSpan', () => {
   it('never holds more hexes than the span says it can', () => {
     const span = { minQ: -2, maxQ: 2, minR: -2, maxR: 2 }
     expect(tilesInSpan(world(400), span).length).toBeLessThanOrEqual(spanCapacity(span))
+  })
+})
+
+describe('spanCost', () => {
+  it('counts exactly the hexes the grid is handed', () => {
+    for (const span of [
+      { minQ: -1, maxQ: 1, minR: -1, maxR: 1 },
+      { minQ: -3, maxQ: 0, minR: 1, maxR: 4 },
+      { minQ: 2, maxQ: 5, minR: -6, maxR: -2 },
+    ]) {
+      expect(spanCost(span, 20)).toBe(tilesInSpan(world(20), span).length)
+    }
+  })
+
+  it('is the whole box on a world without a rim', () => {
+    const span = { minQ: -2, maxQ: 3, minR: -1, maxR: 1 }
+    expect(spanCost(span, Infinity)).toBe(spanCapacity(span))
   })
 })
 

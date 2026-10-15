@@ -64,7 +64,7 @@ for (const zoom of [OPENING_ZOOM, maxZoom]) {
 
   const { alpha, beta, target } = iso.camera
   const view = { x: target.x, z: target.z, zoom: iso.zoom, aspect: WIDTH / HEIGHT, alpha, beta }
-  grid.setWindow(tilesInSpan(field, viewSpan(layout, view, capacity)))
+  grid.setWindow(tilesInSpan(field, viewSpan(layout, view, capacity, RADIUS)))
 
   console.log(`zoom ${iso.zoom.toFixed(0)}: ${grid.count} instances`)
 

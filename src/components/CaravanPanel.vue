@@ -1,8 +1,9 @@
 <script setup lang="ts">
 import { computed, watch } from 'vue'
-import { MERCHANT_INFO } from '../entities/merchant'
 import { useHexMapStore } from '../stores/hexMap'
+import CaravanMerchants from './CaravanMerchants.vue'
 import CaravanSupplies from './CaravanSupplies.vue'
+import InventoryList from './InventoryList.vue'
 
 const store = useHexMapStore()
 
@@ -17,7 +18,6 @@ const toggle = (): void => store.setPanelOpen('caravan', collapsed.value, narrow
 
 const caravan = computed(() => store.shownCaravan)
 const riders = computed(() => (caravan.value ? store.ridersOf(caravan.value.id) : []))
-const merchants = computed(() => (caravan.value ? store.merchantsOf(caravan.value.id) : []))
 
 // As with the hex details, a phone keeps whatever was last chosen: opening
 // here would fold away the entities list the caravan was just picked from.
@@ -50,6 +50,8 @@ watch(
     <div v-show="!collapsed" class="body">
       <CaravanSupplies :caravan-id="caravan.id" />
 
+      <InventoryList :owner-id="caravan.id" />
+
       <section class="section" aria-label="riders">
         <div class="row">
           <span class="label">riders</span>
@@ -72,25 +74,7 @@ watch(
         <p v-else class="label">nobody aboard</p>
       </section>
 
-      <section class="section" aria-label="merchants">
-        <div class="row">
-          <span class="label">merchants</span>
-          <span class="value">{{ merchants.length }}</span>
-        </div>
-        <ul v-if="merchants.length" class="list">
-          <li v-for="merchant in merchants" :key="merchant.id" class="merchant">
-            <span aria-hidden="true">{{ MERCHANT_INFO[merchant.type].icon }}</span>
-            <span class="name" :title="MERCHANT_INFO[merchant.type].blurb">
-              {{ merchant.name }}
-              <span v-if="merchant.name !== MERCHANT_INFO[merchant.type].label" class="label">
-                {{ MERCHANT_INFO[merchant.type].label.toLowerCase() }}
-              </span>
-            </span>
-            <span class="value">lv {{ merchant.level }}</span>
-          </li>
-        </ul>
-        <p v-else class="label">no merchants in the crew</p>
-      </section>
+      <CaravanMerchants :caravan-id="caravan.id" />
     </div>
   </aside>
 </template>
@@ -204,14 +188,6 @@ p {
 
 .list button.here {
   background: color-mix(in srgb, var(--line) 70%, transparent);
-}
-
-.merchant {
-  display: grid;
-  grid-template-columns: 1.1rem 1fr auto;
-  align-items: center;
-  gap: 0.4rem;
-  padding: 0.1rem 0.25rem;
 }
 
 .pip {

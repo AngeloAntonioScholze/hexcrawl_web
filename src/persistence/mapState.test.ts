@@ -114,6 +114,10 @@ const snapshot = (patch: Partial<MapSnapshot> = {}): MapSnapshot => ({
     { id: 'merchant-b', caravanId: caravan.id, name: 'Bram', type: 'smith', level: 10 },
     { id: 'merchant-a', caravanId: caravan.id, name: 'Mira', type: 'doctor', level: 1 },
   ],
+  items: [
+    { id: 'item-b', ownerId: caravan.id, name: 'rope', quantity: 3, notes: '50 ft', weight: 2.5 },
+    { id: 'item-a', ownerId: party.id, name: 'torch', quantity: 6, notes: '', weight: null },
+  ],
   catalogOverrides: [
     { id: 'smith.sharpen', op: 'edit', patch: { price: '12 gp', level: 5, materials: [] } },
     {
@@ -211,6 +215,7 @@ describe('schema', () => {
     expect(loaded.entities).toEqual([])
     expect(loaded.record).toEqual([])
     expect(loaded.merchants).toEqual([])
+    expect(loaded.items).toEqual([])
     expect(loaded.supplies).toEqual([])
     expect(loaded.catalogOverrides).toEqual([])
     expect(loaded.resources).toEqual([])
@@ -417,6 +422,16 @@ describe('map state', () => {
 
     saveSnapshot(db, snapshot({ merchants: [] }))
     expect(loadSnapshot(db)!.merchants).toEqual([])
+  })
+
+  it('round-trips every inventory in the order it was added, weighed or not', () => {
+    const saved = snapshot()
+    saveSnapshot(db, saved)
+
+    expect(loadSnapshot(db)!.items).toEqual(saved.items)
+
+    saveSnapshot(db, snapshot({ items: [] }))
+    expect(loadSnapshot(db)!.items).toEqual([])
   })
 
   it("round-trips a caravan's stores turn by turn, and lets them shrink", () => {

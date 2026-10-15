@@ -5,10 +5,14 @@ import DayNightDial from '../components/DayNightDial.vue'
 import DmToolbar from '../components/DmToolbar.vue'
 import HexCanvas from '../components/HexCanvas.vue'
 import HexDetails from '../components/HexDetails.vue'
+import InventoryList from '../components/InventoryList.vue'
 import MapList from '../components/MapList.vue'
 import ViewToggle from '../components/ViewToggle.vue'
+import { MIN_MAX_ZOOM } from '../composables/useHexWindow'
 import { useUndoKeys } from '../composables/useUndoKeys'
+import { useZoomLimit } from '../composables/useZoomLimit'
 import type { EntityKind } from '../entities/entity'
+import { carriesInventory } from '../entities/inventory'
 import { MAP_FILE_EXTENSION, parseMapFile, serialiseMap } from '../persistence/mapFile'
 import {
   MAX_SIGHT,
@@ -57,6 +61,12 @@ const onSpacing = (event: Event): void => {
 
 const onChance = (terrainId: TerrainId, event: Event): void => {
   store.setResourceChance(terrainId, Number((event.target as HTMLInputElement).value) / 100)
+}
+
+const zoomLimit = useZoomLimit()
+
+const onZoomLimit = (event: Event): void => {
+  zoomLimit.choose(Number((event.target as HTMLInputElement).value))
 }
 
 const resourceCounts = computed(() => countByOrigin(store.resources))
@@ -121,6 +131,14 @@ const walking = computed(() => store.entities.filter((one) => !store.carrierOf(o
 const carrierName = computed(() => {
   const carrier = store.carrierOf(store.selectedId)
   return carrier ? (store.entities.find((one) => one.id === carrier)?.name ?? null) : null
+})
+
+// A caravan's list sits in the caravan panel already; twice over is once too many.
+const ownInventory = computed(() => {
+  const selected = store.selectedEntity
+  return selected && carriesInventory(selected.kind) && store.shownCaravan?.id !== selected.id
+    ? selected
+    : null
 })
 
 const hint = computed(() => {
@@ -335,6 +353,21 @@ const olderTurns = computed(() => Math.max(0, store.adventureLog.length - TURNS_
             </div>
           </div>
 
+          <div class="control stack">
+            <div class="row">
+              <span>zoom-out limit</span>
+              <span class="value">{{ zoomLimit.limit.value }}</span>
+            </div>
+            <input
+              :value="zoomLimit.limit.value"
+              type="range"
+              :min="MIN_MAX_ZOOM"
+              :max="zoomLimit.farthest.value"
+              step="1"
+              @input="onZoomLimit"
+            />
+          </div>
+
           <p class="dim">drag to pan · wheel to zoom · Q / E to rotate</p>
         </div>
       </aside>
@@ -500,6 +533,8 @@ const olderTurns = computed(() => Math.max(0, store.adventureLog.length - TURNS_
               make camp this turn
             </button>
           </div>
+
+          <InventoryList v-if="ownInventory" :owner-id="ownInventory.id" />
 
           <label class="control">
             <input v-model="store.showHistory" type="checkbox" />

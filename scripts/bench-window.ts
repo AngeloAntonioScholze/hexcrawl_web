@@ -70,7 +70,7 @@ for (const [name, radius] of Object.entries(WORLDS)) {
   for (const zoom of [OPENING_ZOOM, maxZoomFor(layout, radius)]) {
     // The camera's resting turn, at the lean it holds past the tilt band.
     const view = { x: 0, z: 0, zoom, aspect: ASPECT, alpha: -Math.PI / 2, beta: FAR_BETA }
-    const span = viewSpan(layout, view, capacity)
+    const span = viewSpan(layout, view, capacity, radius)
     const tiles = tilesInSpan(field, span)
 
     console.log(

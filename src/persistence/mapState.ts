@@ -3,6 +3,7 @@ import type { EncounterOverride } from '../encounters/tables'
 import type { Action, ActionKind, ActionRecord } from '../entities/action'
 import type { CatalogOverride } from '../entities/catalog'
 import type { Entity, EntityKind, EntityState, Owner } from '../entities/entity'
+import type { Item } from '../entities/inventory'
 import type { Merchant, MerchantType } from '../entities/merchant'
 import type { SupplyEntry } from '../entities/supplies'
 import type { HexEvent, HexLocation } from '../hex/content'
@@ -71,6 +72,8 @@ export interface MapSnapshot {
   locations: readonly ({ hex: HexKey } & HexLocation)[]
   /** Every caravan's crew, in the order they were taken on. */
   merchants: readonly Merchant[]
+  /** What every party, caravan and ship carries, in the order it was added. */
+  items: readonly Item[]
   /** The DM's changes to the services catalog, in the order they were first made. */
   catalogOverrides: readonly CatalogOverride[]
   /** Listed in the order they were placed. */
@@ -303,6 +306,20 @@ export function saveSnapshot(db: Database, snapshot: MapSnapshot): void {
       merchant.finalize()
     }
 
+    db.exec('DELETE FROM item')
+    const item = db.prepare(
+      'INSERT INTO item (id, owner_id, ord, name, quantity, notes, weight) VALUES (?, ?, ?, ?, ?, ?, ?)',
+    )
+    try {
+      snapshot.items.forEach((one, index) => {
+        item
+          .bind([one.id, one.ownerId, index, one.name, one.quantity, one.notes, one.weight])
+          .stepReset()
+      })
+    } finally {
+      item.finalize()
+    }
+
     db.exec('DELETE FROM catalog_override')
     const catalogOverride = db.prepare(
       'INSERT INTO catalog_override (id, ord, payload) VALUES (?, ?, ?)',
@@ -475,6 +492,14 @@ export function loadSnapshot(db: Database): MapSnapshot | null {
       name: String(one.name),
       type: String(one.type) as MerchantType,
       level: Number(one.level),
+    })),
+    items: db.selectObjects('SELECT * FROM item ORDER BY ord').map((one) => ({
+      id: String(one.id),
+      ownerId: String(one.owner_id),
+      name: String(one.name),
+      quantity: Number(one.quantity),
+      notes: String(one.notes),
+      weight: one.weight === null ? null : Number(one.weight),
     })),
     catalogOverrides: db.selectObjects('SELECT * FROM catalog_override ORDER BY ord').map(
       (one) =>

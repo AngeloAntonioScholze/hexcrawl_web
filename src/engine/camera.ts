@@ -1,7 +1,74 @@
-import { ArcRotateCamera } from '@babylonjs/core/Cameras/arcRotateCamera'
 import { Camera } from '@babylonjs/core/Cameras/camera'
-import { Vector3 } from '@babylonjs/core/Maths/math.vector'
+import { TargetCamera } from '@babylonjs/core/Cameras/targetCamera'
+import { Vector3, type Matrix } from '@babylonjs/core/Maths/math.vector'
 import type { Scene } from '@babylonjs/core/scene'
+
+/**
+ * Sits on a sphere around its target and looks at it, placed exactly as
+ * ArcRotateCamera places itself. The rig drives alpha, beta and target and
+ * controls.ts owns input, so ArcRotateCamera's inputs, behaviours and device
+ * input system would only be dead weight in the bundle.
+ */
+export class OrbitCamera extends TargetCamera {
+  constructor(
+    name: string,
+    public alpha: number,
+    public beta: number,
+    public radius: number,
+    private orbitTarget: Vector3,
+    scene: Scene,
+  ) {
+    super(name, Vector3.Zero(), scene)
+    this.getViewMatrix()
+  }
+
+  override get target(): Vector3 {
+    return this.orbitTarget
+  }
+
+  override set target(value: Vector3) {
+    this.orbitTarget = value
+  }
+
+  override _initCache(): void {
+    super._initCache()
+    this._cache.target = new Vector3(Number.MAX_VALUE, Number.MAX_VALUE, Number.MAX_VALUE)
+    this._cache.alpha = undefined
+    this._cache.beta = undefined
+    this._cache.radius = undefined
+  }
+
+  override _updateCache(ignoreParentClass?: boolean): void {
+    if (!ignoreParentClass) super._updateCache()
+    this._cache.target.copyFrom(this.target)
+    this._cache.alpha = this.alpha
+    this._cache.beta = this.beta
+    this._cache.radius = this.radius
+  }
+
+  override _isSynchronizedViewMatrix(): boolean {
+    return (
+      super._isSynchronizedViewMatrix() &&
+      this._cache.alpha === this.alpha &&
+      this._cache.beta === this.beta &&
+      this._cache.radius === this.radius &&
+      this._cache.target.equals(this.target)
+    )
+  }
+
+  override _getViewMatrix(): Matrix {
+    // ArcRotateCamera nudges a zero sine so the look-at never degenerates.
+    const sinBeta = Math.sin(this.beta) || 0.0001
+    this.position.copyFromFloats(
+      this.target.x + this.radius * Math.cos(this.alpha) * sinBeta,
+      this.target.y + this.radius * Math.cos(this.beta),
+      this.target.z + this.radius * Math.sin(this.alpha) * sinBeta,
+    )
+    this._computeViewMatrix(this.position, this.target, this.upVector)
+    this._currentTarget.copyFrom(this.target)
+    return this._viewMatrix
+  }
+}
 
 // Tilt tracks zoom: pulled back the view flattens toward a map, pushed in it
 // drops toward the horizon so elevation reads three-dimensionally. Beta is
@@ -43,7 +110,7 @@ export interface IsoCameraOptions {
 }
 
 export interface IsoCamera {
-  camera: ArcRotateCamera
+  camera: OrbitCamera
   rotate(steps: number): void
   zoomBy(factor: number): void
   panBy(dxPixels: number, dyPixels: number): void
@@ -89,7 +156,7 @@ export function createIsoCamera(
 
   const initialZoom = clamp(options.zoom ?? 40, minZoom, maxZoom)
 
-  const camera = new ArcRotateCamera(
+  const camera = new OrbitCamera(
     'iso',
     -Math.PI / 2,
     betaFor(initialZoom),
@@ -98,8 +165,6 @@ export function createIsoCamera(
     scene,
   )
   camera.mode = Camera.ORTHOGRAPHIC_CAMERA
-  camera.lowerBetaLimit = Math.min(betaNear, betaFar)
-  camera.upperBetaLimit = Math.max(betaNear, betaFar)
   camera.minZ = -500
   camera.maxZ = 1000
 

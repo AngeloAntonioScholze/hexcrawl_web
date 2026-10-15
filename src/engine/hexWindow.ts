@@ -130,6 +130,26 @@ export const tilesInSpan = (field: TerrainField, span: ChunkSpan): HexTile[] =>
 export const spanCapacity = (span: ChunkSpan): number =>
   (span.maxQ - span.minQ + 1) * CHUNK * ((span.maxR - span.minR + 1) * CHUNK)
 
+/**
+ * How many hexes a span holds that a world of this radius has ground for,
+ * which is all the grid is ever handed: a window reaching past the rim is
+ * cheaper than its box. Counted a row at a time across the world's hexagon.
+ */
+export function spanCost(span: ChunkSpan, radius: number): number {
+  const firstQ = span.minQ * CHUNK
+  const lastQ = (span.maxQ + 1) * CHUNK - 1
+  const lastR = Math.min((span.maxR + 1) * CHUNK - 1, radius)
+  let cost = 0
+
+  for (let r = Math.max(span.minR * CHUNK, -radius); r <= lastR; r++) {
+    const low = Math.max(firstQ, -radius, -radius - r)
+    const high = Math.min(lastQ, radius, radius - r)
+    if (high >= low) cost += high - low + 1
+  }
+
+  return cost
+}
+
 /** The world-space box the whole map sits in, for the camera's pan bounds. */
 export function worldBounds(layout: Layout, radius: number): ViewRect {
   const rim = [

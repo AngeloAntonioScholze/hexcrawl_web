@@ -5,6 +5,7 @@ import { hexKey, parseKey, type HexKey } from '../hex/coords'
 import { createLayout } from '../hex/layout'
 import MiniMap from './MiniMap.vue'
 import { gridCapacity, maxZoomFor, useHexWindow } from '../composables/useHexWindow'
+import { useZoomLimit } from '../composables/useZoomLimit'
 import { useTurnPlayback } from '../composables/useTurnPlayback'
 import { createFogStepper } from '../engine/fogStepper'
 import type { HexGrid } from '../engine/hexGrid'
@@ -71,8 +72,14 @@ const makeWorld = (): void => {
 
 makeWorld()
 
-/** How far back this world may be looked at; a bigger one is allowed more. */
-const maxZoom = (): number => maxZoomFor(layout, store.worldRadius)
+const zoomLimit = useZoomLimit()
+
+// How far back this world may be looked at, a bigger one being allowed more;
+// the panel's slider holds the camera anywhere short of it.
+watchEffect(() => {
+  zoomLimit.farthest.value = maxZoomFor(layout, store.worldRadius)
+})
+const maxZoom = (): number => zoomLimit.limit.value
 
 // Sized for any world rather than for today's, so switching size moves the zoom
 // limit without ever reallocating.
@@ -292,6 +299,8 @@ const pushEverything = (created: NonNullable<typeof hexScene.value>): void => {
 watch(hexScene, (created) => {
   if (created) pushEverything(created)
 })
+
+watch(zoomLimit.limit, (limit) => hexScene.value?.setMaxZoom(limit))
 
 // A new seed or a new size is a different world: the field is replaced, the
 // scene is told its rim has moved, and the window rebuilds onto the new ground.
