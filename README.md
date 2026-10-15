@@ -70,4 +70,4 @@ bd show <id>   # issue detail
 
 ## License
 
-TODO
+[GNU AGPL v3.0 or later](LICENSE). Anyone who runs a modified copy as a public site must offer its source to the people using it.
