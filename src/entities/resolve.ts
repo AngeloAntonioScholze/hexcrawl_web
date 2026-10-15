@@ -3,8 +3,10 @@ import type { TerrainField } from '../terrain/field'
 import { crossesRiver, type Rivers } from '../terrain/rivers'
 import { hasRoad, type Roads } from '../terrain/roads'
 import {
+  besideLand,
   CLIMB_MULTIPLIER,
   KM_PER_HEX,
+  MOVEMENT_RULES,
   RIVER_CROSSING_KM,
   stepCostKm,
   type Movement,
@@ -59,12 +61,19 @@ function intent(
   return { ...state, kind: 'wait' }
 }
 
+/**
+ * Where the carriers stand once they have moved: the only water anyone on foot
+ * may step into, to board. A ship that sails off leaves the party on the shore.
+ */
+type Harbours = ReadonlySet<HexKey>
+
 function walk(
   entity: Entity,
   field: TerrainField,
   roads: Roads,
   rivers: Rivers,
   from: EntityState,
+  harbours: Harbours,
 ): EntityState & { entered: HexKey[] } {
   const entered: HexKey[] = []
   let at = from.at
@@ -95,9 +104,12 @@ function walk(
     const next = field.at(parseKey(pending[0]))
     if (!here || !next) break
 
+    const movement = KIND_MOVEMENT[entity.kind]
+    if (isWater(next) && !MOVEMENT_RULES[movement].water && !harbours.has(pending[0])) break
+
     const road = hasRoad(roads, here.hex, next.hex)
     const river = crossesRiver(rivers, here.hex, next.hex)
-    const cost = stepCostTurns(here, next, KIND_MOVEMENT[entity.kind], road, river)
+    const cost = stepCostTurns(here, next, movement, road, river)
     if (budget < cost) break
 
     budget -= cost
@@ -121,6 +133,7 @@ function step(
   rivers: Rivers,
   before: EntityState,
   action: Action | undefined,
+  harbours: Harbours = new Set(),
 ): Step {
   const { kind, ...ordered } = intent(before, action)
 
@@ -129,7 +142,7 @@ function step(
   // standstill, whatever it had left over.
   const after =
     kind === 'move'
-      ? walk(entity, field, roads, rivers, ordered)
+      ? walk(entity, field, roads, rivers, ordered, harbours)
       : { ...ordered, carry: kind === 'camp' ? 0 : ordered.carry, entered: [] as HexKey[] }
 
   const { entered, ...state } = after
@@ -145,9 +158,10 @@ const ride = (carrierId: string, carrier: Step): Step => ({
   spent: 0,
 })
 
+/** Open water with no shore beside it: nowhere for a rider to step off to. */
 const atSea = (field: TerrainField, at: HexKey | null): boolean => {
   const tile = at === null ? undefined : field.at(parseKey(at))
-  return tile !== undefined && isWater(tile)
+  return tile !== undefined && isWater(tile) && !besideLand(field, tile)
 }
 
 /**
@@ -158,7 +172,7 @@ const atSea = (field: TerrainField, at: HexKey | null): boolean => {
  * Carriers resolve first, so the entities riding inside them can follow. A
  * rider given a move order climbs out and walks it at its own pace from where
  * the carrier stood, at no extra cost; any other order leaves it aboard, and so
- * does a move order given at sea, where there is nowhere to step off to.
+ * does a move order given out at sea, with no shore beside it to step off to.
  */
 export function resolveTurn(
   turn: number,
@@ -178,6 +192,10 @@ export function resolveTurn(
     steps.set(carrier.id, step(carrier, field, roads, rivers, own, queued.get(carrier.id)))
   }
 
+  const harbours = new Set(
+    [...steps.values()].flatMap(({ state }) => (state.at === null ? [] : [state.at])),
+  )
+
   for (const entity of entities) {
     if (isCarrier(entity.kind)) continue
 
@@ -190,7 +208,7 @@ export function resolveTurn(
       entity.id,
       carrier && was.riding
         ? ride(was.riding, carrier)
-        : step(entity, field, roads, rivers, { ...was, riding: null }, action),
+        : step(entity, field, roads, rivers, { ...was, riding: null }, action, harbours),
     )
   }
 

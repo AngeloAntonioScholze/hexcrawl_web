@@ -3,6 +3,7 @@ import { computed, ref, shallowRef, watch } from 'vue'
 import type { Action, ActionRecord } from '../entities/action'
 import {
   idleState,
+  isCarrier,
   KIND_MOVEMENT,
   newEntity,
   type Entity,
@@ -92,6 +93,7 @@ import {
 } from '../terrain/resources'
 import { sightFrom, type PartySight } from '../terrain/sight'
 import {
+  besideLand,
   canEnter,
   chainRoute,
   findRoute,
@@ -439,11 +441,17 @@ export const useHexMapStore = defineStore('hexMap', () => {
     return caravan && (dmView.value || !caravan.hidden) ? caravan : null
   })
 
-  /** A rider whose carrier is out on open water, where there is nowhere to step off to. */
+  /** Water with land beside it: a ship there can take on or put off riders. */
+  const offshore = (hex: HexKey): boolean => {
+    const tile = tileAt(hex)
+    return tile !== undefined && besideLand(field.value, tile)
+  }
+
+  /** A rider whose carrier is out on open water, with no shore beside it to step off to. */
   const atSea = (id: string): boolean => {
     const at = stateOf(id).at
     const under = at ? tileAt(at) : undefined
-    return carrierOf(id) !== null && under !== undefined && isWater(under)
+    return carrierOf(id) !== null && under !== undefined && isWater(under) && !offshore(at!)
   }
 
   /** Where the selected entity stands: what the map calls the party's hex. */
@@ -894,17 +902,28 @@ export const useHexMapStore = defineStore('hexMap', () => {
 
   /**
    * Puts an entity on the map at the turn the crawl stands on, but only on
-   * ground its kind could stand on: no ship inland, nobody afloat on open sea.
+   * ground its kind could stand on: no ship on land, nobody afloat on open sea.
    */
   const place = (id: string, hex: HexKey): void => {
     const kind = entities.value.find((one) => one.id === id)?.kind ?? 'party'
     const under = tileAt(hex)
-    if (under && !canEnter(field.value, under, KIND_MOVEMENT[kind])) return
+    if (under && !canEnter(under, KIND_MOVEMENT[kind])) return
     truncate()
     const next = new Map(origins.value)
     next.set(id, { turn: turn.value, hex })
     origins.value = next
   }
+
+  /** Water hexes a carrier stands in this turn: where someone ashore can step aboard. */
+  const harbours = computed<ReadonlySet<HexKey>>(() => {
+    const moored = new Set<HexKey>()
+    for (const one of entities.value) {
+      const at = stateOf(one.id).at
+      const under = at ? tileAt(at) : undefined
+      if (at && under && isCarrier(one.kind) && isWater(under)) moored.add(at)
+    }
+    return moored
+  })
 
   // Whoever does the walking decides what ground the route may cross.
   const legsFrom = (walker: string, from: HexKey, waypoints: readonly HexKey[]): Route[] | null => {
@@ -913,6 +932,7 @@ export const useHexMapStore = defineStore('hexMap', () => {
       movement: KIND_MOVEMENT[kind],
       roads: roads.value,
       rivers: rivers.value,
+      harbours: isCarrier(kind) ? undefined : harbours.value,
     })
   }
 
@@ -1015,7 +1035,7 @@ export const useHexMapStore = defineStore('hexMap', () => {
       return
     }
     const under = tileAt(hex)
-    if (!under || !canEnter(field.value, under, 'land')) return
+    if (!under || !canEnter(under, 'land')) return
     if (tail === null) {
       roadTail.value = hex
       return
@@ -1266,7 +1286,7 @@ export const useHexMapStore = defineStore('hexMap', () => {
       steps: leg.steps,
       km: leg.km,
       turns: turnsFor(leg.km),
-      landfall: routeBySea.value && shoreAt(stops[index]) === 'coast',
+      landfall: routeBySea.value && offshore(stops[index]),
     }))
   })
 

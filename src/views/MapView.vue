@@ -143,11 +143,11 @@ const ownInventory = computed(() => {
 
 const hint = computed(() => {
   if (!store.start && store.selectedEntity?.kind === 'ship') {
-    return 'click a water or coast hex to put the ship there'
+    return 'click a water hex to put the ship there'
   }
   if (!store.start) return 'click a hex to put the entity there'
   if (carrierName.value && store.atSea(store.selectedId)) {
-    return `aboard ${carrierName.value} at sea · no orders until it puts in at a coast`
+    return `aboard ${carrierName.value} at sea · no orders until it lies beside land`
   }
   if (carrierName.value) {
     return `riding in ${carrierName.value} · click a hex to climb out and walk there`
@@ -489,7 +489,7 @@ const olderTurns = computed(() => Math.max(0, store.adventureLog.length - TURNS_
               <span>{{ leg.to }}</span>
               <span class="value">
                 {{ leg.km }} km · ~{{ leg.turns }}t
-                <span v-if="leg.landfall" class="dim" title="riders can step off here">
+                <span v-if="leg.landfall" class="dim" title="riders can step ashore here">
                   · puts in
                 </span>
               </span>

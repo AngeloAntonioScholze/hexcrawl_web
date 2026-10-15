@@ -2,8 +2,9 @@ import { Color3 } from '@babylonjs/core/Maths/math.color'
 import { describe, expect, it } from 'vitest'
 import { distance, hexKey, range, type Axial, type HexKey } from '../hex/coords'
 import { createLayout } from '../hex/layout'
-import { createTerrain, type TerrainTile } from './terrain'
+import { createTerrain, isWater, type TerrainTile } from './terrain'
 import {
+  besideLand,
   CLIMB_MULTIPLIER,
   CLIMB_THRESHOLD,
   KM_PER_HEX,
@@ -394,10 +395,13 @@ describe('land movement', () => {
     expect(findRoute(fieldFromTiles(channel()), { q: 0, r: 0 }, { q: 4, r: 0 })).toBeNull()
   })
 
-  it('refuses a route that starts or ends in water', () => {
-    const tiles = channel()
-    expect(findRoute(fieldFromTiles(tiles), { q: 2, r: 0 }, { q: 0, r: 0 })).toBeNull()
-    expect(findRoute(fieldFromTiles(tiles), { q: 0, r: 0 }, { q: 2, r: 0 })).toBeNull()
+  it('refuses a route that ends in water', () => {
+    expect(findRoute(fieldFromTiles(channel()), { q: 0, r: 0 }, { q: 2, r: 0 })).toBeNull()
+  })
+
+  it('sets off from water, as a rider stepping ashore', () => {
+    const route = findRoute(fieldFromTiles(channel()), { q: 2, r: 0 }, { q: 0, r: 0 })!
+    expect(route.steps).toBe(2)
   })
 
   it('walks around a lake rather than through it', () => {
@@ -437,53 +441,67 @@ describe('sea movement', () => {
     expect(shoreOf(field, field.at({ q: -1, r: 0 })!)).toBe('inland')
   })
 
-  it('lets a ship onto water and coast but not inland', () => {
+  it('lets a ship onto water only, and a party onto land only', () => {
     const field = fieldFromTiles(shore())
-    expect(canEnter(field, field.at({ q: 1, r: 0 })!, 'sea')).toBe(true)
-    expect(canEnter(field, field.at({ q: 0, r: 0 })!, 'sea')).toBe(true)
-    expect(canEnter(field, field.at({ q: -1, r: 0 })!, 'sea')).toBe(false)
-    expect(canEnter(field, field.at({ q: 1, r: 0 })!, 'land')).toBe(false)
-    expect(canEnter(field, field.at({ q: -1, r: 0 })!, 'land')).toBe(true)
+    expect(canEnter(field.at({ q: 1, r: 0 })!, 'sea')).toBe(true)
+    expect(canEnter(field.at({ q: 0, r: 0 })!, 'sea')).toBe(false)
+    expect(canEnter(field.at({ q: -1, r: 0 })!, 'sea')).toBe(false)
+    expect(canEnter(field.at({ q: 1, r: 0 })!, 'land')).toBe(false)
+    expect(canEnter(field.at({ q: -1, r: 0 })!, 'land')).toBe(true)
   })
 
-  it('sails out from the coast across open water', () => {
-    const route = findRoute(fieldFromTiles(shore()), { q: 0, r: 0 }, { q: 4, r: 0 }, sail)!
-    expect(route.steps).toBe(4)
-    expect(route.km).toBe(4 * KM_PER_HEX)
-  })
-
-  it('refuses to sail inland', () => {
-    const field = fieldFromTiles(shore())
-    expect(findRoute(field, { q: 4, r: 0 }, { q: -2, r: 0 }, sail)).toBeNull()
-    expect(findRoute(field, { q: -2, r: 0 }, { q: 4, r: 0 }, sail)).toBeNull()
-  })
-
-  it('keeps every hex of a voyage on water or coast', () => {
-    const field = fieldFromTiles(shore())
-    const route = findRoute(field, { q: 0, r: -4 }, { q: 0, r: 4 }, sail)!
-    for (const hex of route.hexes) expect(canEnter(field, field.at(hex)!, 'sea')).toBe(true)
-  })
-
-  it('puts in under a cliff without paying for the climb', () => {
-    const tiles = shore(9)
-    expect(stepCostKm(water({ q: 1, r: 0 }), tiles.get(hexKey({ q: 0, r: 0 }))!, 'sea')).toBe(
-      KM_PER_HEX,
-    )
-    const route = findRoute(fieldFromTiles(tiles), { q: 3, r: 0 }, { q: 0, r: 0 }, sail)!
+  it('sails across open water', () => {
+    const route = findRoute(fieldFromTiles(shore()), { q: 1, r: 0 }, { q: 4, r: 0 }, sail)!
+    expect(route.steps).toBe(3)
     expect(route.km).toBe(3 * KM_PER_HEX)
   })
 
+  it('refuses to sail onto land, coast or inland', () => {
+    const field = fieldFromTiles(shore())
+    expect(findRoute(field, { q: 4, r: 0 }, { q: 0, r: 0 }, sail)).toBeNull()
+    expect(findRoute(field, { q: 4, r: 0 }, { q: -2, r: 0 }, sail)).toBeNull()
+  })
+
+  it('keeps every hex of a voyage on water', () => {
+    const field = fieldFromTiles(shore())
+    const route = findRoute(field, { q: 1, r: -4 }, { q: 1, r: 4 }, sail)!
+    for (const hex of route.hexes) expect(isWater(field.at(hex)!)).toBe(true)
+  })
+
   it('finds the shortest way round an island', () => {
-    // A highland island: its heart is inland, its rim is coast a ship can touch.
+    // A highland island seven hexes across: the ship keeps off all of it.
     const tiles = mapOf([])
     for (const hex of range({ q: 0, r: 0 }, 8)) tiles.set(hexKey(hex), water(hex))
     for (const hex of range({ q: 0, r: 0 }, 1)) tiles.set(hexKey(hex), tile(hex, 4))
 
-    const route = findRoute(fieldFromTiles(tiles), { q: -4, r: 0 }, { q: 4, r: 0 }, sail)!
-    expect(route.hexes.some((h) => h.q === 0 && h.r === 0)).toBe(false)
-    // The straight line runs through the heart, so one hex of detour is the best there is.
-    expect(route.steps).toBe(distance({ q: -4, r: 0 }, { q: 4, r: 0 }) + 1)
+    const field = fieldFromTiles(tiles)
+    const route = findRoute(field, { q: -4, r: 0 }, { q: 4, r: 0 }, sail)!
+    for (const hex of route.hexes) expect(isWater(field.at(hex)!)).toBe(true)
+    // Round the island's rim rather than over it: two hexes longer than the straight line.
+    expect(route.steps).toBe(distance({ q: -4, r: 0 }, { q: 4, r: 0 }) + 2)
     expect(route.km).toBe(route.steps * KM_PER_HEX)
+  })
+
+  it('tells the water a ship can put riders ashore from', () => {
+    const field = fieldFromTiles(shore())
+    expect(besideLand(field, field.at({ q: 1, r: 0 })!)).toBe(true)
+    expect(besideLand(field, field.at({ q: 3, r: 0 })!)).toBe(false)
+    expect(besideLand(field, field.at({ q: 0, r: 0 })!)).toBe(false)
+  })
+
+  it('steps ashore off a boat without paying for a climb', () => {
+    const tiles = shore(3)
+    expect(stepCostKm(water({ q: 1, r: 0 }), tiles.get(hexKey({ q: 0, r: 0 }))!)).toBe(KM_PER_HEX)
+  })
+
+  it('lets a party step off the shore onto a moored ship, and no further', () => {
+    const field = fieldFromTiles(shore())
+    const harbours = new Set<HexKey>(['1,0', '3,0'])
+    const board = findRoute(field, { q: -1, r: 0 }, { q: 1, r: 0 }, { harbours })!
+    expect(board.hexes.map(hexKey)).toEqual(['-1,0', '0,0', '1,0'])
+    // A ship out of reach of the shore cannot be walked to, nor water without one.
+    expect(findRoute(field, { q: -1, r: 0 }, { q: 3, r: 0 }, { harbours })).toBeNull()
+    expect(findRoute(field, { q: -1, r: 0 }, { q: 1, r: 1 }, { harbours })).toBeNull()
   })
 
   it('keeps a land party off the sea a ship can cross', () => {

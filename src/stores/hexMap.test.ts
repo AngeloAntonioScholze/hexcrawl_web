@@ -1349,7 +1349,7 @@ describe('riding a ship', () => {
     return tiles
   }
 
-  /** A DM's ship at the coast, and the party walked aboard it with a sight of one. */
+  /** A DM's ship moored off the coast, and the party walked aboard it with a sight of one. */
   const aboard = (store: Store): { party: string; ship: string } => {
     store.setTiles(shore())
     const ship = store.addEntity('the ship', 'ship', 'dm')
@@ -1357,10 +1357,11 @@ describe('riding a ship', () => {
     store.setEntitySight(party, 1)
 
     store.selectEntity(ship.id)
-    store.select({ q: 0, r: 0 })
+    store.select({ q: 1, r: 0 })
     store.selectEntity(party)
     store.select({ q: -2, r: 0 })
-    store.select({ q: 0, r: 0 })
+    store.select({ q: 1, r: 0 })
+    store.advanceTurn()
     store.advanceTurn()
     store.advanceTurn()
 
@@ -1369,11 +1370,11 @@ describe('riding a ship', () => {
 
   const sail = (store: Store, ship: string): void => {
     store.selectEntity(ship)
-    store.select({ q: 3, r: 0 })
+    store.select({ q: 4, r: 0 })
     store.advanceTurn()
   }
 
-  it('boards at the coast and is carried three hexes of sea in a turn', () => {
+  it('boards from the shore and is carried three hexes of sea in a turn', () => {
     const store = useHexMapStore()
     const { party, ship } = aboard(store)
     expect(store.carrierOf(party)).toBe(ship)
@@ -1381,32 +1382,63 @@ describe('riding a ship', () => {
     sail(store, ship)
 
     store.selectEntity(party)
-    expect(store.start).toBe('3,0')
+    expect(store.start).toBe('4,0')
     expect(store.carrierOf(party)).toBe(ship)
   })
 
-  it('takes no order from a rider at sea', () => {
+  it('leaves a party on the shore when the ship sails off as it steps aboard', () => {
+    const store = useHexMapStore()
+    store.setTiles(shore())
+    const ship = store.addEntity('the ship', 'ship', 'dm').id
+    const party = store.entities[0].id
+
+    store.selectEntity(ship)
+    store.select({ q: 1, r: 0 })
+    store.selectEntity(party)
+    store.select({ q: 0, r: 0 })
+    store.select({ q: 1, r: 0 })
+    store.selectEntity(ship)
+    store.select({ q: 4, r: 0 })
+    store.advanceTurn()
+
+    store.selectEntity(party)
+    expect(store.start).toBe('0,0')
+    expect(store.carrierOf(party)).toBeNull()
+  })
+
+  it('keeps a party off water with no ship in it', () => {
+    const store = useHexMapStore()
+    store.setTiles(shore())
+    const party = store.entities[0].id
+
+    store.selectEntity(party)
+    store.select({ q: 0, r: 0 })
+    store.select({ q: 1, r: 0 })
+    expect(store.queue.has(party)).toBe(false)
+  })
+
+  it('takes no order from a rider out at sea', () => {
     const store = useHexMapStore()
     const { party, ship } = aboard(store)
     sail(store, ship)
 
     store.selectEntity(party)
-    store.select({ q: 3, r: 1 })
-    store.select({ q: 3, r: 0 })
+    store.select({ q: -1, r: 0 })
+    store.select({ q: 4, r: 0 })
 
     expect(store.queue.has(party)).toBe(false)
   })
 
-  it('lets a rider off at the coast', () => {
+  it('lets a rider step ashore from a ship beside the coast', () => {
     const store = useHexMapStore()
     const { party } = aboard(store)
 
     store.selectEntity(party)
-    store.select({ q: -1, r: 0 })
+    store.select({ q: 0, r: 0 })
     store.advanceTurn()
 
     expect(store.carrierOf(party)).toBeNull()
-    expect(store.start).toBe('-1,0')
+    expect(store.start).toBe('0,0')
   })
 
   it("lets a hidden ship's riders see from every hex it crosses", () => {
@@ -1416,12 +1448,12 @@ describe('riding a ship', () => {
 
     sail(store, ship)
 
-    // Only the first sea hex has 1,1 in a sight of one; 4,0 only the last.
-    expect(store.explored.has('1,1')).toBe(true)
-    expect(store.explored.has('4,0')).toBe(true)
+    // In a sight of one, 2,1 shows only from the hexes sailed through, 5,0 only from the last.
+    expect(store.explored.has('2,1')).toBe(true)
+    expect(store.explored.has('5,0')).toBe(true)
   })
 
-  it('puts a ship down only on water or coast, and nobody else on water', () => {
+  it('puts a ship down only on water, and nobody else on water', () => {
     const store = useHexMapStore()
     store.setTiles(shore())
     const party = store.entities[0].id
@@ -1431,17 +1463,24 @@ describe('riding a ship', () => {
     store.select({ q: -2, r: 0 })
     expect(store.start).toBeNull()
     store.select({ q: 0, r: 0 })
-    expect(store.start).toBe('0,0')
+    expect(store.start).toBeNull()
+    store.select({ q: 1, r: 0 })
+    expect(store.start).toBe('1,0')
 
     store.selectEntity(party)
     store.select({ q: 2, r: 0 })
     expect(store.start).toBeNull()
     store.select({ q: 0, r: 1 })
     expect(store.start).toBe('0,1')
+  })
 
-    store.selectEntity(store.addEntity('the other ship', 'ship').id)
-    store.select({ q: 3, r: 0 })
-    expect(store.start).toBe('3,0')
+  it('never sails a ship onto the coast', () => {
+    const store = useHexMapStore()
+    const { ship } = aboard(store)
+
+    store.selectEntity(ship)
+    store.select({ q: 0, r: 0 })
+    expect(store.queue.has(ship)).toBe(false)
   })
 
   it('draws a ship as a boat, and its route as by sea', () => {
@@ -1450,17 +1489,17 @@ describe('riding a ship', () => {
     expect(store.tokens.find((one) => one.id === ship)?.shape).toBe('boat')
 
     store.selectEntity(ship)
-    store.select({ q: 3, r: 0 })
+    store.select({ q: 4, r: 0 })
     expect(store.routeBySea).toBe(true)
   })
 
-  it('marks the sailed legs that put in at a coast', () => {
+  it('marks the sailed legs that end beside land', () => {
     const store = useHexMapStore()
     const { party, ship } = aboard(store)
 
     store.selectEntity(ship)
-    store.select({ q: 3, r: 0 })
-    store.select({ q: 0, r: 2 }, true)
+    store.select({ q: 4, r: 0 })
+    store.select({ q: 1, r: 2 }, true)
     expect(store.legs.map((leg) => leg.landfall)).toEqual([false, true])
 
     store.selectEntity(party)
@@ -1476,7 +1515,7 @@ describe('riding a ship', () => {
     expect(store.shoreAt('-2,0')).toBe('inland')
   })
 
-  it('says which riders are at sea', () => {
+  it('says which riders are out at sea', () => {
     const store = useHexMapStore()
     const { party, ship } = aboard(store)
     expect(store.atSea(party)).toBe(false)
@@ -1491,13 +1530,13 @@ describe('riding a ship', () => {
     const { party, ship } = aboard(store)
     sail(store, ship)
 
-    store.goToTurn(2)
+    store.goToTurn(3)
     store.selectEntity(party)
-    expect(store.start).toBe('0,0')
+    expect(store.start).toBe('1,0')
     expect(store.carrierOf(party)).toBe(ship)
 
-    store.goToTurn(1)
-    expect(store.start).toBe('-1,0')
+    store.goToTurn(2)
+    expect(store.start).toBe('0,0')
     expect(store.carrierOf(party)).toBeNull()
   })
 })

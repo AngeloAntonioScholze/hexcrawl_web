@@ -22,7 +22,7 @@ const hex = computed(() => store.selectedHex)
 const tile = computed(() => (hex.value ? store.tileAt(hex.value) : undefined))
 const position = computed(() => (hex.value ? parseKey(hex.value) : null))
 const shore = computed(() => (hex.value ? store.shoreAt(hex.value) : null))
-const SHORE_LABELS = { water: 'open water · ships only', coast: 'coast · ships put in here' }
+const SHORE_LABELS = { water: 'open water · ships only', coast: 'coast · board ships from here' }
 const note = computed(() => (hex.value ? (store.notes.get(hex.value) ?? '') : ''))
 
 // A phone keeps whatever the DM last chose: popping open on every tap would

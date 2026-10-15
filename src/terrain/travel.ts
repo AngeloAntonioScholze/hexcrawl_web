@@ -1,4 +1,4 @@
-import { distance, neighbors, type Axial } from '../hex/coords'
+import { distance, hexKey, neighbors, type Axial, type HexKey } from '../hex/coords'
 import { findPath } from '../hex/pathfind'
 import type { TerrainField } from './field'
 import { crossesRiver, type Rivers } from './rivers'
@@ -54,8 +54,8 @@ export type Movement = 'land' | 'sea'
 export interface MovementRule {
   /** Whether open water can be entered at all. */
   water: boolean
-  /** Whether land with no water beside it can be entered; coast always can. */
-  inland: boolean
+  /** Whether land can be entered at all, coast included. */
+  land: boolean
   /** Whether rising ground costs extra: a ship putting in under a cliff does not climb it. */
   climbs: boolean
 }
@@ -67,8 +67,8 @@ export interface MovementRule {
  * never drift on fractions.
  */
 export const MOVEMENT_RULES: Readonly<Record<Movement, MovementRule>> = {
-  land: { water: false, inland: true, climbs: true },
-  sea: { water: true, inland: false, climbs: false },
+  land: { water: false, land: true, climbs: true },
+  sea: { water: true, land: false, climbs: false },
 }
 
 export interface RouteOptions {
@@ -76,6 +76,12 @@ export interface RouteOptions {
   movement?: Movement
   roads?: Roads
   rivers?: Rivers
+  /**
+   * Water hexes with a carrier moored in them. Someone on foot may step into
+   * one from the shore to board, but only as the last step of a route: a ship
+   * is a place to climb into, not a bridge.
+   */
+  harbours?: ReadonlySet<HexKey>
 }
 
 export interface Route {
@@ -94,8 +100,10 @@ export function stepCostKm(
 ): number {
   const rise = to.level - from.level
   const graded = road && ROADS_GRADED[movement]
+  // The sea's level is its surface, not a valley floor: stepping ashore off a
+  // boat is not a climb out of it.
   const ground =
-    MOVEMENT_RULES[movement].climbs && !graded && rise >= CLIMB_THRESHOLD
+    MOVEMENT_RULES[movement].climbs && !graded && !isWater(from) && rise >= CLIMB_THRESHOLD
       ? KM_PER_HEX * CLIMB_MULTIPLIER
       : KM_PER_HEX
   const fording = river && !road && RIVERS_SLOW[movement]
@@ -127,7 +135,16 @@ export function isCoast(field: TerrainField, tile: TerrainTile): boolean {
   })
 }
 
-/** Where a hex sits against the sea: what a ship may reach and where its riders may step off. */
+/** Water with land on at least one side: where a ship's riders can step ashore. */
+export function besideLand(field: TerrainField, tile: TerrainTile): boolean {
+  if (!isWater(tile)) return false
+  return neighbors(tile.hex).some((hex) => {
+    const next = field.at(hex)
+    return next !== undefined && !isWater(next)
+  })
+}
+
+/** Where a hex sits against the sea: where a party may board from, and where only ships go. */
 export type Shore = 'water' | 'coast' | 'inland'
 
 export function shoreOf(field: TerrainField, tile: TerrainTile): Shore {
@@ -135,10 +152,9 @@ export function shoreOf(field: TerrainField, tile: TerrainTile): Shore {
   return isCoast(field, tile) ? 'coast' : 'inland'
 }
 
-export function canEnter(field: TerrainField, tile: TerrainTile, movement: Movement): boolean {
+export function canEnter(tile: TerrainTile, movement: Movement): boolean {
   const rule = MOVEMENT_RULES[movement]
-  if (isWater(tile)) return rule.water
-  return rule.inland || isCoast(field, tile)
+  return isWater(tile) ? rule.water : rule.land
 }
 
 export function findRoute(
@@ -154,17 +170,23 @@ export function findRoute(
   const tileAt = (hex: Axial): TerrainTile | undefined => field.at(hex)
 
   const passable = (tile: TerrainTile | undefined): tile is TerrainTile =>
-    tile !== undefined && canEnter(field, tile, movement)
+    tile !== undefined && canEnter(tile, movement)
 
+  const goalKey = hexKey(goal)
+  const boards = options.harbours?.has(goalKey) ?? false
+
+  // The start is wherever the mover already is, so it need not be ground it
+  // could enter: a party aboard a ship sets off from the water.
   const from = tileAt(start)
   const to = tileAt(goal)
-  if (!passable(from) || !passable(to)) return null
+  if (!from || !to || !(passable(to) || boards)) return null
 
   const result = findPath(start, goal, {
     cost: (a, b) => {
       const here = tileAt(a)
       const there = tileAt(b)
-      if (!here || !passable(there)) return null
+      if (!here || !there) return null
+      if (!passable(there) && !(boards && hexKey(b) === goalKey)) return null
       const road = hasRoad(roads, a, b)
       const nudge = usesRoads && !road ? OFF_ROAD_NUDGE : 0
       return stepCostKm(here, there, movement, road, crossesRiver(rivers, a, b)) + nudge
