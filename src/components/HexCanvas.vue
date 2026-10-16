@@ -1,18 +1,30 @@
 <script setup lang="ts">
 import { Color3 } from '@babylonjs/core/Maths/math.color'
-import { computed, defineAsyncComponent, ref, watch, watchEffect } from 'vue'
+import { Vector3 } from '@babylonjs/core/Maths/math.vector'
+import {
+  computed,
+  defineAsyncComponent,
+  onBeforeUnmount,
+  onMounted,
+  ref,
+  watch,
+  watchEffect,
+} from 'vue'
 import { hexKey, parseKey, type HexKey } from '../hex/coords'
-import { createLayout } from '../hex/layout'
+import { createLayout, hexToWorld, type WorldPoint } from '../hex/layout'
 import MiniMap from './MiniMap.vue'
 import { gridCapacity, maxZoomFor, useHexWindow } from '../composables/useHexWindow'
+import { useStage, type StageDirector, type StageMark } from '../composables/useStage'
 import { useZoomLimit } from '../composables/useZoomLimit'
 import { useTurnPlayback } from '../composables/useTurnPlayback'
 import { createFogStepper } from '../engine/fogStepper'
 import type { HexGrid } from '../engine/hexGrid'
+import type { HexScene } from '../engine/scene'
 import { visiblePois } from '../engine/poiMarkers'
 import { resourceMarks } from '../engine/resourceMarkers'
 import { roadSpans } from '../engine/roadSegments'
 import type { SkyGlow } from '../engine/sky'
+import { seatAt, seatHeadings } from '../engine/stageSeats'
 import { useHexScene } from '../engine/useHexScene'
 import { DM } from '../session/permissions'
 import { useHexMapStore } from '../stores/hexMap'
@@ -47,6 +59,11 @@ const HEAD_TINT = new Color3(0.99, 0.93, 0.7)
 const START_TINT = new Color3(0.44, 0.78, 0.5)
 const GOAL_TINT = new Color3(0.86, 0.36, 0.36)
 const ROAD_TAIL_TINT = new Color3(0.78, 0.55, 0.3)
+
+/** How far back the enter screen stands: a wide plain of fog for the wave to roll across. */
+const TITLE_ZOOM = 32
+/** Where the view eases in to once the enter screen hands the map over. */
+const WORK_ZOOM = 30
 
 // Dev-only; the static DEV check lets the build drop the chunk entirely.
 const RenderStats = import.meta.env.DEV
@@ -178,16 +195,103 @@ const overlay = computed(() => {
 
 const fogStepper = createFogStepper()
 
-const paintFog = (grid: HexGrid): void =>
+const stage = useStage()
+const { veiled } = stage
+
+watch(veiled, (next) => hexScene.value?.setVeiled(next))
+
+const mapCentre = (): WorldPoint => hexToWorld(layout, { q: 0, r: 0 })
+
+const flatRight = (created: HexScene): { x: number; z: number } => {
+  const right = created.iso.camera.getDirection(Vector3.Right())
+  const length = Math.hypot(right.x, right.z) || 1
+  return { x: right.x / length, z: right.z / length }
+}
+
+// Read off the view the scene opens on, so the title card's seat is wherever
+// the camera first stood and the forms sit a third of the way round from it.
+const headings = new WeakMap<HexScene, Record<StageMark, number>>()
+
+const headingsFor = (created: HexScene): Record<StageMark, number> => {
+  let known = headings.get(created)
+  if (!known) {
+    known = seatHeadings(created.iso.camera.alpha, flatRight(created))
+    headings.set(created, known)
+  }
+  return known
+}
+
+// Wide enough that a card swung a third of the way round has left the middle
+// of the screen to the one taking its place.
+const seatRadius = (created: HexScene): number =>
+  0.6 * TITLE_ZOOM * created.engine.getAspectRatio(created.iso.camera)
+
+const placeSeats = (created: HexScene): void => {
+  const { camera, zoom } = created.iso
+  const height = created.engine.getRenderingCanvas()?.clientHeight ?? 1
+  const view = {
+    alpha: camera.alpha,
+    beta: camera.beta,
+    right: flatRight(created),
+    pixelsPerUnit: height / (2 * zoom),
+  }
+  const radius = seatRadius(created)
+  const at = headingsFor(created)
+  stage.seats.value = {
+    home: seatAt(at.home, view, radius),
+    host: seatAt(at.host, view, radius),
+    join: seatAt(at.join, view, radius),
+  }
+}
+
+// The map may have been turned any number of times while worked on; the way
+// round to a seat is the shorter one, not every turn unwound.
+const headingNear = (alpha: number, heading: number): number => {
+  const turn = 2 * Math.PI
+  return alpha + ((((heading - alpha) % turn) + turn + Math.PI) % turn) - Math.PI
+}
+
+const turnToMark = (created: HexScene, mark: StageMark): Promise<void> =>
+  created.iso.turnTo(headingNear(created.iso.camera.alpha, headingsFor(created)[mark]))
+
+const director: StageDirector = {
+  wave: () => hexScene.value?.wave(),
+  turnTo: (mark) => {
+    const created = hexScene.value
+    return created ? turnToMark(created, mark) : Promise.resolve()
+  },
+  zoomIn: () => {
+    const { x, z } = mapCentre()
+    return hexScene.value?.iso.glideTo(x, z, WORK_ZOOM) ?? Promise.resolve()
+  },
+  zoomOut: async () => {
+    const created = hexScene.value
+    if (!created) return
+    const { x, z } = mapCentre()
+    await Promise.all([created.iso.glideTo(x, z, TITLE_ZOOM), turnToMark(created, 'home')])
+  },
+}
+
+onMounted(() => stage.direct(director))
+onBeforeUnmount(() => stage.direct(null))
+
+const paintFog = (grid: HexGrid): void => {
+  hexScene.value?.setRevealOrigin(store.start ? parseKey(store.start) : null)
   fogStepper.paint(grid, {
-    fog: store.fog,
+    fog: store.fogShown,
     visible: store.visibleToPlayers,
     windowKeys,
     windowTick: windowTick.value,
     explored: store.knownState,
   })
+}
 
 watch(overlay, (next) => hexScene.value?.grid.setOverlay(next))
+
+watch(
+  () => store.seeThrough,
+  (next) => hexScene.value?.grid.setSeeThrough(next),
+)
 
 watchEffect(() => {
   const grid = hexScene.value?.grid
@@ -220,38 +324,22 @@ watch(
   ({ hexes, color }) => hexScene.value?.stops.setStops(hexes, color),
 )
 
-const marks = computed(() =>
-  resourceMarks(store.resources, {
-    dmView: store.dmView,
-    fog: store.fog,
-    explored: store.known,
-  }),
-)
+const marks = computed(() => resourceMarks(store.resources, store.drawnView))
 
 watch(marks, (next) => hexScene.value?.resources.setMarks(next))
 
-const pois = computed(() =>
-  visiblePois(store.locations, store.events, {
-    dmView: store.dmView,
-    fog: store.fog,
-    explored: store.known,
-  }),
-)
+const pois = computed(() => visiblePois(store.locations, store.events, store.drawnView))
 
 watch(pois, (next) => hexScene.value?.pois.setPois(next))
 
-const spans = computed(() =>
-  roadSpans(store.roads, { dmView: store.dmView, fog: store.fog, explored: store.explored }),
-)
+const spans = computed(() => roadSpans(store.roads, store.drawnView))
 
 watch(spans, (next) => {
   hexScene.value?.roads.setSpans(next)
   hexScene.value?.bridges.setRoads(next)
 })
 
-const riverLines = computed(() =>
-  roadSpans(store.rivers, { dmView: store.dmView, fog: store.fog, explored: store.explored }),
-)
+const riverLines = computed(() => roadSpans(store.rivers, store.drawnView))
 
 watch(riverLines, (next) => {
   hexScene.value?.rivers.setSpans(next)
@@ -291,6 +379,7 @@ const pushEverything = (created: NonNullable<typeof hexScene.value>): void => {
   // than the new world allows asks the grid for more than it holds.
   created.setMaxZoom(maxZoom())
   created.grid.setOverlay(overlay.value)
+  created.grid.setSeeThrough(store.seeThrough)
   // Neither the window nor the crawl is anything this fog has seen before, so
   // it goes down whole rather than as a step off the last painting.
   fogStepper.reset()
@@ -298,10 +387,23 @@ const pushEverything = (created: NonNullable<typeof hexScene.value>): void => {
   pushHeights(created)
   created.vision.setShown(store.showSight)
   created.setDaylight(timeOfDay(store.clock))
+  created.setVeiled(veiled.value)
 }
 
 watch(hexScene, (created) => {
-  if (created) pushEverything(created)
+  if (!created) return
+  pushEverything(created)
+  // The cards ride the map as it turns, so they are placed every frame the
+  // camera has moved, after it has moved.
+  created.scene.onBeforeRenderObservable.add(() => {
+    if (veiled.value) placeSeats(created)
+  })
+  // A scene that opens under the veil opens on the title, not on the map.
+  if (veiled.value) {
+    const { x, z } = mapCentre()
+    created.iso.jumpTo(x, z, TITLE_ZOOM)
+    placeSeats(created)
+  }
 })
 
 watch(zoomLimit.limit, (limit) => hexScene.value?.setMaxZoom(limit))
@@ -333,7 +435,7 @@ watch(
 <template>
   <canvas ref="canvas" touch-action="none" />
   <div class="sky-glow" :style="glowStyle" aria-hidden="true" />
-  <MiniMap :hex-scene="hexScene" :layout="layout" />
+  <MiniMap v-show="!veiled" :hex-scene="hexScene" :layout="layout" />
   <component :is="RenderStats" v-if="RenderStats" :hex-scene="hexScene" />
 </template>
 

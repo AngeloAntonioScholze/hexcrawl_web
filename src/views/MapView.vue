@@ -3,14 +3,16 @@ import { computed, ref, watchEffect } from 'vue'
 import CaravanPanel from '../components/CaravanPanel.vue'
 import DayNightDial from '../components/DayNightDial.vue'
 import DmToolbar from '../components/DmToolbar.vue'
+import EnterScreen from '../components/EnterScreen.vue'
 import HexCanvas from '../components/HexCanvas.vue'
 import HexDetails from '../components/HexDetails.vue'
 import InventoryList from '../components/InventoryList.vue'
 import MapList from '../components/MapList.vue'
-import SessionProbe from '../components/SessionProbe.vue'
+import SessionBar from '../components/SessionBar.vue'
 import ViewToggle from '../components/ViewToggle.vue'
 import { useDebugMode } from '../composables/useDebugMode'
 import { MIN_MAX_ZOOM } from '../composables/useHexWindow'
+import { useStage } from '../composables/useStage'
 import { useUndoKeys } from '../composables/useUndoKeys'
 import { useZoomLimit } from '../composables/useZoomLimit'
 import type { EntityKind } from '../entities/entity'
@@ -26,12 +28,14 @@ import {
   type WorldSize,
 } from '../stores/hexMap'
 import { useMapLibraryStore } from '../stores/mapLibrary'
+import { useSessionStore } from '../stores/session'
 import { RESOURCE_SPACING_LIMITS, countByOrigin } from '../terrain/resources'
 import { TERRAIN_IDS, TERRAIN_LABELS, type TerrainId } from '../terrain/terrain'
 import { KM_PER_HEX } from '../terrain/travel'
 
 const store = useHexMapStore()
 const library = useMapLibraryStore()
+const { veiled } = useStage()
 useUndoKeys()
 
 /** Narrower than this and a panel would be most of the window. */
@@ -66,12 +70,16 @@ const onChance = (terrainId: TerrainId, event: Event): void => {
 }
 
 const debug = useDebugMode()
+const session = useSessionStore()
 
 // The host is always the DM; peeking at the players' view is a debugging aid,
 // and turning it off hands the DM their own view back.
 watchEffect(() => {
   if (!debug.value && !store.dmView) store.dmView = true
 })
+
+// Picking the picked token again puts it down, so the DM's clicks go back to the ground.
+const pick = (id: string): void => store.selectEntity(id === store.selectedId ? '' : id)
 
 const zoomLimit = useZoomLimit()
 
@@ -135,8 +143,32 @@ const importMap = async (event: Event): Promise<void> => {
 
 const worldSizes = Object.keys(WORLD_SIZES) as WorldSize[]
 
+// The controls below ask the store's own permission check, so the players' view
+// offers exactly what the store would carry out and the two cannot drift apart.
+// The world panel as a whole is the DM's: players are shown none of it.
+const shapesWorld = computed(
+  () => store.may('terrain') || store.may('maps') || store.may('resources'),
+)
+
+/** Whether the selected entity takes orders from whoever is at this browser. */
+const orderable = computed(
+  () => store.selectedEntity !== null && store.may('order', store.selectedEntity),
+)
+
+const onRename = (event: Event): void => {
+  const input = event.target as HTMLInputElement
+  if (store.selectedEntity) store.renameEntity(store.selectedEntity.id, input.value)
+  // A blank name is refused; the field goes back to the name the entity kept.
+  input.value = store.selectedEntity?.name ?? ''
+}
+
+const onRecolor = (event: Event): void => {
+  const one = store.selectedEntity
+  if (one) store.recolorEntity(one.id, (event.target as HTMLInputElement).value)
+}
+
 /** Riders are listed under their caravan, not among those walking on their own. */
-const walking = computed(() => store.entities.filter((one) => !store.carrierOf(one.id)))
+const walking = computed(() => store.shownEntities.filter((one) => !store.carrierOf(one.id)))
 
 const carrierName = computed(() => {
   const carrier = store.carrierOf(store.selectedId)
@@ -152,6 +184,9 @@ const ownInventory = computed(() => {
 })
 
 const hint = computed(() => {
+  if (store.selectedEntity && !orderable.value) {
+    return `${store.selectedEntity.name} is not yours to order · you can only watch it`
+  }
   if (!store.start && store.selectedEntity?.kind === 'ship') {
     return 'click a water hex to put the ship there'
   }
@@ -183,12 +218,18 @@ const olderTurns = computed(() => Math.max(0, store.adventureLog.length - TURNS_
 <template>
   <main>
     <HexCanvas />
-    <DayNightDial />
-    <ViewToggle v-if="debug" />
-    <DmToolbar />
-    <HexDetails />
-    <div class="panels">
-      <aside class="panel" :class="{ collapsed: worldCollapsed }">
+    <!-- Nothing but the fogged map behind the enter screen: no tools to reach
+         past it, and nothing to give the map away before anyone is in. -->
+    <template v-if="!veiled">
+      <DayNightDial />
+      <ViewToggle v-if="debug" />
+      <SessionBar v-if="session.role" :class="{ beside: debug }" />
+      <DmToolbar />
+      <HexDetails />
+    </template>
+    <EnterScreen />
+    <div v-if="!veiled" class="panels">
+      <aside v-if="shapesWorld" class="panel" :class="{ collapsed: worldCollapsed }">
         <header>
           <h1>world</h1>
           <button
@@ -214,94 +255,99 @@ const olderTurns = computed(() => Math.max(0, store.adventureLog.length - TURNS_
           </dl>
 
           <div class="control stack">
-            <div class="row">
-              <span>seed</span>
-              <span class="value">{{ store.terrain.seed }}</span>
-            </div>
-            <button type="button" @click="store.reseed">roll a new world</button>
-            <MapList />
-            <div class="row">
-              <button type="button" @click="exportMap">export map</button>
-              <button type="button" @click="importInput?.click()">import map</button>
-            </div>
-            <input
-              ref="importInput"
-              type="file"
-              :accept="`${MAP_FILE_EXTENSION},application/json`"
-              hidden
-              @change="importMap"
-            />
-            <p v-if="importError" class="error" role="alert">{{ importError }}</p>
+            <template v-if="store.may('terrain')">
+              <div class="row">
+                <span>seed</span>
+                <span class="value">{{ store.terrain.seed }}</span>
+              </div>
+              <button type="button" @click="store.reseed">roll a new world</button>
+            </template>
+            <template v-if="store.may('maps')">
+              <MapList />
+              <div class="row">
+                <button type="button" @click="exportMap">export map</button>
+                <button type="button" @click="importInput?.click()">import map</button>
+              </div>
+              <input
+                ref="importInput"
+                type="file"
+                :accept="`${MAP_FILE_EXTENSION},application/json`"
+                hidden
+                @change="importMap"
+              />
+              <p v-if="importError" class="error" role="alert">{{ importError }}</p>
+            </template>
 
-            <div class="row">
-              <span>world size</span>
-              <span class="value">{{ store.worldRadius }} hex</span>
-            </div>
-            <div class="sizes">
-              <button
-                v-for="size in worldSizes"
-                :key="size"
-                type="button"
-                :class="{ here: store.worldSize === size }"
-                @click="store.setWorldSize(size)"
-              >
-                {{ size }}
-              </button>
-            </div>
+            <template v-if="store.may('terrain')">
+              <div class="row">
+                <span>world size</span>
+                <span class="value">{{ store.worldRadius }} hex</span>
+              </div>
+              <div class="sizes">
+                <button
+                  v-for="size in worldSizes"
+                  :key="size"
+                  type="button"
+                  :class="{ here: store.worldSize === size }"
+                  @click="store.setWorldSize(size)"
+                >
+                  {{ size }}
+                </button>
+              </div>
 
-            <div class="row">
-              <span>landmass size</span>
-              <span class="value">{{ store.terrain.scale }}</span>
-            </div>
-            <input
-              :value="store.terrain.scale"
-              type="range"
-              :min="TERRAIN_LIMITS.scale.min"
-              :max="TERRAIN_LIMITS.scale.max"
-              :step="TERRAIN_LIMITS.scale.step"
-              @input="onTerrain('scale', $event)"
-            />
+              <div class="row">
+                <span>landmass size</span>
+                <span class="value">{{ store.terrain.scale }}</span>
+              </div>
+              <input
+                :value="store.terrain.scale"
+                type="range"
+                :min="TERRAIN_LIMITS.scale.min"
+                :max="TERRAIN_LIMITS.scale.max"
+                :step="TERRAIN_LIMITS.scale.step"
+                @input="onTerrain('scale', $event)"
+              />
 
-            <div class="row">
-              <span>sea level</span>
-              <span class="value">{{ store.terrain.seaLevel.toFixed(2) }}</span>
-            </div>
-            <input
-              :value="store.terrain.seaLevel"
-              type="range"
-              :min="TERRAIN_LIMITS.seaLevel.min"
-              :max="TERRAIN_LIMITS.seaLevel.max"
-              :step="TERRAIN_LIMITS.seaLevel.step"
-              @input="onTerrain('seaLevel', $event)"
-            />
+              <div class="row">
+                <span>sea level</span>
+                <span class="value">{{ store.terrain.seaLevel.toFixed(2) }}</span>
+              </div>
+              <input
+                :value="store.terrain.seaLevel"
+                type="range"
+                :min="TERRAIN_LIMITS.seaLevel.min"
+                :max="TERRAIN_LIMITS.seaLevel.max"
+                :step="TERRAIN_LIMITS.seaLevel.step"
+                @input="onTerrain('seaLevel', $event)"
+              />
 
-            <div class="row">
-              <span>relief</span>
-              <span class="value">{{ store.terrain.relief.toFixed(1) }}</span>
-            </div>
-            <input
-              :value="store.terrain.relief"
-              type="range"
-              :min="TERRAIN_LIMITS.relief.min"
-              :max="TERRAIN_LIMITS.relief.max"
-              :step="TERRAIN_LIMITS.relief.step"
-              @input="onTerrain('relief', $event)"
-            />
+              <div class="row">
+                <span>relief</span>
+                <span class="value">{{ store.terrain.relief.toFixed(1) }}</span>
+              </div>
+              <input
+                :value="store.terrain.relief"
+                type="range"
+                :min="TERRAIN_LIMITS.relief.min"
+                :max="TERRAIN_LIMITS.relief.max"
+                :step="TERRAIN_LIMITS.relief.step"
+                @input="onTerrain('relief', $event)"
+              />
+            </template>
 
-            <div class="row">
-              <span>resource spacing</span>
-              <span class="value">{{ store.resourceSpacing }} hex</span>
-            </div>
-            <input
-              :value="store.resourceSpacing"
-              type="range"
-              :min="RESOURCE_SPACING_LIMITS.min"
-              :max="RESOURCE_SPACING_LIMITS.max"
-              :step="RESOURCE_SPACING_LIMITS.step"
-              @input="onSpacing"
-            />
-
-            <template v-if="store.dmView">
+            <template v-if="store.may('resources')">
+              <div class="row">
+                <span>resource spacing</span>
+                <span class="value">{{ store.resourceSpacing }} hex</span>
+              </div>
+              <input
+                :value="store.resourceSpacing"
+                type="range"
+                :min="RESOURCE_SPACING_LIMITS.min"
+                :max="RESOURCE_SPACING_LIMITS.max"
+                :step="RESOURCE_SPACING_LIMITS.step"
+                @input="onSpacing"
+              />
               <details class="odds">
                 <summary>resource odds</summary>
                 <template v-for="terrainId in TERRAIN_IDS" :key="terrainId">
@@ -330,36 +376,47 @@ const olderTurns = computed(() => Math.max(0, store.adventureLog.length - TURNS_
             </template>
           </div>
 
-          <label class="control">
-            <input v-model="store.fog" type="checkbox" />
-            <span>fog of war</span>
-          </label>
+          <!-- What the fog shows is the DM's to say. The sight field goes with it:
+               it is drawn from everything the parties see, hexes the DM hid included. -->
+          <template v-if="store.may('fog')">
+            <label class="control">
+              <input v-model="store.fog" type="checkbox" />
+              <span>fog of war</span>
+            </label>
 
-          <label class="control">
-            <input v-model="store.showSight" type="checkbox" />
-            <span>show the sight field</span>
-          </label>
+            <label v-if="store.fog" class="control indent">
+              <input v-model="store.fogSeeThrough" type="checkbox" />
+              <span>see the map through the fog</span>
+            </label>
+
+            <label class="control">
+              <input v-model="store.showSight" type="checkbox" />
+              <span>show the sight field</span>
+            </label>
+          </template>
 
           <div v-if="store.fog || store.showSight" class="control stack">
-            <div class="row">
-              <span>sight by daylight</span>
-              <span class="value">{{ store.sight }}</span>
-            </div>
-            <input
-              :value="store.sight"
-              type="range"
-              :min="MIN_SIGHT"
-              :max="MAX_SIGHT"
-              step="1"
-              @input="onSight"
-            />
+            <template v-if="store.may('entitySettings', store.selectedEntity ?? undefined)">
+              <div class="row">
+                <span>sight by daylight</span>
+                <span class="value">{{ store.sight }}</span>
+              </div>
+              <input
+                :value="store.sight"
+                type="range"
+                :min="MIN_SIGHT"
+                :max="MAX_SIGHT"
+                step="1"
+                @input="onSight"
+              />
+            </template>
             <div class="row">
               <span>seeing</span>
               <span class="value">{{ store.reach }} hex</span>
             </div>
             <div v-if="store.fog" class="row">
               <span>explored</span>
-              <span class="value">{{ store.explored.size }}</span>
+              <span class="value">{{ store.exploredCount }}</span>
             </div>
           </div>
 
@@ -377,8 +434,6 @@ const olderTurns = computed(() => Math.max(0, store.adventureLog.length - TURNS_
               @input="onZoomLimit"
             />
           </div>
-
-          <SessionProbe />
 
           <label class="control">
             <input v-model="debug" type="checkbox" />
@@ -423,7 +478,7 @@ const olderTurns = computed(() => Math.max(0, store.adventureLog.length - TURNS_
           <div class="control stack">
             <div class="row">
               <span>entities</span>
-              <span class="value">{{ store.entities.length }}</span>
+              <span class="value">{{ store.shownEntities.length }}</span>
             </div>
 
             <ul class="entities">
@@ -431,8 +486,12 @@ const olderTurns = computed(() => Math.max(0, store.adventureLog.length - TURNS_
                 <button
                   type="button"
                   :class="{ here: one.id === store.selectedId }"
-                  :title="`give ${one.name} the orders`"
-                  @click="store.selectEntity(one.id)"
+                  :title="
+                    store.may('order', one)
+                      ? `give ${one.name} the orders`
+                      : `look at ${one.name}; it is not yours to order`
+                  "
+                  @click="pick(one.id)"
                 >
                   <span class="pip" :style="{ background: one.color }" />
                   <span>{{ one.name }}</span>
@@ -449,7 +508,7 @@ const olderTurns = computed(() => Math.max(0, store.adventureLog.length - TURNS_
                           ? `${rider.name} is aboard ${one.name} at sea and cannot be ordered off`
                           : `${rider.name} rides in ${one.name}; an order takes it out`
                       "
-                      @click="store.selectEntity(rider.id)"
+                      @click="pick(rider.id)"
                     >
                       <span class="pip" :style="{ background: rider.color }" />
                       <span>{{ rider.name }}</span>
@@ -461,7 +520,7 @@ const olderTurns = computed(() => Math.max(0, store.adventureLog.length - TURNS_
               </li>
             </ul>
 
-            <div class="row">
+            <div v-if="store.may('addEntity')" class="row">
               <select v-model="addKind">
                 <option value="party">party</option>
                 <option value="caravan">caravan</option>
@@ -473,6 +532,7 @@ const olderTurns = computed(() => Math.max(0, store.adventureLog.length - TURNS_
               </button>
             </div>
             <button
+              v-if="store.may('removeEntity', store.selectedEntity ?? undefined)"
               type="button"
               :disabled="!store.selectedEntity"
               @click="store.removeEntity(store.selectedId)"
@@ -511,6 +571,7 @@ const olderTurns = computed(() => Math.max(0, store.adventureLog.length - TURNS_
                 </span>
               </span>
               <button
+                v-if="orderable"
                 type="button"
                 class="drop"
                 :title="`drop the stop at ${leg.to}`"
@@ -522,11 +583,33 @@ const olderTurns = computed(() => Math.max(0, store.adventureLog.length - TURNS_
           </ol>
 
           <div v-if="store.selectedEntity" class="control stack">
+            <label v-if="store.may('renameEntity', store.selectedEntity)" class="row naming">
+              <span>name</span>
+              <input
+                :key="store.selectedId"
+                class="name"
+                type="text"
+                maxlength="40"
+                :value="store.selectedEntity.name"
+                aria-label="the entity's name"
+                @change="onRename"
+              />
+            </label>
+            <label v-if="store.may('recolorEntity', store.selectedEntity)" class="row naming">
+              <span>colour</span>
+              <input
+                type="color"
+                :value="store.selectedEntity.color"
+                aria-label="the entity's colour"
+                @input="onRecolor"
+              />
+            </label>
             <div class="row">
               <span>pace</span>
               <span class="value">{{ store.selectedEntity.pacePerTurn }} hex a turn</span>
             </div>
             <input
+              v-if="store.may('entitySettings', store.selectedEntity)"
               :value="store.selectedEntity.pacePerTurn"
               type="range"
               :min="PACE_LIMITS.min"
@@ -534,21 +617,24 @@ const olderTurns = computed(() => Math.max(0, store.adventureLog.length - TURNS_
               :step="PACE_LIMITS.step"
               @input="onPace"
             />
-            <button
-              type="button"
-              :disabled="!store.goal || store.atSea(store.selectedId)"
-              :title="store.atSea(store.selectedId) ? 'no orders for a rider at sea' : undefined"
-              @click="store.clear"
-            >
-              call off the order
-            </button>
-            <button
-              type="button"
-              :disabled="!store.start"
-              @click="store.queueAction(store.selectedId, { kind: 'camp' })"
-            >
-              make camp this turn
-            </button>
+            <template v-if="orderable">
+              <button
+                type="button"
+                :disabled="!store.goal || store.atSea(store.selectedId)"
+                :title="store.atSea(store.selectedId) ? 'no orders for a rider at sea' : undefined"
+                @click="store.clear"
+              >
+                call off the order
+              </button>
+              <button
+                type="button"
+                :disabled="!store.start"
+                @click="store.queueAction(store.selectedId, { kind: 'camp' })"
+              >
+                make camp this turn
+              </button>
+            </template>
+            <p v-else class="dim">not yours to order</p>
           </div>
 
           <InventoryList v-if="ownInventory" :owner-id="ownInventory.id" />
@@ -582,7 +668,12 @@ const olderTurns = computed(() => Math.max(0, store.adventureLog.length - TURNS_
                   v-if="entry.kind === 'turn'"
                   type="button"
                   :class="{ here: entry.row.turn === store.turn - 1, ahead: !entry.row.spent }"
-                  :title="`put the crawl back as it stood at the end of turn ${entry.row.turn}`"
+                  :disabled="!store.may('clock')"
+                  :title="
+                    store.may('clock')
+                      ? `put the crawl back as it stood at the end of turn ${entry.row.turn}`
+                      : undefined
+                  "
                   @click="store.goToTurn(entry.row.turn + 1)"
                 >
                   <span class="dim">{{ entry.row.turn }}</span>
@@ -600,7 +691,12 @@ const olderTurns = computed(() => Math.max(0, store.adventureLog.length - TURNS_
                     here: entry.encounter.turn === store.turn,
                     ahead: entry.encounter.turn > store.turn,
                   }"
-                  :title="`put the crawl back to turn ${entry.encounter.turn}, when this was met`"
+                  :disabled="!store.may('clock')"
+                  :title="
+                    store.may('clock')
+                      ? `put the crawl back to turn ${entry.encounter.turn}, when this was met`
+                      : undefined
+                  "
                   @click="store.goToTurn(entry.encounter.turn)"
                 >
                   <span class="dim">!</span>
@@ -611,7 +707,9 @@ const olderTurns = computed(() => Math.max(0, store.adventureLog.length - TURNS_
             </ol>
             <p v-if="olderTurns" class="dim">and {{ olderTurns }} earlier</p>
 
-            <button type="button" @click="store.clearHistory">clear the history</button>
+            <button v-if="store.may('clearHistory')" type="button" @click="store.clearHistory">
+              clear the history
+            </button>
           </div>
 
           <p>{{ hint }}</p>
@@ -699,8 +797,14 @@ aside:where(.panel) {
   white-space: nowrap;
 }
 
-.journey li button:hover {
+.journey li button:hover:not(:disabled) {
   background: color-mix(in srgb, var(--line) 45%, transparent);
+}
+
+/* Read-only for whoever may not wind the clock: a record, not a control. */
+.journey li button:disabled {
+  color: inherit;
+  cursor: default;
 }
 
 .legs {
@@ -905,6 +1009,13 @@ p {
   font-size: 0.75rem;
 }
 
+.control.indent {
+  margin-top: 0.35rem;
+  padding-top: 0;
+  padding-left: 1.2rem;
+  border-top: none;
+}
+
 .control {
   display: flex;
   align-items: center;
@@ -943,6 +1054,27 @@ p {
 
 .control.stack span {
   color: var(--ink-dim);
+}
+
+.control.stack .row.naming {
+  align-items: center;
+}
+
+.control.stack input.name {
+  flex: 1;
+  min-width: 0;
+  padding: 0.25rem 0.45rem;
+  border: 1px solid var(--line);
+  border-radius: 0.35rem;
+  background: var(--surface);
+  color: var(--ink);
+  font: inherit;
+  cursor: text;
+}
+
+.control.stack input.name:focus {
+  border-color: #7aa2c8;
+  outline: none;
 }
 
 .control.stack input[type='range'] {
