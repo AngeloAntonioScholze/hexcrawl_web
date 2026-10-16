@@ -1,10 +1,28 @@
+import { parseChunk, type Chunk } from './wireChunks'
+
 /** Bumped when a message changes shape, so an older tab is turned away rather than misread. */
-export const PROTOCOL_VERSION = 1
+export const PROTOCOL_VERSION = 2
 
 export const MAX_NAME_LENGTH = 40
 
+export const REFUSAL_REASONS = ['locked', 'declined', 'name-taken', 'kicked'] as const
+
+export type RefusalReason = (typeof REFUSAL_REASONS)[number]
+
 export type SessionMessage =
-  { type: 'hello'; name: string } | { type: 'ping'; at: number } | { type: 'pong'; at: number }
+  | { type: 'hello'; name: string }
+  | { type: 'ping'; at: number }
+  | { type: 'pong'; at: number }
+  | { type: 'welcome' }
+  | { type: 'pending' }
+  | { type: 'refused'; reason: RefusalReason }
+  | { type: 'kicked' }
+  /** One piece of the whole of what the players see, as it stands at `seq`. */
+  | { type: 'state'; seq: number; chunk: Chunk }
+  /** One piece of what changed from `base` to `seq`. */
+  | { type: 'patch'; base: number; seq: number; chunk: Chunk }
+  /** From a guest that has lost track: send me the whole state. */
+  | { type: 'resync' }
 
 export interface Envelope {
   v: typeof PROTOCOL_VERSION
@@ -20,6 +38,12 @@ const hasExactly = (record: Record<string, unknown>, keys: readonly string[]): b
   const own = Object.keys(record)
   return own.length === keys.length && keys.every((key) => Object.hasOwn(record, key))
 }
+
+const isSeq = (value: unknown): value is number =>
+  Number.isSafeInteger(value) && (value as number) >= 0
+
+const isRefusalReason = (value: unknown): value is RefusalReason =>
+  REFUSAL_REASONS.some((reason) => reason === value)
 
 const parseMessage = (msg: unknown): SessionMessage | null => {
   if (!isRecord(msg)) return null
@@ -38,6 +62,30 @@ const parseMessage = (msg: unknown): SessionMessage | null => {
       if (!hasExactly(msg, ['type', 'at']) || typeof at !== 'number' || !Number.isFinite(at))
         return null
       return { type: msg.type, at }
+    }
+    case 'welcome':
+    case 'pending':
+    case 'kicked':
+    case 'resync':
+      return hasExactly(msg, ['type']) ? { type: msg.type } : null
+    case 'state': {
+      const { seq } = msg
+      const chunk = parseChunk(msg.chunk)
+      if (!hasExactly(msg, ['type', 'seq', 'chunk']) || !isSeq(seq) || !chunk) return null
+      return { type: 'state', seq, chunk }
+    }
+    case 'patch': {
+      const { base, seq } = msg
+      const chunk = parseChunk(msg.chunk)
+      if (!hasExactly(msg, ['type', 'base', 'seq', 'chunk']) || !isSeq(base) || !isSeq(seq))
+        return null
+      if (base >= seq || !chunk) return null
+      return { type: 'patch', base, seq, chunk }
+    }
+    case 'refused': {
+      const { reason } = msg
+      if (!hasExactly(msg, ['type', 'reason']) || !isRefusalReason(reason)) return null
+      return { type: 'refused', reason }
     }
     default:
       return null
