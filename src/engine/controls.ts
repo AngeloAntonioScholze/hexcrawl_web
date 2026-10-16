@@ -6,23 +6,27 @@ const ZOOM_STEP = 1.12
 export interface IsoControlOptions {
   /** While this holds, a left-button drag belongs to the brush and the camera pans by the right or middle button. */
   brushing?(): boolean
+  /** While this holds the view is not the viewer's to move: every input is let past. */
+  held?(): boolean
 }
 
 export function attachIsoControls(
   canvas: HTMLCanvasElement,
   iso: IsoCamera,
-  { brushing }: IsoControlOptions = {},
+  { brushing, held }: IsoControlOptions = {},
 ): () => void {
   let panPointer: number | null = null
   let lastX = 0
   let lastY = 0
 
   const onWheel = (event: WheelEvent): void => {
+    if (held?.()) return
     event.preventDefault()
     iso.zoomBy(event.deltaY > 0 ? ZOOM_STEP : 1 / ZOOM_STEP)
   }
 
   const onPointerDown = (event: PointerEvent): void => {
+    if (held?.()) return
     if (event.button === 0 ? brushing?.() : event.button !== 1 && event.button !== 2) return
     panPointer = event.pointerId
     lastX = event.clientX
@@ -31,7 +35,7 @@ export function attachIsoControls(
   }
 
   const onPointerMove = (event: PointerEvent): void => {
-    if (event.pointerId !== panPointer) return
+    if (event.pointerId !== panPointer || held?.()) return
     iso.panBy(event.clientX - lastX, event.clientY - lastY)
     lastX = event.clientX
     lastY = event.clientY
@@ -48,7 +52,7 @@ export function attachIsoControls(
   }
 
   const onKeyDown = (event: KeyboardEvent): void => {
-    if (editsText(event.target)) return
+    if (editsText(event.target) || held?.()) return
     if (event.key === 'q' || event.key === 'Q') iso.rotate(-1)
     else if (event.key === 'e' || event.key === 'E') iso.rotate(1)
     else return

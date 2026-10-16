@@ -41,9 +41,15 @@ describe('OrbitCamera', () => {
     for (const { alpha, beta, radius, target } of poses) {
       const camera = new OrbitCamera('orbit', alpha, beta, radius, target.clone(), scene)
       camera.getViewMatrix()
-      expect(camera.position.x).toBeCloseTo(target.x + radius * Math.cos(alpha) * Math.sin(beta), 10)
+      expect(camera.position.x).toBeCloseTo(
+        target.x + radius * Math.cos(alpha) * Math.sin(beta),
+        10,
+      )
       expect(camera.position.y).toBeCloseTo(target.y + radius * Math.cos(beta), 10)
-      expect(camera.position.z).toBeCloseTo(target.z + radius * Math.sin(alpha) * Math.sin(beta), 10)
+      expect(camera.position.z).toBeCloseTo(
+        target.z + radius * Math.sin(alpha) * Math.sin(beta),
+        10,
+      )
       camera.dispose()
     }
   })
@@ -54,7 +60,10 @@ describe('OrbitCamera', () => {
       const arc = new ArcRotateCamera('arc', alpha, beta, radius, target.clone(), scene)
       // ArcRotateCamera adds its (zero) screen offset, which turns -0 into 0.
       const entries = (camera: OrbitCamera | ArcRotateCamera): number[] =>
-        camera.getViewMatrix().asArray().map((value) => value + 0)
+        camera
+          .getViewMatrix()
+          .asArray()
+          .map((value) => value + 0)
       expect(entries(orbit)).toEqual(entries(arc))
       orbit.dispose()
       arc.dispose()
@@ -319,6 +328,113 @@ describe('moveTo', () => {
     settle()
     expect(iso.camera.target.x).toBe(5)
     expect(iso.camera.target.z).toBe(5)
+  })
+})
+
+describe('glideTo', () => {
+  /** Frames drawn until the promise settles, or null if it never does. */
+  const framesUntil = async (glide: Promise<void>, limit = 400): Promise<number | null> => {
+    let done = false
+    void glide.then(() => (done = true))
+    for (let frame = 1; frame <= limit; frame++) {
+      scene.onBeforeRenderObservable.notifyObservers(scene)
+      await Promise.resolve()
+      if (done) return frame
+    }
+    return null
+  }
+
+  it('eases over the point and resolves once settled there', async () => {
+    const glide = iso.glideTo(30, -12)
+    scene.onBeforeRenderObservable.notifyObservers(scene)
+    expect(iso.camera.target.x).toBeGreaterThan(0)
+    expect(iso.camera.target.x).toBeLessThan(30)
+
+    expect(await framesUntil(glide)).toBeGreaterThan(1)
+    expect(iso.settling).toBe(false)
+    expect(iso.camera.target.x).toBe(30)
+    expect(iso.camera.target.z).toBe(-12)
+  })
+
+  it('eases to the zoom it is given alongside', async () => {
+    const glide = iso.glideTo(0, 0, 20)
+    scene.onBeforeRenderObservable.notifyObservers(scene)
+    expect(iso.zoom).toBeLessThan(40)
+    expect(iso.zoom).toBeGreaterThan(20)
+    await framesUntil(glide)
+    expect(iso.zoom).toBe(20)
+  })
+
+  it('arrives at the edge of the pan bounds rather than chasing past them', async () => {
+    iso.setPanBounds({ minX: -10, maxX: 10, minZ: -10, maxZ: 10 })
+    expect(await framesUntil(iso.glideTo(500, 0))).not.toBeNull()
+    expect(iso.camera.target.x).toBe(10)
+  })
+
+  it('holds the zoom inside its range', async () => {
+    await framesUntil(iso.glideTo(0, 0, 5000))
+    expect(iso.zoom).toBe(200)
+  })
+
+  it('swings round to a heading and resolves once it is there', async () => {
+    const from = iso.camera.alpha
+    const turn = iso.turnTo(from + Math.PI)
+    scene.onBeforeRenderObservable.notifyObservers(scene)
+    expect(iso.camera.alpha).toBeGreaterThan(from)
+    expect(iso.camera.alpha).toBeLessThan(from + Math.PI)
+
+    expect(await framesUntil(turn)).toBeGreaterThan(1)
+    expect(iso.camera.alpha).toBe(from + Math.PI)
+  })
+
+  it('resolves when a drag calls the slide off', async () => {
+    const glide = iso.glideTo(100, 100)
+    settle(3)
+    iso.panBy(10, 0)
+    expect(await framesUntil(glide, 2)).not.toBeNull()
+  })
+
+  it('resolves every glide still waiting once the last one lands', async () => {
+    const first = iso.glideTo(50, 0)
+    settle(3)
+    const second = iso.glideTo(-50, 0)
+    let firstDone = false
+    void first.then(() => (firstDone = true))
+    expect(await framesUntil(second)).not.toBeNull()
+    expect(firstDone).toBe(true)
+    expect(iso.camera.target.x).toBe(-50)
+  })
+
+  it('lets go of anyone waiting when the rig is disposed', async () => {
+    const extra = createIsoCamera(scene, fakeCanvas(800, 400), { zoom: 40 })
+    const glide = extra.glideTo(100, 0)
+    extra.dispose()
+    await expect(glide).resolves.toBeUndefined()
+  })
+})
+
+describe('jumpTo', () => {
+  it('puts the view over the point and at the zoom on the same frame', () => {
+    iso.jumpTo(12, -7, 25)
+    expect(iso.camera.target.x).toBe(12)
+    expect(iso.camera.target.z).toBe(-7)
+    expect(iso.zoom).toBe(25)
+    expect(iso.camera.orthoTop).toBe(25)
+    expect(iso.settling).toBe(false)
+  })
+
+  it('calls off a glide under way', () => {
+    void iso.glideTo(100, 100, 80)
+    settle(3)
+    iso.jumpTo(5, 5, 30)
+    settle()
+    expect(iso.camera.target.x).toBe(5)
+    expect(iso.zoom).toBe(30)
+  })
+
+  it('leaves the zoom alone when none is given', () => {
+    iso.jumpTo(5, 5)
+    expect(iso.zoom).toBe(40)
   })
 })
 

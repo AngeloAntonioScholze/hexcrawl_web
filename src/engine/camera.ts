@@ -118,6 +118,15 @@ export interface IsoCamera {
   focusOn(x: number, z: number): void
   /** Puts the view over a point this frame, inside the pan bounds; calls off a slide. */
   moveTo(x: number, z: number): void
+  /**
+   * Slides the view over a point inside the pan bounds, and to a zoom when one
+   * is given; resolves once the view has settled, wherever a hand left it.
+   */
+  glideTo(x: number, z: number, zoom?: number): Promise<void>
+  /** Puts the view over a point, at a zoom when one is given, this frame. */
+  jumpTo(x: number, z: number, zoom?: number): void
+  /** Swings the view round to a heading; resolves once the view has settled. */
+  turnTo(alpha: number): Promise<void>
   /** Moves the fence the view may be dragged inside: a new world, a new rim. */
   setPanBounds(bounds: { minX: number; maxX: number; minZ: number; maxZ: number }): void
   /** How far back the view may be pulled; a bigger world is allowed more. */
@@ -173,6 +182,8 @@ export function createIsoCamera(
   let targetAlpha = camera.alpha
   // Where the view is sliding to, or null when it is sitting where it was left.
   let focus: Vector3 | null = null
+  // Whoever is waiting on a glide; told on the first frame the view is still.
+  let waiting: (() => void)[] = []
   let aspect = canvas.clientWidth / Math.max(1, canvas.clientHeight)
 
   const applyProjection = (): void => {
@@ -189,7 +200,19 @@ export function createIsoCamera(
     camera.target.z = clamp(camera.target.z, bounds.minZ, bounds.maxZ)
   }
 
-  const settle = (): void => {
+  const settling = (): boolean =>
+    focus !== null ||
+    Math.abs(targetAlpha - camera.alpha) >= SETTLED ||
+    Math.abs(targetZoom - zoom) >= SETTLED
+
+  const release = (): void => {
+    if (waiting.length === 0 || settling()) return
+    const settled = waiting
+    waiting = []
+    for (const resolve of settled) resolve()
+  }
+
+  const ease = (): void => {
     if (focus) {
       const gap = focus.subtract(camera.target)
       if (gap.length() < SETTLED) {
@@ -201,17 +224,20 @@ export function createIsoCamera(
       }
     }
 
-    const alphaGap = targetAlpha - camera.alpha
-    const zoomGap = targetZoom - zoom
-    if (Math.abs(alphaGap) < SETTLED && Math.abs(zoomGap) < SETTLED) {
+    camera.alpha += (targetAlpha - camera.alpha) * SMOOTHING
+    zoom += (targetZoom - zoom) * SMOOTHING
+    // Snapped on the step that comes within reach, so the frame the view stops
+    // being reported as settling is one drawn at exactly where it was sent.
+    if (Math.abs(targetAlpha - camera.alpha) < SETTLED && Math.abs(targetZoom - zoom) < SETTLED) {
       camera.alpha = targetAlpha
       zoom = targetZoom
-      applyProjection()
-      return
     }
-    camera.alpha += alphaGap * SMOOTHING
-    zoom += zoomGap * SMOOTHING
     applyProjection()
+  }
+
+  const settle = (): void => {
+    ease()
+    release()
   }
 
   applyProjection()
@@ -257,6 +283,34 @@ export function createIsoCamera(
       clampTarget()
     },
 
+    // The point is fenced in first: a slide toward one outside the bounds is
+    // clamped back every frame and would never arrive.
+    glideTo(x: number, z: number, nextZoom?: number): Promise<void> {
+      focus = new Vector3(
+        bounds ? clamp(x, bounds.minX, bounds.maxX) : x,
+        camera.target.y,
+        bounds ? clamp(z, bounds.minZ, bounds.maxZ) : z,
+      )
+      if (nextZoom !== undefined) targetZoom = clamp(nextZoom, minZoom, maxZoom)
+      return new Promise((resolve) => waiting.push(resolve))
+    },
+
+    jumpTo(x: number, z: number, nextZoom?: number): void {
+      focus = null
+      camera.target.x = x
+      camera.target.z = z
+      clampTarget()
+      if (nextZoom === undefined) return
+      targetZoom = clamp(nextZoom, minZoom, maxZoom)
+      zoom = targetZoom
+      applyProjection()
+    },
+
+    turnTo(alpha: number): Promise<void> {
+      targetAlpha = alpha
+      return new Promise((resolve) => waiting.push(resolve))
+    },
+
     setPanBounds(next): void {
       bounds = next
       clampTarget()
@@ -276,11 +330,7 @@ export function createIsoCamera(
     },
 
     get settling() {
-      return (
-        focus !== null ||
-        Math.abs(targetAlpha - camera.alpha) >= SETTLED ||
-        Math.abs(targetZoom - zoom) >= SETTLED
-      )
+      return settling()
     },
 
     updateProjection(nextAspect: number): void {
@@ -290,6 +340,8 @@ export function createIsoCamera(
 
     dispose(): void {
       scene.onBeforeRenderObservable.remove(observer)
+      for (const resolve of waiting) resolve()
+      waiting = []
       camera.dispose()
     },
   }

@@ -14,12 +14,12 @@ import { Scene } from '@babylonjs/core/scene'
 import { hexKey, type Axial } from '../hex/coords'
 import type { TimeOfDay } from '../time/clock'
 import { daylightFor, skyGlow, type SkyGlow } from './sky'
-import type { Layout } from '../hex/layout'
+import { hexToWorld, hexWidth, worldToHex, type Layout } from '../hex/layout'
 import { createIsoCamera, type IsoCamera } from './camera'
 import { hexUnderRay, type PickRay } from './groundPick'
 import { attachIsoControls } from './controls'
 import type { TerrainField } from '../terrain/field'
-import { createHexGrid, wantsDetail, type HexGrid, type HexTile } from './hexGrid'
+import { FOG_COLOR, createHexGrid, wantsDetail, type HexGrid, type HexTile } from './hexGrid'
 import { worldBounds } from './hexWindow'
 import { createTokenField, type TokenField } from './tokenField'
 import { createPoiMarkers, type PoiMarkers } from './poiMarkers'
@@ -31,6 +31,8 @@ import { createRouteArrows, type RouteArrows } from './routeArrows'
 import { createVisionOverlay, type VisionOverlay } from './visionOverlay'
 import { createWaypointMarkers, type WaypointMarkers } from './waypointMarkers'
 import { wantsFrame } from './renderPacing'
+import { createFogLids } from './fogLids'
+import { nextWaveStart, waveDone, waveLift } from './fogWave'
 
 export interface HexSceneOptions {
   layout: Layout
@@ -77,11 +79,26 @@ export interface HexScene {
   setMaxZoom(limit: number): void
   /** Swings the light to where the clock says the sun is. */
   setDaylight(time: TimeOfDay): void
+  /**
+   * Draws nothing but the grid, every hex of it buried, and lets no input
+   * through; lifted, the map is back as the fog has it.
+   */
+  setVeiled(veiled: boolean): void
+  /** Where the eyes are that the next fog lifted is seen from; the wind blows it away from there. */
+  setRevealOrigin(hex: Axial | null): void
+  /** Rolls a ring out through the hexes from the one at the centre of the screen. */
+  wave(): void
   resize(): void
   dispose(): void
 }
 
 type IsoCameraBounds = { minX: number; maxX: number; minZ: number; maxZ: number }
+
+// Babylon's default masks: a camera sees every mesh on the low 28 bits.
+const EVERY_LAYER = 0x0fffffff
+// Only the ground and the grid sit on this one, so a camera looking at it alone
+// sees the bare fogged plain with nothing standing on it.
+const VEIL_LAYER = 0x10000000
 
 // PickingInfo reports "no instance" as -1, never undefined, so a truthiness or
 // undefined check silently swallows every hit on instance 0 and every miss.
@@ -122,6 +139,7 @@ function addGroundSlab(scene: Scene, bounds: IsoCameraBounds | undefined, margin
   )
   ground.position.set((bounds.minX + bounds.maxX) / 2, 0, (bounds.minZ + bounds.maxZ) / 2)
   ground.isPickable = false
+  ground.layerMask = EVERY_LAYER | VEIL_LAYER
   // Laid once for the world and never moved.
   ground.freezeWorldMatrix()
   ground.doNotSyncBoundingInfo = true
@@ -171,13 +189,28 @@ export function createHexScene(canvas: HTMLCanvasElement, options: HexSceneOptio
     maxZoom: options.maxZoom,
     panBounds: bounds,
   })
-  const detachControls = attachIsoControls(canvas, iso, { brushing: options.brushing })
+  let veiled = false
+  let revealOrigin: { x: number; z: number } | null = null
+  const detachControls = attachIsoControls(canvas, iso, {
+    brushing: options.brushing,
+    held: () => veiled,
+  })
 
   const grid = createHexGrid(scene, options.layout, {
     capacity: options.capacity,
     gap: options.gap,
     bevel: options.bevel,
+    layerMask: EVERY_LAYER | VEIL_LAYER,
+    onReveal: (x, top, z) =>
+      lids.lift(
+        x,
+        top,
+        z,
+        revealOrigin ? x - revealOrigin.x : 0,
+        revealOrigin ? z - revealOrigin.z : 0,
+      ),
   })
+  const lids = createFogLids(scene, grid.tileSize, FOG_COLOR, { layerMask: EVERY_LAYER })
 
   // Read straight out of the world rather than out of a copy of it, so the
   // arrows, the pawns and the sight plates cannot drift from the ground: they
@@ -215,6 +248,7 @@ export function createHexScene(canvas: HTMLCanvasElement, options: HexSceneOptio
 
   let stroking = false
   const pointerObserver = scene.onPointerObservable.add((info) => {
+    if (veiled) return
     if (info.type === PointerEventTypes.POINTERMOVE) {
       const hex = pickHex()
       options.onHover?.(hex)
@@ -243,7 +277,16 @@ export function createHexScene(canvas: HTMLCanvasElement, options: HexSceneOptio
     }
   }
 
-  redrawOnCall(grid, ['setOverlay', 'setFog', 'updateFog', 'setWindow', 'moveWindow'])
+  // A jump that only changes the zoom moves no target the loop would notice.
+  redrawOnCall(iso, ['jumpTo'])
+  redrawOnCall(grid, [
+    'setOverlay',
+    'setFog',
+    'updateFog',
+    'setWindow',
+    'moveWindow',
+    'setSeeThrough',
+  ])
   redrawOnCall(arrows, ['setPath', 'setPaths'])
   redrawOnCall(tokens, ['setEntries', 'place', 'hop', 'board', 'alight'])
   redrawOnCall(vision, ['setField', 'setShown'])
@@ -296,6 +339,32 @@ export function createHexScene(canvas: HTMLCanvasElement, options: HexSceneOptio
     return true
   }
 
+  // The rings rolling out from where the screen was centred when each set off,
+  // out to the farthest corner of the screen in hexes. A ring asked for while
+  // one is still near the centre waits a band behind it, so each hover adds a
+  // swell rather than starting the last one over.
+  const waves: { start: number; x: number; z: number; reach: number }[] = []
+  const spacing = hexWidth(options.layout)
+
+  const liftWave = (now: number): void => {
+    if (waves.length === 0) return
+    for (let i = waves.length - 1; i >= 0; i--) {
+      if (waveDone(now - waves[i].start, waves[i].reach)) waves.splice(i, 1)
+    }
+    if (waves.length === 0) {
+      grid.lift(() => 0)
+      return
+    }
+    grid.lift((hexX, hexZ) => {
+      let height = 0
+      for (const wave of waves) {
+        const distance = Math.hypot(hexX - wave.x, hexZ - wave.z) / spacing
+        height = Math.max(height, waveLift(distance, now - wave.start))
+      }
+      return height
+    })
+  }
+
   // A material still compiling draws nothing on its frame and needs another
   // once it is ready, which nothing else would ask for.
   let warming = true
@@ -308,12 +377,21 @@ export function createHexScene(canvas: HTMLCanvasElement, options: HexSceneOptio
   const tick = (now: number): void => {
     frameRequest = requestAnimationFrame(tick)
 
-    const changed = targetMoved() || dirty || warming || iso.settling || tokens.hopping
+    const changed =
+      targetMoved() ||
+      dirty ||
+      warming ||
+      iso.settling ||
+      tokens.hopping ||
+      waves.length > 0 ||
+      lids.active
     const animating = tokens.bobbing || arrows.count > 0 || stops.count > 0
     if (!wantsFrame({ changed, animating, sinceLastFrame: now - lastFrame })) return
 
     dirty = false
     lastFrame = now
+    liftWave(now)
+    if (lids.active) lids.step(now)
     engine.beginFrame()
     scene.render()
     engine.endFrame()
@@ -344,6 +422,36 @@ export function createHexScene(canvas: HTMLCanvasElement, options: HexSceneOptio
     bridges,
 
     setDaylight,
+
+    setVeiled(next): void {
+      if (next === veiled) return
+      veiled = next
+      grid.setVeil(next)
+      iso.camera.layerMask = next ? VEIL_LAYER : EVERY_LAYER
+      if (next) {
+        stroking = false
+        options.onHover?.(null)
+      }
+      dirty = true
+    },
+
+    setRevealOrigin(hex): void {
+      revealOrigin = hex ? hexToWorld(options.layout, hex) : null
+    },
+
+    wave(): void {
+      const centre = hexToWorld(
+        options.layout,
+        worldToHex(options.layout, { x: iso.camera.target.x, z: iso.camera.target.z }),
+      )
+      const aspect = engine.getAspectRatio(iso.camera)
+      const halfDiagonal = Math.hypot(iso.zoom * aspect, iso.zoom / Math.cos(iso.camera.beta))
+      const start = nextWaveStart(
+        waves.map((wave) => wave.start),
+        performance.now(),
+      )
+      if (start !== null) waves.push({ start, ...centre, reach: halfDiagonal / spacing })
+    },
 
     setWindow(next): void {
       grid.setWindow(next)
@@ -380,6 +488,7 @@ export function createHexScene(canvas: HTMLCanvasElement, options: HexSceneOptio
       vision.dispose()
       tokens.dispose()
       arrows.dispose()
+      lids.dispose()
       grid.dispose()
       iso.dispose()
       scene.dispose()

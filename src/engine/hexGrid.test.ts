@@ -4,7 +4,14 @@ import { Scene } from '@babylonjs/core/scene'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { hexKey, spiral, type Axial } from '../hex/coords'
 import { createLayout, hexToWorld } from '../hex/layout'
-import { createHexGrid, wantsDetail, type HexGrid, type HexTile } from './hexGrid'
+import {
+  REVEAL_BURST,
+  SEE_THROUGH_CLARITY,
+  createHexGrid,
+  wantsDetail,
+  type HexGrid,
+  type HexTile,
+} from './hexGrid'
 
 const layout = createLayout(2)
 const BASE = new Color3(0.2, 0.4, 0.6)
@@ -371,6 +378,104 @@ describe('fog flattening', () => {
   })
 })
 
+describe('veil', () => {
+  const FOG: [number, number, number] = [0.055, 0.065, 0.085]
+  const MIN = 0.05
+  const keyOf = (index: number): ReturnType<typeof hexKey> => hexKey(tiles[index].hex)
+
+  it('buries every hex, tints and all, whatever the fog says', () => {
+    grid.setOverlay(new Map([[keyOf(1), new Color3(1, 1, 1)]]))
+    grid.setVeil(true)
+    for (let index = 0; index < grid.count; index++) {
+      const [r, g, b] = grid.colorAt(index)
+      expect([r, g, b].map((channel) => Number(channel.toFixed(6)))).toEqual(FOG)
+      expect(grid.heightAt(index)).toBeCloseTo(MIN, 6)
+    }
+  })
+
+  it('buries ground that enters the window while it is down', () => {
+    grid.setVeil(true)
+    grid.setWindow([...tiles, { hex: { q: 20, r: 0 }, elevation: 3, color: BASE }])
+    const index = grid.indexOf(hexKey({ q: 20, r: 0 }))!
+    expect(grid.colorAt(index)[0]).toBeCloseTo(FOG[0], 6)
+    expect(grid.heightAt(index)).toBeCloseTo(MIN, 6)
+  })
+
+  it('shows the fog painted under it once lifted', () => {
+    grid.setVeil(true)
+    grid.setFog(new Map([[keyOf(0), 0]]))
+    grid.setVeil(false)
+    expect(grid.colorAt(0)[0]).toBeCloseTo(FOG[0], 6)
+    expect(grid.heightAt(0)).toBeCloseTo(MIN, 6)
+    expect(grid.colorAt(1)[0]).toBeCloseTo(BASE.r, 6)
+    expect(grid.heightAt(1)).toBeCloseTo(tiles[1].elevation, 6)
+  })
+})
+
+describe('seeing through the fog', () => {
+  const FOG = 0.055
+  const keyOf = (index: number): ReturnType<typeof hexKey> => hexKey(tiles[index].hex)
+  const washed = (clarity: number): number =>
+    FOG + (BASE.r - FOG) * (SEE_THROUGH_CLARITY + (1 - SEE_THROUGH_CLARITY) * clarity)
+
+  it('stands buried ground at its height, under a wash of fog', () => {
+    grid.setFog(new Map([[keyOf(0), 0]]))
+    grid.setSeeThrough(true)
+    expect(grid.heightAt(0)).toBeCloseTo(tiles[0].elevation, 6)
+    expect(grid.colorAt(0)[0]).toBeCloseTo(washed(0), 6)
+    expect(grid.colorAt(1)[0]).toBeCloseTo(BASE.r, 6)
+  })
+
+  it('washes remembered ground lighter than ground never seen', () => {
+    grid.setSeeThrough(true)
+    grid.setFog(new Map([[keyOf(0), 0.42]]))
+    expect(grid.colorAt(0)[0]).toBeCloseTo(washed(0.42), 6)
+  })
+
+  it('buries the ground again once turned off', () => {
+    grid.setSeeThrough(true)
+    grid.setFog(new Map([[keyOf(0), 0]]))
+    grid.setSeeThrough(false)
+    expect(grid.heightAt(0)).toBeCloseTo(0.05, 6)
+    expect(grid.colorAt(0)[0]).toBeCloseTo(FOG, 6)
+  })
+
+  it('still yields to the veil', () => {
+    grid.setSeeThrough(true)
+    grid.setVeil(true)
+    expect(grid.heightAt(0)).toBeCloseTo(0.05, 6)
+  })
+})
+
+describe('lift', () => {
+  it('raises each hex by the offset at its centre', () => {
+    grid.lift((x) => (x > 0 ? 0.5 : 0))
+    tiles.forEach((tile, index) => {
+      const raised = hexToWorld(layout, tile.hex).x > 0 ? 0.5 : 0
+      expect(grid.heightAt(index)).toBeCloseTo(tile.elevation + raised, 6)
+    })
+  })
+
+  it('raises flattened fog from the ground it lies on', () => {
+    grid.setFog(new Map([[hexKey(tiles[0].hex), 0]]))
+    grid.lift(() => 0.3)
+    expect(grid.heightAt(0)).toBeCloseTo(0.05 + 0.3, 6)
+  })
+
+  it('sets every hex back exactly where it rests on an offset of 0', () => {
+    const before = tiles.map((_, index) => grid.heightAt(index))
+    grid.lift(() => 0.7)
+    grid.lift(() => 0)
+    expect(tiles.map((_, index) => grid.heightAt(index))).toEqual(before)
+  })
+
+  it('uploads nothing when no hex moved', () => {
+    const upload = vi.spyOn(grid.mesh, 'thinInstancePartialBufferUpdate')
+    grid.lift(() => 0)
+    expect(upload).not.toHaveBeenCalled()
+  })
+})
+
 describe('re-terraining', () => {
   const OTHER = new Color3(0.9, 0.1, 0.1)
 
@@ -554,5 +659,74 @@ describe('wantsDetail', () => {
   it('holds whichever it has on a zoom resting between the two lines', () => {
     expect(wantsDetail(2, true)).toBe(true)
     expect(wantsDetail(2, false)).toBe(false)
+  })
+})
+
+describe('reveal', () => {
+  const revealing = (): { grid: HexGrid; seen: [number, number, number][] } => {
+    const seen: [number, number, number][] = []
+    const watched = createHexGrid(scene, layout, {
+      capacity: 100,
+      onReveal: (x, top, z) => seen.push([x, top, z]),
+    })
+    watched.setWindow(tiles)
+    return { grid: watched, seen }
+  }
+
+  it('tells of a buried hex brought out, with the top of the ground now showing', () => {
+    const { grid: watched, seen } = revealing()
+    const key = hexKey(tiles[4].hex)
+    watched.setFog(new Map([[key, 0]]))
+    watched.updateFog(new Map([[key, 1]]))
+
+    const world = hexToWorld(layout, tiles[4].hex)
+    expect(seen).toHaveLength(1)
+    expect(seen[0][0]).toBeCloseTo(world.x, 5)
+    expect(seen[0][1]).toBeCloseTo(tiles[4].elevation, 5)
+    expect(seen[0][2]).toBeCloseTo(world.z, 5)
+    watched.dispose()
+  })
+
+  it('tells of a hex a whole-map replacement brings out', () => {
+    const { grid: watched, seen } = revealing()
+    const key = hexKey(tiles[4].hex)
+    watched.setFog(new Map([[key, 0]]))
+    watched.setFog(new Map())
+    expect(seen).toHaveLength(1)
+    watched.dispose()
+  })
+
+  it('says nothing of a hex that was only dimmed', () => {
+    const { grid: watched, seen } = revealing()
+    const key = hexKey(tiles[4].hex)
+    watched.setFog(new Map([[key, 0.42]]))
+    watched.updateFog(new Map([[key, 1]]))
+    expect(seen).toHaveLength(0)
+    watched.dispose()
+  })
+
+  it('says nothing of a burst as big as the fog being switched off', () => {
+    const seen: unknown[] = []
+    const many = makeTiles(12)
+    expect(many.length).toBeGreaterThan(REVEAL_BURST)
+    const watched = createHexGrid(scene, layout, {
+      capacity: many.length,
+      onReveal: () => seen.push(null),
+    })
+    watched.setWindow(many)
+    watched.setFog(new Map(many.map((tile) => [hexKey(tile.hex), 0])))
+    watched.setFog(new Map())
+    expect(seen).toHaveLength(0)
+    watched.dispose()
+  })
+
+  it('says nothing under the veil', () => {
+    const { grid: watched, seen } = revealing()
+    const key = hexKey(tiles[4].hex)
+    watched.setFog(new Map([[key, 0]]))
+    watched.setVeil(true)
+    watched.updateFog(new Map([[key, 1]]))
+    expect(seen).toHaveLength(0)
+    watched.dispose()
   })
 })

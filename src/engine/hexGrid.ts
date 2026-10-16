@@ -24,6 +24,13 @@ export interface HexGridOptions {
   gap?: number
   /** Radius of the rounded top edge, as a fraction of the hex size. */
   bevel?: number
+  /** Which of the camera's layers the grid is drawn on. */
+  layerMask?: number
+  /**
+   * Told of each hex a fog update brings out from under the fog, with the top
+   * of the ground now showing there: the cue for the fog to be seen lifting.
+   */
+  onReveal?: (x: number, top: number, z: number) => void
 }
 
 export interface HexGrid {
@@ -75,6 +82,21 @@ export interface HexGrid {
   moveWindow(keep: (q: number, r: number) => boolean, entering: readonly HexTile[]): void
   /** Draws the window with the bevelled prism, or with the flat one. */
   setDetail(detailed: boolean): void
+  /**
+   * Buries every hex under the fog, tints and all, whatever the fog says, or
+   * lifts that and shows the fog as it stands again.
+   */
+  setVeil(veiled: boolean): void
+  /**
+   * Draws the fog as a wash over the ground rather than burying it: every hex
+   * stands at its height in its own colour, dimmed by how fogged it is.
+   */
+  setSeeThrough(seeThrough: boolean): void
+  /**
+   * Raises each hex above where it rests by what `offset` gives at its centre on
+   * the ground; an offset of 0 everywhere sets the whole window back down.
+   */
+  lift(offset: (x: number, z: number) => number): void
   dispose(): void
 }
 
@@ -102,11 +124,21 @@ const BASE = 3
 
 // Barely above the ground slab, so a hex nobody has seen reads as a hole in the
 // map rather than as a dimmed tile whose terrain can still be guessed.
-const FOG_COLOR = new Color3(0.055, 0.065, 0.085)
+export const FOG_COLOR = new Color3(0.055, 0.065, 0.085)
+/** What a veiled hex's top lightens toward as it is raised, so a swell reads as ground rising. */
+const CREST_COLOR = new Color3(0.2, 0.24, 0.31)
+/** How high a lifted hex must stand to show the crest colour at full. */
+const CREST_HEIGHT = 3
+
+/** The most hexes one fog change may reveal and still be told of one by one. */
+export const REVEAL_BURST = 400
 
 // Tints carry no terrain information, so they stay legible through the fog: a
 // route or the hover highlight should not vanish into unexplored ground.
 const TINT_CLARITY_FLOOR = 0.6
+
+/** How much of the ground shows through the thickest fog when the fog is seen through. */
+export const SEE_THROUGH_CLARITY = 0.5
 
 /**
  * The hexes on screen, drawn as thin instances of one prism. The buffers are
@@ -141,6 +173,7 @@ export function createHexGrid(scene: Scene, layout: Layout, options: HexGridOpti
   // Both prisms read the same buffers; only the one drawing is sent them.
   for (const prism of [detailedMesh, flatMesh]) {
     prism.material = material
+    if (options.layerMask !== undefined) prism.layerMask = options.layerMask
 
     // Both buffers stay updatable: a static buffer cannot be re-uploaded, so
     // moving the window would rewrite the matrices and never reach the GPU.
@@ -165,6 +198,11 @@ export function createHexGrid(scene: Scene, layout: Layout, options: HexGridOpti
 
   let overlay = new Map<HexKey, Color3>()
   let fog = new Map<HexKey, number>()
+  let veiled = false
+  let seeThrough = false
+
+  const shownClarity = (index: number): number =>
+    seeThrough ? SEE_THROUGH_CLARITY + (1 - SEE_THROUGH_CLARITY) * clarity[index] : clarity[index]
 
   // Only the slots in use go up; the rest of the buffer is whatever was last there.
   const uploadColors = (): void => {
@@ -195,10 +233,18 @@ export function createHexGrid(scene: Scene, layout: Layout, options: HexGridOpti
   // how much of the hex the party has seen. Both layers are kept apart so the
   // hover tint can change on every pointer move without touching the fog.
   const composite = (index: number): void => {
-    const tint = overlay.get(keys[index])
-    const fade = tint ? Math.max(clarity[index], TINT_CLARITY_FLOOR) : clarity[index]
-    const base = index * BASE
     const offset = index * COLOR
+    if (veiled) {
+      colors[offset] = FOG_COLOR.r
+      colors[offset + 1] = FOG_COLOR.g
+      colors[offset + 2] = FOG_COLOR.b
+      colors[offset + 3] = 1
+      return
+    }
+
+    const tint = overlay.get(keys[index])
+    const fade = tint ? Math.max(shownClarity(index), TINT_CLARITY_FLOOR) : shownClarity(index)
+    const base = index * BASE
 
     const r = tint ? tint.r : baseColors[base]
     const g = tint ? tint.g : baseColors[base + 1]
@@ -218,8 +264,11 @@ export function createHexGrid(scene: Scene, layout: Layout, options: HexGridOpti
 
   // Ground nobody has seen lies flat, or a mountain's silhouette would stand
   // up out of the fog and give away what the fog is there to hide.
+  const resting = (index: number): number =>
+    !veiled && (seeThrough || clarity[index] > 0) ? elevations[index] : MIN_ELEVATION
+
   const raise = (index: number): boolean => {
-    const height = clarity[index] > 0 ? elevations[index] : MIN_ELEVATION
+    const height = resting(index)
     const at = index * MATRIX + 5
     if (matrices[at] === height) return false
     matrices[at] = height
@@ -314,12 +363,41 @@ export function createHexGrid(scene: Scene, layout: Layout, options: HexGridOpti
     composite(index)
   }
 
+  // Slots a fog change is bringing out from under the fog, told once the change is in.
+  const revealed: number[] = []
+
+  const noteReveal = (index: number, fade: number): void => {
+    if (options.onReveal && !veiled && clarity[index] === 0 && fade > 0) revealed.push(index)
+  }
+
+  // A burst this big is the fog switched off or a whole map changing hands,
+  // not the party looking round: nothing is seen lifting.
+  const tellReveals = (): void => {
+    if (revealed.length <= REVEAL_BURST) {
+      for (const index of revealed) {
+        const m = index * MATRIX
+        options.onReveal?.(matrices[m + 12], matrices[m + 5], matrices[m + 14])
+      }
+    }
+    revealed.length = 0
+  }
+
   const uploadHeights = (): void => {
     if (raisedTo >= 0) {
       mesh.thinInstancePartialBufferUpdate('matrix', raisedTo - raisedFrom + 1, raisedFrom)
     }
     raisedFrom = Infinity
     raisedTo = -1
+  }
+
+  // Every hex, height and colour both: what a change to how the fog is drawn costs.
+  const redraw = (): void => {
+    for (let index = 0; index < count; index++) {
+      raise(index)
+      composite(index)
+    }
+    if (count > 0) mesh.thinInstancePartialBufferUpdate('matrix', count, 0)
+    uploadColors()
   }
 
   const commit = (): void => {
@@ -390,6 +468,7 @@ export function createHexGrid(scene: Scene, layout: Layout, options: HexGridOpti
       for (let index = 0; index < count; index++) {
         const fade = fog.get(keys[index]) ?? 1
         if (fade === clarity[index]) continue
+        noteReveal(index, fade)
         refog(index, fade)
         changed = true
       }
@@ -398,6 +477,7 @@ export function createHexGrid(scene: Scene, layout: Layout, options: HexGridOpti
         uploadColors()
         uploadHeights()
       }
+      tellReveals()
     },
 
     updateFog(changed): void {
@@ -412,6 +492,7 @@ export function createHexGrid(scene: Scene, layout: Layout, options: HexGridOpti
         const index = indexByKey.get(key)
         if (index === undefined || clarity[index] === fade) continue
 
+        noteReveal(index, fade)
         refog(index, fade)
         touched = true
       }
@@ -420,6 +501,7 @@ export function createHexGrid(scene: Scene, layout: Layout, options: HexGridOpti
         uploadColors()
         uploadHeights()
       }
+      tellReveals()
     },
 
     setWindow(tiles): void {
@@ -467,6 +549,43 @@ export function createHexGrid(scene: Scene, layout: Layout, options: HexGridOpti
       // empty, which settles the material without the per-hex colour attribute;
       // nothing else unsettles it, and the map would draw plain white.
       material.markAsDirty(Material.AttributesDirtyFlag)
+    },
+
+    setVeil(next): void {
+      if (next === veiled) return
+      veiled = next
+      redraw()
+    },
+
+    setSeeThrough(next): void {
+      if (next === seeThrough) return
+      seeThrough = next
+      redraw()
+    },
+
+    lift(offset): void {
+      let lit = false
+      for (let index = 0; index < count; index++) {
+        const m = index * MATRIX
+        const raised = offset(matrices[m + 12], matrices[m + 14])
+        const height = resting(index) + raised
+        if (matrices[m + 5] === height) continue
+        matrices[m + 5] = height
+        if (index < raisedFrom) raisedFrom = index
+        if (index > raisedTo) raisedTo = index
+        // Under the veil every top is the same flat fog, so height alone hardly
+        // shows from above: a raised top catches the light as well.
+        if (veiled) {
+          const glow = Math.min(1, Math.max(0, raised / CREST_HEIGHT))
+          const c = index * COLOR
+          colors[c] = FOG_COLOR.r + (CREST_COLOR.r - FOG_COLOR.r) * glow
+          colors[c + 1] = FOG_COLOR.g + (CREST_COLOR.g - FOG_COLOR.g) * glow
+          colors[c + 2] = FOG_COLOR.b + (CREST_COLOR.b - FOG_COLOR.b) * glow
+          lit = true
+        }
+      }
+      uploadHeights()
+      if (lit) uploadColors()
     },
 
     dispose(): void {
