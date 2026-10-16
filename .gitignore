@@ -8,3 +8,5 @@ dist/
 *.db
 .beads-credential-key
 .beads/proxieddb/
+
+.claude/skills/
