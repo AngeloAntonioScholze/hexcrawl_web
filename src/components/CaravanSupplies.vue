@@ -34,7 +34,7 @@ const onInput = (supply: Supply, event: Event): void => {
       <div class="row">
         <span class="label">{{ one.label }}</span>
         <input
-          v-if="store.dmView"
+          v-if="store.may('supplies')"
           type="number"
           min="0"
           :max="SUPPLY_LIMITS[one.supply].max"

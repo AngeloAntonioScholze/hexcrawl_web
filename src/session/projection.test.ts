@@ -46,6 +46,8 @@ const snapshot = (): MapSnapshot => ({
   terrain: { seed: 1234, scale: 1, seaLevel: 0, relief: 1 },
   worldRadius: 9,
   fog: true,
+  revealed: false,
+  fogSeeThrough: false,
   showSight: true,
   showHistory: true,
   dmView: true,
@@ -308,7 +310,14 @@ describe('what the players never get', () => {
 
   it("leaves out the DM's view state", () => {
     const view = project()
-    for (const key of ['dmView', 'selectedId', 'showSight', 'showHistory', 'fog']) {
+    for (const key of [
+      'dmView',
+      'selectedId',
+      'showSight',
+      'showHistory',
+      'fog',
+      'fogSeeThrough',
+    ]) {
       expect(view).not.toHaveProperty(key)
     }
   })
@@ -337,6 +346,13 @@ describe('what the players do get', () => {
     expect(view.visible).toContain('3,0')
     expect(view.visible).not.toContain('-2,0')
     expect(view.visible.every((hex) => view.explored.includes(hex))).toBe(true)
+  })
+
+  it('has the whole world, roads and all, once the DM reveals the map', () => {
+    const view = project({ ...snapshot(), revealed: true })
+    expect(view.explored).toHaveLength(3 * 9 * 10 + 1)
+    expect(view.tiles).toHaveLength(view.explored.length)
+    expect(view.roads.length).toBeGreaterThanOrEqual(project().roads.length)
   })
 
   it('has the ground of every explored hex', () => {

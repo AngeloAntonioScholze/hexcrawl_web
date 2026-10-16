@@ -20,6 +20,8 @@ const plain = (snapshot: MapSnapshot): MapSnapshot => ({
   terrain: { ...snapshot.terrain },
   worldRadius: snapshot.worldRadius,
   fog: snapshot.fog,
+  revealed: snapshot.revealed,
+  fogSeeThrough: snapshot.fogSeeThrough,
   showSight: snapshot.showSight,
   showHistory: snapshot.showHistory,
   dmView: snapshot.dmView,

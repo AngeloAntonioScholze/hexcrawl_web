@@ -105,7 +105,7 @@ const dome = [
       <span class="time">{{ timeOfDay(store.clock) }}</span>
       <div class="row">
         <button
-          v-if="store.dmView"
+          v-if="store.may('clock')"
           type="button"
           class="step"
           title="take the last turn back"
@@ -124,7 +124,7 @@ const dome = [
         </span>
 
         <button
-          v-if="store.dmView"
+          v-if="store.may('clock')"
           type="button"
           class="step"
           title="let a turn pass"
@@ -136,6 +136,7 @@ const dome = [
       </div>
 
       <button
+        v-if="store.may('clock')"
         type="button"
         class="skip"
         :title="store.clock.phase === 'day' ? 'travel on until dark' : 'camp until first light'"

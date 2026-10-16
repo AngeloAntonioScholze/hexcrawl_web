@@ -12,6 +12,8 @@ const snapshot = (): MapSnapshot => ({
   terrain: { seed: 4242, scale: 65, seaLevel: -0.15, relief: 9.5 },
   worldRadius: 150,
   fog: true,
+  revealed: false,
+  fogSeeThrough: false,
   showSight: false,
   showHistory: true,
   dmView: false,

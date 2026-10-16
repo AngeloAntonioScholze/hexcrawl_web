@@ -1,4 +1,5 @@
 import { Color3 } from '@babylonjs/core/Maths/math.color'
+import { roadSpans } from '../engine/roadSegments'
 import { createPinia, setActivePinia } from 'pinia'
 import { beforeEach, describe, expect, it } from 'vitest'
 import { catalogFor, DEFAULT_CATALOG, unlockedServices } from '../entities/catalog'
@@ -10,7 +11,7 @@ import {
 } from '../terrain/resources'
 import { mulberry32 } from '../terrain/perlin'
 import { riverKey } from '../terrain/rivers'
-import { roadHexes } from '../terrain/roads'
+import { roadHexes, type Roads } from '../terrain/roads'
 import { TERRAIN_DEFAULTS, type TerrainId, type TerrainTile } from '../terrain/terrain'
 import { TURNS_PER_PHASE } from '../time/clock'
 import { DM, PLAYER } from '../session/permissions'
@@ -140,6 +141,7 @@ describe('DM tools', () => {
     expect(store.canUndo).toBe(false)
 
     store.setDmTool('select')
+    store.selectEntity('')
     store.click({ q: 2, r: 0 })
     expect(store.selectedHex).toBe('2,0')
   })
@@ -434,6 +436,47 @@ describe('roads', () => {
   })
 })
 
+describe('what the map draws', () => {
+  /** Road and river both run 0,0 to 2,0, all of it seen by the party, and the DM hides 2,0. */
+  const linesUnderFog = (): Store => {
+    const store = setup()
+    for (const tool of ['road', 'river'] as const) {
+      store.setDmTool(tool)
+      store.click({ q: 0, r: 0 })
+      store.click({ q: 2, r: 0 })
+      store.click({ q: 2, r: 0 })
+    }
+    store.setDmTool('select')
+    store.setSight(2)
+    store.select({ q: 1, r: 0 })
+    expect(['0,0', '1,0', '2,0'].every((key) => store.explored.has(key as HexKey))).toBe(true)
+    store.setDmTool('fog')
+    store.setFogMode('hide')
+    store.setBrushSize(0)
+    store.click({ q: 2, r: 0 })
+    store.setDmTool('select')
+    return store
+  }
+
+  const drawn = (store: Store, lines: Roads): string[][] =>
+    roadSpans(lines, store.drawnView).map(({ a, b }) => [a, b])
+
+  it('keeps roads and rivers on hexes the DM hid off the players map', () => {
+    const store = linesUnderFog()
+    store.dmView = false
+
+    expect(drawn(store, store.roads)).toEqual([['0,0', '1,0']])
+    expect(drawn(store, store.rivers)).toEqual([['0,0', '1,0']])
+  })
+
+  it('shows the DM every stretch, hidden or not', () => {
+    const store = linesUnderFog()
+
+    expect(drawn(store, store.roads)).toHaveLength(2)
+    expect(drawn(store, store.rivers)).toHaveLength(2)
+  })
+})
+
 describe('rivers', () => {
   const riverTool = (): Store => {
     const store = setup()
@@ -659,13 +702,25 @@ describe('painting terrain', () => {
 })
 
 describe('clicking the map', () => {
-  it('selects the hex in DM view and gives no order', () => {
+  it('selects the hex in DM view with no token picked, and gives no order', () => {
     const store = setup()
+    store.selectEntity('')
 
     store.click({ q: 2, r: 0 })
     expect(store.selectedHex).toBe('2,0')
     expect(store.start).toBeNull()
     expect(store.queue.size).toBe(0)
+  })
+
+  it('places, then orders, the token the DM picked', () => {
+    const store = setup()
+
+    store.click({ q: 0, r: 0 })
+    expect(store.start).toBe('0,0')
+    expect(store.selectedHex).toBeNull()
+
+    store.click({ q: 2, r: 0 })
+    expect(store.goal).toBe('2,0')
   })
 
   it('routes as before in player view and selects nothing', () => {
@@ -681,6 +736,7 @@ describe('clicking the map', () => {
 
   it('deselects the hex the DM clicks a second time, and moves to another', () => {
     const store = setup()
+    store.selectEntity('')
 
     store.click({ q: 2, r: 0 })
     store.click({ q: 2, r: 0 })
@@ -2273,6 +2329,7 @@ describe('undo and redo', () => {
 
   it('leaves no step for a click that changed nothing it keeps', () => {
     const store = setup()
+    store.selectEntity('')
     store.click({ q: 1, r: 0 })
     expect(store.selectedHex).toBe('1,0')
     expect(store.canUndo).toBe(false)
@@ -2562,6 +2619,7 @@ describe("the store's permissions", () => {
     const caravan = store.addEntity('the smugglers', 'caravan', 'dm')!.id
     const bandits = store.addEntity('the bandits', 'party', 'dm')!.id
     const scout = store.addEntity('the scout')!.id
+    const lookout = store.addEntity('the lookout', 'party', 'dm')!.id
 
     const putDown = (id: string, at: Axial, boarding?: Axial): void => {
       store.selectEntity(id)
@@ -2587,7 +2645,7 @@ describe("the store's permissions", () => {
     store.setPaintTerrain('forest')
 
     store.dmView = false
-    return { party, wagon, caravan, bandits, scout, rope, loot, merchant }
+    return { party, wagon, caravan, bandits, scout, lookout, rope, loot, merchant }
   }
 
   type Table = ReturnType<typeof table>
@@ -2618,9 +2676,9 @@ describe("the store's permissions", () => {
 
   const FORBIDDEN: Record<string, Case[]> = {
     place: [
-      ['place', (s, t) => s.place(t.scout, '1,1')],
-      ['select', (s) => s.select({ q: 1, r: 1 }), (s, t) => s.selectEntity(t.scout)],
-      ['click', (s) => s.click({ q: 1, r: 1 }), (s, t) => s.selectEntity(t.scout)],
+      ['place', (s, t) => s.place(t.party, '1,1')],
+      ['select', (s) => s.select({ q: 1, r: 1 }), (s, t) => s.selectEntity(t.lookout)],
+      ['click', (s) => s.click({ q: 1, r: 1 }), (s, t) => s.selectEntity(t.lookout)],
     ],
     order: [
       ['queueAction', (s, t) => s.queueAction(t.caravan, { kind: 'wait' })],
@@ -2630,6 +2688,7 @@ describe("the store's permissions", () => {
       ['removeWaypoint', (s) => s.removeWaypoint(0), (s, t) => s.selectEntity(t.caravan)],
     ],
     renameEntity: [['renameEntity', (s, t) => s.renameEntity(t.caravan, 'the friends')]],
+    recolorEntity: [['recolorEntity', (s, t) => s.recolorEntity(t.caravan, '#ff0000')]],
     editInventory: [
       ['addItem', (s, t) => s.addItem(t.bandits, { name: 'knife' })],
       ['editItem', (s, t) => s.editItem(t.loot, { name: 'gold' })],
@@ -2664,7 +2723,10 @@ describe("the store's permissions", () => {
         (s) => s.editCatalogEntry('smith.sharpen', { price: '1 gp' }),
       ],
     ],
-    fog: [['setFogMode', (s) => s.setFogMode('hide')]],
+    fog: [
+      ['setFogMode', (s) => s.setFogMode('hide')],
+      ['setRevealed', (s) => s.setRevealed(true)],
+    ],
     terrain: [
       ['setField', (s) => s.setField(fieldFromTiles(flatField(2)))],
       ['setTiles', (s) => s.setTiles(flatField(2))],
@@ -2830,6 +2892,27 @@ describe("the store's permissions", () => {
     expect(store.itemsOf(party)).toMatchObject([{ id: rope, quantity: 3 }])
   })
 
+  it('lets a player recolour their own party, to a colour and nothing else', () => {
+    const store = setup()
+    const { party } = table(store)
+
+    store.recolorEntity(party, '#A0B1C2')
+    store.recolorEntity(party, 'red')
+
+    expect(store.entities.find((one) => one.id === party)?.color).toBe('#a0b1c2')
+  })
+
+  it('falls back to an entity the player can see, never one the DM hid', () => {
+    const store = setup()
+    const spy = store.addEntity('the spy', 'npc', 'dm')!
+    store.entities = [spy, ...store.entities.filter((one) => one.id !== spy.id)]
+    store.selectEntity('')
+    expect(store.selectedEntity?.id).toBe(spy.id)
+
+    store.dmView = false
+    expect(store.selectedEntity?.hidden).toBe(false)
+  })
+
   it('lets a player hand things to the wagon they ride in', () => {
     const store = setup()
     const { party, wagon, rope } = table(store)
@@ -2866,5 +2949,62 @@ describe("the store's permissions", () => {
     expect(store.viewer).toEqual(PLAYER)
     store.dmView = true
     expect(store.viewer).toEqual(DM)
+  })
+})
+
+describe('the fog as each view draws it', () => {
+  it("follows the DM's switch in the DM view only", () => {
+    const store = setup()
+    store.fog = false
+    expect(store.fogShown).toBe(false)
+
+    store.dmView = false
+    expect(store.fogShown).toBe(true)
+  })
+
+  it('lifts off the player view once the DM reveals the map', () => {
+    const store = setup()
+    store.setRevealed(true)
+    expect(store.snapshot.revealed).toBe(true)
+    store.dmView = false
+    expect(store.fogShown).toBe(false)
+
+    store.dmView = true
+    store.undo()
+    store.dmView = false
+    expect(store.fogShown).toBe(true)
+  })
+
+  it('lets the DM see through the fog, and never the players', () => {
+    const store = setup()
+    store.fogSeeThrough = true
+    expect(store.seeThrough).toBe(true)
+    expect(store.drawnView.fog).toBe(false)
+
+    store.fog = false
+    expect(store.seeThrough).toBe(false)
+    store.fog = true
+
+    store.dmView = false
+    expect(store.seeThrough).toBe(false)
+    expect(store.drawnView.fog).toBe(true)
+  })
+
+  it('counts no hex the DM has hidden as explored', () => {
+    const store = setup()
+    store.select({ q: 0, r: 0 })
+    const seen = store.exploredCount
+    expect(seen).toBeGreaterThan(1)
+
+    store.setDmTool('fog')
+    store.setFogMode('hide')
+    store.click({ q: 0, r: 0 })
+
+    const hidden = range({ q: 0, r: 0 }, store.brushSize).filter((hex) =>
+      store.explored.has(hexKey(hex)),
+    )
+    expect(hidden.length).toBeGreaterThan(0)
+    expect(store.exploredCount).toBe(seen - hidden.length)
+    expect(store.explored.size).toBe(seen)
   })
 })

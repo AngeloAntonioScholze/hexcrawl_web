@@ -69,6 +69,7 @@ const mayTransfer = (viewer: Viewer, target: Target | undefined): boolean => {
 /** What a player may do; every action missing here is the DM's alone. */
 const PLAYER_RULES: Partial<Record<Action, (viewer: Viewer, target?: Target) => boolean>> = {
   order: ownsTarget,
+  place: ownsTarget,
   renameEntity: ownsTarget,
   recolorEntity: ownsTarget,
   editInventory: ownsTarget,
@@ -100,6 +101,7 @@ export const HEX_MAP_RULES = {
   clear: 'order',
   removeWaypoint: 'order',
   renameEntity: 'renameEntity',
+  recolorEntity: 'recolorEntity',
   addItem: 'editInventory',
   editItem: 'editInventory',
   removeItem: 'editInventory',
@@ -123,6 +125,7 @@ export const HEX_MAP_RULES = {
   addCatalogEntry: 'merchants',
   resetCatalogEntry: 'merchants',
   setFogMode: 'fog',
+  setRevealed: 'fog',
   setField: 'terrain',
   setTiles: 'terrain',
   setTerrain: 'terrain',

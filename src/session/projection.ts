@@ -9,7 +9,7 @@ import { visiblePois } from '../engine/poiMarkers'
 import { resourceMarks, type ResourceView } from '../engine/resourceMarkers'
 import { roadSpans } from '../engine/roadSegments'
 import type { HexEvent, HexLocation } from '../hex/content'
-import { parseKey, type HexKey } from '../hex/coords'
+import { hexKey, parseKey, range, type HexKey } from '../hex/coords'
 import { knownSet, withoutHidden, type FogEdits } from '../hex/fogEdits'
 import type { MapSnapshot, SavedAction, SavedOrigin } from '../persistence/mapState'
 import type { TerrainField } from '../terrain/field'
@@ -48,7 +48,10 @@ export interface PlayerProjection {
   turn: number
   clock: Clock
   worldRadius: number
-  /** Ground the players know: what the visible entities have seen, with the DM's fog edits laid over. */
+  /**
+   * Ground the players know: what the visible entities have seen, with the DM's
+   * fog edits laid over; the whole world once the DM reveals the map.
+   */
   explored: HexKey[]
   /** Ground in sight of any visible entity right now, less what the DM hid. */
   visible: HexKey[]
@@ -192,7 +195,10 @@ export function projectForPlayers(snapshot: MapSnapshot, field: TerrainField): P
   }
   const record = readRecord(snapshot)
   const { seen, inSight } = playerSight(snapshot, field, shown, record)
-  const known = knownSet(seen, edits)
+  // A revealed map is the player view with the fog off: every hex of the world.
+  const known: ReadonlySet<HexKey> = snapshot.revealed
+    ? new Set(range({ q: 0, r: 0 }, snapshot.worldRadius).map(hexKey))
+    : knownSet(seen, edits)
   const explored = sorted(known)
 
   const tiles = explored.flatMap((hex): PlayerTile[] => {
@@ -212,7 +218,7 @@ export function projectForPlayers(snapshot: MapSnapshot, field: TerrainField): P
 
   // The same filters the player view draws through, so the projection holds
   // exactly the markers, roads and rivers that view puts on the map.
-  const view: ResourceView = { dmView: false, fog: true, explored: known }
+  const view: ResourceView = { dmView: false, fog: !snapshot.revealed, explored: known }
 
   const markedHexes = new Set(resourceMarks(snapshot.resources, view).map((mark) => mark.hex))
   const resources = snapshot.resources

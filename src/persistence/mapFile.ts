@@ -38,16 +38,16 @@ export const MAP_FILE_EXTENSION = '.hexmap.json'
 
 export type MapFileResult = { ok: true; snapshot: MapSnapshot } | { ok: false; error: string }
 
-type Guard<T> = (value: unknown) => value is T
+export type Guard<T> = (value: unknown) => value is T
 
-const isString: Guard<string> = (value): value is string => typeof value === 'string'
+export const isString: Guard<string> = (value): value is string => typeof value === 'string'
 
 const isBoolean: Guard<boolean> = (value): value is boolean => typeof value === 'boolean'
 
-const isNumber: Guard<number> = (value): value is number =>
+export const isNumber: Guard<number> = (value): value is number =>
   typeof value === 'number' && Number.isFinite(value)
 
-const isTurn: Guard<number> = (value): value is number =>
+export const isTurn: Guard<number> = (value): value is number =>
   Number.isInteger(value) && (value as number) >= 0
 
 const isLevel: Guard<number> = (value): value is number =>
@@ -55,7 +55,7 @@ const isLevel: Guard<number> = (value): value is number =>
   (value as number) >= MERCHANT_LEVELS.min &&
   (value as number) <= MERCHANT_LEVELS.max
 
-const isSupply =
+export const isSupply =
   (supply: Supply): Guard<number> =>
   (value): value is number =>
     Number.isInteger(value) &&
@@ -70,30 +70,30 @@ const isQuantity: Guard<number> = (value): value is number =>
 const isChance: Guard<number> = (value): value is number =>
   isNumber(value) && value >= 0 && value <= 1
 
-const isHex: Guard<HexKey> = (value): value is HexKey =>
+export const isHex: Guard<HexKey> = (value): value is HexKey =>
   typeof value === 'string' && /^-?\d+,-?\d+$/.test(value)
 
-const oneOf =
+export const oneOf =
   <T extends string>(...allowed: T[]): Guard<T> =>
   (value): value is T =>
     allowed.includes(value as T)
 
-const nullable =
+export const nullable =
   <T>(guard: Guard<T>): Guard<T | null> =>
   (value): value is T | null =>
     value === null || guard(value)
 
-const listOf =
+export const listOf =
   <T>(guard: Guard<T>): Guard<readonly T[]> =>
   (value): value is readonly T[] =>
     Array.isArray(value) && value.every(guard)
 
-const isObject = (value: unknown): value is Record<string, unknown> =>
+export const isObject = (value: unknown): value is Record<string, unknown> =>
   typeof value === 'object' && value !== null && !Array.isArray(value)
 
 // The mapped type makes leaving a field out of a shape a type error, so a field
 // added to the snapshot cannot slip through the file unchecked.
-const shape =
+export const shape =
   <T>(fields: { [K in keyof T]-?: Guard<T[K]> }): Guard<T> =>
   (value): value is T =>
     isObject(value) &&
@@ -185,7 +185,7 @@ const isCatalogOverrides: Guard<readonly CatalogOverride[]> = (
   listOf(isCatalogOverride)(value) && new Set(value.map((one) => one.id)).size === value.length
 
 /** One check per snapshot field; a new field is one line here and one in ADDED_FIELD_DEFAULTS. */
-const SNAPSHOT_FIELDS: { [K in keyof MapSnapshot]-?: Guard<MapSnapshot[K]> } = {
+export const SNAPSHOT_FIELDS: { [K in keyof MapSnapshot]-?: Guard<MapSnapshot[K]> } = {
   terrain: shape<TerrainControls>({
     seed: isNumber,
     scale: isNumber,
@@ -194,6 +194,8 @@ const SNAPSHOT_FIELDS: { [K in keyof MapSnapshot]-?: Guard<MapSnapshot[K]> } = {
   }),
   worldRadius: isNumber,
   fog: isBoolean,
+  revealed: isBoolean,
+  fogSeeThrough: isBoolean,
   showSight: isBoolean,
   showHistory: isBoolean,
   dmView: isBoolean,
@@ -346,6 +348,8 @@ const ADDED_FIELD_DEFAULTS: {
   [K in Exclude<keyof MapSnapshot, OriginalField>]-?: () => MapSnapshot[K]
 } = {
   fogEdits: () => [],
+  revealed: () => false,
+  fogSeeThrough: () => false,
   encounterOverrides: () => [],
   catalogOverrides: () => [],
   roads: () => [],

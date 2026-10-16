@@ -62,7 +62,11 @@ watch(
             <button
               type="button"
               :class="{ here: rider.id === store.selectedId }"
-              :title="`give ${rider.name} the orders`"
+              :title="
+                store.may('order', rider)
+                  ? `give ${rider.name} the orders`
+                  : `look at ${rider.name}; it is not yours to order`
+              "
               @click="store.selectEntity(rider.id)"
             >
               <span class="pip" :style="{ background: rider.color }" />

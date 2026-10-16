@@ -33,6 +33,8 @@ const snapshot = (patch: Partial<MapSnapshot> = {}): MapSnapshot => ({
   terrain: { seed: 4242, scale: 65, seaLevel: -0.15, relief: 9.5 },
   worldRadius: 150,
   fog: false,
+  revealed: true,
+  fogSeeThrough: true,
   showSight: true,
   showHistory: true,
   dmView: false,

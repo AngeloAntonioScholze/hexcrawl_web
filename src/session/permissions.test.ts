@@ -19,14 +19,13 @@ const hiddenDmCaravan: EntityRef = { owner: 'dm', hidden: true }
 
 const ENTITY_ACTIONS: readonly Action[] = [
   'order',
+  'place',
   'renameEntity',
   'recolorEntity',
   'editInventory',
 ]
 
-// Putting an entity on the map is where it starts, which is the DM's call.
 const DM_ONLY: readonly Action[] = [
-  'place',
   'addEntity',
   'removeEntity',
   'entitySettings',

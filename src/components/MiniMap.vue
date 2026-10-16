@@ -51,7 +51,7 @@ const RESOURCE_DOT = 2
 const resourceDots = computed<readonly Pixel[]>(() =>
   resourceMarks(store.resources, {
     dmView: store.dmView,
-    fog: store.fog,
+    fog: store.drawnView.fog,
     explored: store.known,
   }).map((mark) => {
     const world = hexToWorld(props.layout, parseKey(mark.hex))
@@ -67,7 +67,7 @@ const hexPixel = (hex: HexKey): Pixel => {
 const roadLines = computed<readonly [Pixel, Pixel][]>(() =>
   roadSpans(store.roads, {
     dmView: store.dmView,
-    fog: store.fog,
+    fog: store.drawnView.fog,
     explored: store.explored,
   }).map((span) => [hexPixel(span.a), hexPixel(span.b)]),
 )
@@ -75,7 +75,7 @@ const roadLines = computed<readonly [Pixel, Pixel][]>(() =>
 const riverLines = computed<readonly [Pixel, Pixel][]>(() =>
   roadSpans(store.rivers, {
     dmView: store.dmView,
-    fog: store.fog,
+    fog: store.drawnView.fog,
     explored: store.explored,
   }).map((span) => [hexPixel(span.a), hexPixel(span.b)]),
 )

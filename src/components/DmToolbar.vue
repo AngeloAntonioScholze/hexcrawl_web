@@ -26,7 +26,7 @@ const SWATCHES = Object.fromEntries(
 </script>
 
 <template>
-  <div v-if="store.dmView" class="dm-toolbar" role="toolbar" aria-label="DM tools">
+  <div v-if="store.may('mapTools')" class="dm-toolbar" role="toolbar" aria-label="DM tools">
     <div class="tools">
       <button
         v-for="tool in DM_TOOLS"
@@ -63,6 +63,15 @@ const SWATCHES = Object.fromEntries(
         @click="store.setFogMode(mode)"
       >
         {{ mode }}
+      </button>
+      <button
+        type="button"
+        :class="{ here: store.revealed }"
+        :aria-pressed="store.revealed"
+        title="lift the fog off the whole map for the players"
+        @click="store.setRevealed(!store.revealed)"
+      >
+        reveal map
       </button>
     </div>
     <RoadOptions v-if="store.dmTool === 'road' || store.dmTool === 'river'" />

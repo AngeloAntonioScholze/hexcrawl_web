@@ -234,6 +234,10 @@ const MIGRATIONS: readonly string[] = [
     weight REAL
   );
   `,
+  `
+  ALTER TABLE map ADD COLUMN revealed INTEGER NOT NULL DEFAULT 0;
+  ALTER TABLE map ADD COLUMN fog_see_through INTEGER NOT NULL DEFAULT 0;
+  `,
 ]
 
 export const SCHEMA_VERSION = MIGRATIONS.length

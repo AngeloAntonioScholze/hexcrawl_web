@@ -66,6 +66,7 @@ import {
 import { encountersMet, encountersUpTo, interleave, type LogEntry } from '../encounters/log'
 import { resolveTurn } from '../entities/resolve'
 import type { TokenShape } from '../engine/partyToken'
+import type { ResourceView } from '../engine/resourceMarkers'
 import type { HexEvent, HexLocation } from '../hex/content'
 import {
   createKnowledge,
@@ -319,6 +320,10 @@ export const useHexMapStore = defineStore('hexMap', () => {
   )
 
   const fog = ref(true)
+  /** The DM has lifted the fog off the whole map for the players. */
+  const revealed = ref(false)
+  /** The DM's view shows the ground under the fog, through a thin wash of it. */
+  const fogSeeThrough = ref(false)
   /** Hexes the DM has revealed to or hidden from the players by hand. */
   const fogEdits = shallowRef<FogEdits>(NO_FOG_EDITS)
   const showSight = ref(false)
@@ -391,6 +396,7 @@ export const useHexMapStore = defineStore('hexMap', () => {
     resourceChances: slotOf(resourceChances),
     resourceSpacing: slotOf(resourceSpacing),
     fogEdits: slotOf(fogEdits),
+    revealed: slotOf(revealed),
     encounterOverrides: slotOf(encounterOverrides),
     roads: slotOf(roads),
     roadTail: slotOf(roadTail),
@@ -403,7 +409,10 @@ export const useHexMapStore = defineStore('hexMap', () => {
    * emptied of entities, and an empty map has no orders to give.
    */
   const selectedEntity = computed<Entity | null>(
-    () => entities.value.find((one) => one.id === selectedId.value) ?? entities.value[0] ?? null,
+    () =>
+      entities.value.find((one) => one.id === selectedId.value) ??
+      entities.value.find((one) => dmView.value || !one.hidden) ??
+      null,
   )
 
   const openingState = (id: string, at: number): EntityState => {
@@ -495,8 +504,9 @@ export const useHexMapStore = defineStore('hexMap', () => {
     entities.value = entities.value.map((one) => (one.id === id ? { ...one, ...change } : one))
   }
 
+  /** An empty id picks nobody, leaving the DM's clicks free to look the ground over. */
   const selectEntity = (id: string): void => {
-    if (entities.value.some((one) => one.id === id)) selectedId.value = id
+    if (id === '' || entities.value.some((one) => one.id === id)) selectedId.value = id
   }
 
   const addEntity = (
@@ -551,6 +561,11 @@ export const useHexMapStore = defineStore('hexMap', () => {
     if (!may('renameEntity', entityOf(id))) return
     const trimmed = name.trim()
     if (trimmed) patch(id, { name: trimmed })
+  }
+
+  const recolorEntity = (id: string, color: string): void => {
+    if (!may('recolorEntity', entityOf(id))) return
+    if (/^#[0-9a-f]{6}$/i.test(color)) patch(id, { color: color.toLowerCase() })
   }
 
   const clamp = (value: number, { min, max }: { min: number; max: number }): number =>
@@ -977,6 +992,8 @@ export const useHexMapStore = defineStore('hexMap', () => {
    */
   const place = (id: string, hex: HexKey): void => {
     if (!may('place', entityOf(id))) return
+    // A player sets their token down once; after that it goes where it is ordered.
+    if ((actingFor ?? viewer.value).role !== 'dm' && stateOf(id).at) return
     const kind = entities.value.find((one) => one.id === id)?.kind ?? 'party'
     const under = tileAt(hex)
     if (under && !canEnter(under, KIND_MOVEMENT[kind])) return
@@ -1082,6 +1099,11 @@ export const useHexMapStore = defineStore('hexMap', () => {
 
   /** Whether the fog brush reveals ground to the players or hides it; view state, never saved. */
   const fogMode = ref<FogMode>('reveal')
+
+  const setRevealed = (on: boolean): void => {
+    if (!may('fog')) return
+    revealed.value = on
+  }
 
   const setFogMode = (mode: FogMode): void => {
     if (!may('fog')) return
@@ -1191,14 +1213,21 @@ export const useHexMapStore = defineStore('hexMap', () => {
    * alone, so a player's click never reaches the DM's tools.
    */
   const click = (hex: Axial | null, append = false): void => {
-    if (!may('order', selectedEntity.value ?? undefined)) return
     const key = hex ? hexKey(hex) : null
     if (may('mapTools')) {
       const tool = dmTool.value
-      if (tool === 'select') selectHex(key === selectedHex.value ? null : hex)
-      else if (hex) toolHandlers[tool]?.(brushHexes(hex))
-      return
+      if (tool !== 'select') {
+        if (hex) toolHandlers[tool]?.(brushHexes(hex))
+        return
+      }
+      // With a token picked from the list the DM's clicks are its orders;
+      // with none they look the ground over.
+      if (!entities.value.some((one) => one.id === selectedId.value)) {
+        selectHex(key === selectedHex.value ? null : hex)
+        return
+      }
     }
+    if (!may('order', selectedEntity.value ?? undefined)) return
     const id = selectedId.value
     const queued = queue.value.get(id)
     // Against the last stop rather than the route's end, so a second click on
@@ -1582,10 +1611,33 @@ export const useHexMapStore = defineStore('hexMap', () => {
   const knownState = computed<Knowledge>(() => knowledge(exploredState.value, fogEdits.value))
   const known = computed<ReadonlySet<HexKey>>(() => knownState.value.seen)
 
+  /** Ground the parties have seen, less what the DM has since hidden. */
+  const exploredCount = computed(() => withoutHidden(explored.value, fogEdits.value.hidden).size)
+
+  /**
+   * Whether the map is drawn fogged. The fog switch is the DM's own; players
+   * always see the fog unless the DM has revealed the whole map to them.
+   */
+  const fogShown = computed(() => (dmView.value ? fog.value : !revealed.value))
+
+  /** Whether the fog is drawn as a wash over the ground rather than burying it. */
+  const seeThrough = computed(() => dmView.value && fog.value && fogSeeThrough.value)
+
   /** What the fog leaves clear around the parties: their sight, less what the DM hid. */
   const visibleToPlayers = computed<ReadonlySet<HexKey>>(() =>
     withoutHidden(visible.value, fogEdits.value.hidden),
   )
+
+  /**
+   * What the map draws resources, places, roads and rivers against. It is the
+   * known set rather than the explored one, so a hex the DM has hidden keeps
+   * its road and river off the players' map along with everything else on it.
+   */
+  const drawnView = computed<ResourceView>(() => ({
+    dmView: dmView.value,
+    fog: fogShown.value && !seeThrough.value,
+    explored: known.value,
+  }))
 
   /** Where one entity has been up to this turn, in the order it went. */
   const trailOf = (id: string): Axial[] => {
@@ -1668,6 +1720,8 @@ export const useHexMapStore = defineStore('hexMap', () => {
     terrain: terrain.value,
     worldRadius: worldRadius.value,
     fog: fog.value,
+    revealed: revealed.value,
+    fogSeeThrough: fogSeeThrough.value,
     showSight: showSight.value,
     showHistory: showHistory.value,
     dmView: dmView.value,
@@ -1712,6 +1766,8 @@ export const useHexMapStore = defineStore('hexMap', () => {
     setWorldRadius(saved.worldRadius)
     setTerrain(saved.terrain)
     fog.value = saved.fog
+    revealed.value = saved.revealed
+    fogSeeThrough.value = saved.fogSeeThrough
     showSight.value = saved.showSight
     showHistory.value = saved.showHistory
     dmView.value = saved.dmView
@@ -1834,6 +1890,7 @@ export const useHexMapStore = defineStore('hexMap', () => {
     addEntity: history.track(addEntity),
     removeEntity: history.track(removeEntity),
     renameEntity: history.track(renameEntity),
+    recolorEntity: history.track(recolorEntity, (id) => `color:${id}`),
     setPace: history.track(setPace, (id) => `pace:${id}`),
     setEntitySight: history.track(setEntitySight, (id) => `sight:${id}`),
     start,
@@ -1879,6 +1936,11 @@ export const useHexMapStore = defineStore('hexMap', () => {
     setWorldRadius,
     setWorldSize,
     fog,
+    revealed,
+    setRevealed: history.track(setRevealed),
+    fogShown,
+    fogSeeThrough,
+    seeThrough,
     showSight,
     showHistory,
     dmView,
@@ -1892,9 +1954,11 @@ export const useHexMapStore = defineStore('hexMap', () => {
     visible,
     blocked,
     explored,
+    exploredCount,
     known,
     knownState,
     visibleToPlayers,
+    drawnView,
     fogEdits,
     fogMode,
     setFogMode,

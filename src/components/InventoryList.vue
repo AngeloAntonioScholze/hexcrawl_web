@@ -16,10 +16,16 @@ const carried = computed(() => {
   return weighed.length ? Math.round(weighed.reduce((sum, one) => sum + one, 0) * 100) / 100 : null
 })
 
-// The players are never offered a hand-over to a carrier they cannot see.
-const partners = computed(() =>
-  store.inventoryPartners(props.ownerId).filter((one) => store.dmView || !one.hidden),
-)
+// Asked of the same rules the store holds to, so a player is offered only the
+// edits and hand-overs it would carry out: never one to a carrier they cannot see.
+const editable = computed(() => owner.value !== null && store.may('editInventory', owner.value))
+
+const partners = computed(() => {
+  const from = owner.value
+  return from
+    ? store.inventoryPartners(props.ownerId).filter((to) => store.may('transferItem', { from, to }))
+    : []
+})
 
 const open = ref(false)
 /** The line being edited, or null while a new one is being written. */
@@ -91,9 +97,15 @@ const title = computed(() =>
       </span>
     </div>
 
-    <ul v-if="items.length" class="list">
+    <ul v-if="items.length" class="list" :class="{ fixed: !editable }">
       <li v-for="item in items" :key="item.id">
+        <span v-if="!editable" class="item" :title="item.notes || undefined">
+          <span class="name">{{ item.name }}</span>
+          <span class="value">×{{ item.quantity }}</span>
+          <span class="label">{{ item.weight === null ? '' : `${totalWeight(item)} wt` }}</span>
+        </span>
         <button
+          v-else
           type="button"
           class="item"
           :title="item.notes || `edit ${item.name}`"
@@ -104,6 +116,7 @@ const title = computed(() =>
           <span class="label">{{ item.weight === null ? '' : `${totalWeight(item)} wt` }}</span>
         </button>
         <button
+          v-if="editable"
           type="button"
           class="drop"
           :aria-label="`remove ${item.name}`"
@@ -116,7 +129,7 @@ const title = computed(() =>
     </ul>
     <p v-else class="label">carrying nothing</p>
 
-    <button type="button" class="open" @click="startAdding">add item</button>
+    <button v-if="editable" type="button" class="open" @click="startAdding">add item</button>
 
     <PopupDialog v-model="open" :title="title">
       <form class="form" @submit.prevent="save">
@@ -219,7 +232,15 @@ p {
   cursor: pointer;
 }
 
-.item:hover {
+.list.fixed li {
+  grid-template-columns: minmax(0, 1fr);
+}
+
+.list.fixed .item {
+  cursor: default;
+}
+
+button.item:hover {
   background: color-mix(in srgb, var(--line) 45%, transparent);
 }
 

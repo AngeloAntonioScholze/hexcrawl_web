@@ -38,7 +38,8 @@ const onNote = (event: Event): void => {
 </script>
 
 <template>
-  <aside v-if="store.dmView && hex" class="details" :class="{ collapsed }">
+  <!-- The DM's notebook on a hex: whoever may not write in it has no use for it open. -->
+  <aside v-if="store.may('notes') && hex" class="details" :class="{ collapsed }">
     <header>
       <h2>hex {{ hex }}</h2>
       <div class="actions">

@@ -57,7 +57,7 @@ const step = (merchant: Merchant, by: number): void =>
               {{ info.label.toLowerCase() }}
             </span>
           </span>
-          <span v-if="store.dmView" class="stepper">
+          <span v-if="store.may('merchants')" class="stepper">
             <button
               type="button"
               :disabled="merchant.level <= MERCHANT_LEVELS.min"
@@ -98,7 +98,7 @@ const step = (merchant: Merchant, by: number): void =>
     </ul>
     <p v-else class="label">no merchants in the crew</p>
 
-    <template v-if="store.dmView">
+    <template v-if="store.may('merchants')">
       <button type="button" class="open" @click="adding = true">add merchant</button>
 
       <PopupDialog v-model="adding" title="new merchant">

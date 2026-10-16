@@ -50,6 +50,10 @@ export interface MapSnapshot {
   /** How far the world runs from the middle, in hexes. */
   worldRadius: number
   fog: boolean
+  /** The DM has lifted the fog off the whole map for the players. */
+  revealed: boolean
+  /** The DM's view shows the ground under the fog, through a thin wash of it. */
+  fogSeeThrough: boolean
   showSight: boolean
   showHistory: boolean
   dmView: boolean
@@ -96,8 +100,9 @@ export interface MapSnapshot {
 const SAVE_MAP = `
   INSERT OR REPLACE INTO map
     (id, seed, scale, sea_level, relief, world_radius, fog, show_sight,
-     show_history, dm_view, turn, selected_id, resource_spacing)
-  VALUES (1, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+     show_history, dm_view, turn, selected_id, resource_spacing, revealed,
+     fog_see_through)
+  VALUES (1, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
 `
 
 const flag = (value: boolean): number => (value ? 1 : 0)
@@ -134,6 +139,8 @@ export function saveSnapshot(db: Database, snapshot: MapSnapshot): void {
         snapshot.turn,
         snapshot.selectedId,
         snapshot.resourceSpacing,
+        flag(snapshot.revealed),
+        flag(snapshot.fogSeeThrough),
       ],
     })
 
@@ -424,6 +431,8 @@ export function loadSnapshot(db: Database): MapSnapshot | null {
     },
     worldRadius: Number(row.world_radius),
     fog: Number(row.fog) === 1,
+    revealed: Number(row.revealed) === 1,
+    fogSeeThrough: Number(row.fog_see_through) === 1,
     showSight: Number(row.show_sight) === 1,
     showHistory: Number(row.show_history) === 1,
     dmView: Number(row.dm_view) === 1,
