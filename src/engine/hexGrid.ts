@@ -138,7 +138,7 @@ export const REVEAL_BURST = 400
 const TINT_CLARITY_FLOOR = 0.6
 
 /** How much of the ground shows through the thickest fog when the fog is seen through. */
-export const SEE_THROUGH_CLARITY = 0.5
+export const SEE_THROUGH_CLARITY = 0.35
 
 /**
  * The hexes on screen, drawn as thin instances of one prism. The buffers are
