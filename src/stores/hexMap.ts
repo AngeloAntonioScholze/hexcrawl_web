@@ -223,7 +223,7 @@ export const MAX_SEED = 1_000_000
 export const MIN_SIGHT = 1
 export const MAX_SIGHT = 10
 
-/** What the sight slider reads with nobody on the map to ask. */
+/** The sight the vision falls back to with nobody on the map to ask. */
 export const DEFAULT_SIGHT = 5
 
 /** The world, entities and caravan panels on the left, the hex details on the right. */
@@ -580,10 +580,6 @@ export const useHexMapStore = defineStore('hexMap', () => {
     if (!may('entitySettings', entityOf(id))) return
     patch(id, { sight: clamp(Math.round(sight), { min: MIN_SIGHT, max: MAX_SIGHT }) })
   }
-
-  /** The selected entity's daylight sight, which the panel's slider turns. */
-  const sight = computed(() => selectedEntity.value?.sight ?? DEFAULT_SIGHT)
-  const setSight = (next: number): void => setEntitySight(selectedId.value, next)
 
   const vision = computed<VisionOptions>(() => {
     const one = selectedEntity.value
@@ -1947,8 +1943,6 @@ export const useHexMapStore = defineStore('hexMap', () => {
     viewer,
     may,
     actAs,
-    sight,
-    setSight: history.track(setSight, () => `sight:${selectedId.value}`),
     sightAt,
     reach,
     visible,

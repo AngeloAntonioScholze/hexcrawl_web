@@ -54,7 +54,7 @@ const toggleWorld = (): void => store.setPanelOpen('world', worldCollapsed.value
 const toggleEntities = (): void => store.setPanelOpen('entities', entitiesCollapsed.value, narrow())
 
 const onSight = (event: Event): void => {
-  store.setSight(Number((event.target as HTMLInputElement).value))
+  store.setEntitySight(store.selectedId, Number((event.target as HTMLInputElement).value))
 }
 
 const onPace = (event: Event): void => {
@@ -396,20 +396,6 @@ const olderTurns = computed(() => Math.max(0, store.adventureLog.length - TURNS_
           </template>
 
           <div v-if="store.fog || store.showSight" class="control stack">
-            <template v-if="store.may('entitySettings', store.selectedEntity ?? undefined)">
-              <div class="row">
-                <span>sight by daylight</span>
-                <span class="value">{{ store.sight }}</span>
-              </div>
-              <input
-                :value="store.sight"
-                type="range"
-                :min="MIN_SIGHT"
-                :max="MAX_SIGHT"
-                step="1"
-                @input="onSight"
-              />
-            </template>
             <div class="row">
               <span>seeing</span>
               <span class="value">{{ store.reach }} hex</span>
@@ -616,6 +602,19 @@ const olderTurns = computed(() => Math.max(0, store.adventureLog.length - TURNS_
               :max="PACE_LIMITS.max"
               :step="PACE_LIMITS.step"
               @input="onPace"
+            />
+            <div class="row">
+              <span>sight by daylight</span>
+              <span class="value">{{ store.selectedEntity.sight }} hex</span>
+            </div>
+            <input
+              v-if="store.may('entitySettings', store.selectedEntity)"
+              :value="store.selectedEntity.sight"
+              type="range"
+              :min="MIN_SIGHT"
+              :max="MAX_SIGHT"
+              step="1"
+              @input="onSight"
             />
             <template v-if="orderable">
               <button

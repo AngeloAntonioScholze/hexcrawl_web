@@ -89,7 +89,7 @@ export function allowed(viewer: Viewer, action: Action, target?: Target): boolea
 /**
  * The rule behind each of the map store's functions that changes something.
  * Entity actions are judged against the entity they name, or the selected one
- * for those that take none (select, click, clear, removeWaypoint, setSight);
+ * for those that take none (select, click, clear, removeWaypoint);
  * an item's entity is the one holding it. A select that puts an entity down
  * for the first time is judged as 'place' rather than 'order'.
  */
@@ -110,7 +110,6 @@ export const HEX_MAP_RULES = {
   removeEntity: 'removeEntity',
   setPace: 'entitySettings',
   setEntitySight: 'entitySettings',
-  setSight: 'entitySettings',
   advanceTurn: 'clock',
   rewindTurn: 'clock',
   goToTurn: 'clock',

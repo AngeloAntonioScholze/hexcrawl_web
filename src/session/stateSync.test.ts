@@ -155,7 +155,7 @@ describe('keeping a guest in step with the host', () => {
   it('puts a snapshot of many pieces back together', async () => {
     const { host, join } = link()
     const store = walking()
-    store.setSight(12)
+    store.setEntitySight(store.selectedId, 12)
     const line = join('mira')
     host.sendSnapshot('mira', view(store))
     await host.idle()
@@ -171,7 +171,7 @@ describe('keeping a guest in step with the host', () => {
     host.sendSnapshot('mira', view(store))
     await host.idle()
 
-    store.setSight(12)
+    store.setEntitySight(store.selectedId, 12)
     host.broadcast(view(store))
     await host.idle()
 
@@ -276,7 +276,7 @@ describe('keeping a guest in step with the host', () => {
 describe('pacing', () => {
   it('waits for a full buffer to drain before sending more', async () => {
     const store = walking()
-    store.setSight(12)
+    store.setEntitySight(store.selectedId, 12)
     const pieces = chunk(encodeState(view(store)), { id: 0 }).length
     expect(pieces).toBeGreaterThan(2)
 
@@ -335,7 +335,7 @@ describe('pacing', () => {
           : undefined,
     })
     const store = walking()
-    store.setSight(12)
+    store.setEntitySight(store.selectedId, 12)
     host.sendSnapshot('mira', view(store))
     await vi.waitFor(() => expect(sent).toHaveLength(1))
 
@@ -452,7 +452,7 @@ describe('a guest on its own', () => {
   it('trusts none of a transfer whose pieces disagree about what it is', () => {
     const { guest, asked, feed } = guestWith()
     const store = walking()
-    store.setSight(12)
+    store.setEntitySight(store.selectedId, 12)
     const pieces = stateMessages(view(store), 1, 0)
     expect(pieces.length).toBeGreaterThan(1)
     feed(pieces.map((message, index) => (index === 1 ? { ...message, seq: 9 } : message)))

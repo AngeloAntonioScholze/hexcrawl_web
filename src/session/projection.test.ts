@@ -399,7 +399,7 @@ describe('against the store', () => {
     setActivePinia(createPinia())
     const store = useHexMapStore()
     store.setTiles(flatTiles(6))
-    store.setSight(2)
+    store.setEntitySight(store.selectedId, 2)
     store.select({ q: 0, r: 0 })
     store.select({ q: 4, r: 0 })
 

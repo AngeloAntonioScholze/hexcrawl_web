@@ -16,7 +16,7 @@ import { TERRAIN_DEFAULTS, type TerrainId, type TerrainTile } from '../terrain/t
 import { TURNS_PER_PHASE } from '../time/clock'
 import { DM, PLAYER } from '../session/permissions'
 import { fieldFromTiles } from '../terrain/field'
-import { BRUSH_LIMITS, MAX_SIGHT, MIN_SIGHT, TERRAIN_LIMITS, useHexMapStore } from './hexMap'
+import { BRUSH_LIMITS, MAX_SIGHT, TERRAIN_LIMITS, useHexMapStore } from './hexMap'
 
 // The number is the mechanical level; sight and climbs read that, and the
 // rendered height only trails along behind it.
@@ -236,7 +236,7 @@ describe('the fog tool', () => {
 
   it('hides ground the party saw, and ground it has in sight', () => {
     const store = setup()
-    store.setSight(2)
+    store.setEntitySight(store.selectedId, 2)
     sendEast(store, 4)
     store.advanceTurn()
     expect(store.known.has('0,0')).toBe(true)
@@ -264,7 +264,7 @@ describe('the fog tool', () => {
 
   it('keeps the edits over a rewind', () => {
     const store = setup()
-    store.setSight(1)
+    store.setEntitySight(store.selectedId, 1)
     sendEast(store, 4)
     for (let i = 0; i < 3; i++) store.advanceTurn()
     fogTool(store, 'reveal')
@@ -447,7 +447,7 @@ describe('what the map draws', () => {
       store.click({ q: 2, r: 0 })
     }
     store.setDmTool('select')
-    store.setSight(2)
+    store.setEntitySight(store.selectedId, 2)
     store.select({ q: 1, r: 0 })
     expect(['0,0', '1,0', '2,0'].every((key) => store.explored.has(key as HexKey))).toBe(true)
     store.setDmTool('fog')
@@ -851,7 +851,7 @@ describe('the clock', () => {
   it('cuts sight down after dark and hands it back at dawn', () => {
     const store = setup()
     store.select({ q: 0, r: 0 })
-    store.setSight(6)
+    store.setEntitySight(store.selectedId, 6)
     const byDay = store.reach
 
     store.skipPhase()
@@ -888,7 +888,7 @@ describe('winding the crawl back', () => {
 
   it('closes the fog behind the party', () => {
     const store = setup()
-    store.setSight(2)
+    store.setEntitySight(store.selectedId, 2)
     sendEast(store, 4)
     for (let i = 0; i < 4; i++) store.advanceTurn()
     const far = store.explored.size
@@ -1026,11 +1026,10 @@ describe('entities', () => {
     const store = setup()
     const caravan = store.addEntity('the caravan', 'caravan')!
 
-    store.setSight(MAX_SIGHT)
-    store.selectEntity(caravan.id)
+    store.setEntitySight(store.selectedId, MAX_SIGHT + 5)
 
-    expect(store.sight).toBeLessThan(MAX_SIGHT)
-    expect(store.sight).toBeGreaterThanOrEqual(MIN_SIGHT)
+    expect(store.selectedEntity?.sight).toBe(MAX_SIGHT)
+    expect(store.entities.find((one) => one.id === caravan.id)?.sight).toBeLessThan(MAX_SIGHT)
   })
 })
 
@@ -2700,7 +2699,6 @@ describe("the store's permissions", () => {
     entitySettings: [
       ['setPace', (s, t) => s.setPace(t.party, 2)],
       ['setEntitySight', (s, t) => s.setEntitySight(t.party, 9)],
-      ['setSight', (s) => s.setSight(9)],
     ],
     clock: [
       ['advanceTurn', (s) => s.advanceTurn()],
