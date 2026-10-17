@@ -144,7 +144,7 @@ export function saveSnapshot(db: Database, snapshot: MapSnapshot): void {
 
     db.exec('DELETE FROM entity')
     const entity = db.prepare(
-      'INSERT INTO entity (id, ord, name, kind, owner, color, pace, sight, hidden) VALUES (?,?,?,?,?,?,?,?,?)',
+      'INSERT INTO entity (id, ord, name, kind, owner, color, pace, sight, hidden, darkvision) VALUES (?,?,?,?,?,?,?,?,?,?)',
     )
     try {
       snapshot.entities.forEach((one, index) => {
@@ -159,6 +159,7 @@ export function saveSnapshot(db: Database, snapshot: MapSnapshot): void {
             one.pacePerTurn,
             one.sight,
             flag(one.hidden),
+            flag(one.darkvision),
           ])
           .stepReset()
       })
@@ -418,6 +419,7 @@ export function loadSnapshot(db: Database): MapSnapshot | null {
     pacePerTurn: Number(one.pace),
     sight: Number(one.sight),
     hidden: Number(one.hidden) === 1,
+    darkvision: Number(one.darkvision) === 1,
   }))
 
   return {

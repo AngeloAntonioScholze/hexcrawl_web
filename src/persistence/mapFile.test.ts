@@ -27,6 +27,7 @@ const snapshot = (): MapSnapshot => ({
       color: '#e0b25a',
       pacePerTurn: 1,
       sight: 5,
+      darkvision: false,
       hidden: false,
     },
     {
@@ -37,6 +38,7 @@ const snapshot = (): MapSnapshot => ({
       color: '#6fa8dc',
       pacePerTurn: 3,
       sight: 7,
+      darkvision: true,
       hidden: true,
     },
   ],
@@ -207,6 +209,7 @@ describe('parseMapFile', () => {
     ['a negative turn', (map) => (map.turn = -1), 'turn'],
     ['an unknown entity kind', (map) => (map.entities[0].kind = 'dragon'), 'entities'],
     ['an entity missing a field', (map) => delete map.entities[1].hidden, 'entities'],
+    ['a darkvision that is not a flag', (map) => (map.entities[0].darkvision = 1), 'entities'],
     ['a list that is not a list', (map) => (map.notes = {}), 'notes'],
     ['a malformed hex key', (map) => (map.origins[0].hex = 'north'), 'origins'],
     ['a bad hex inside a path', (map) => map.record[0].entered.push('1;0'), 'record'],
@@ -344,6 +347,11 @@ describe('parseMapFile', () => {
   ])('opens a file from before %s existed with the default', (field, fallback) => {
     const result = parseMapFile(tampered((file) => delete file.map[field]))
     expect(result).toEqual({ ok: true, snapshot: { ...snapshot(), [field]: fallback } })
+  })
+
+  it('opens an entity from before darkvision existed as blind by night', () => {
+    const result = parseMapFile(tampered((file) => delete file.map.entities[1].darkvision))
+    expect(result.ok && result.snapshot.entities[1].darkvision).toBe(false)
   })
 
   it('gives a terrain the file has no odds for the default odds', () => {

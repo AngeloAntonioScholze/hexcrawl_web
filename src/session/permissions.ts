@@ -110,6 +110,7 @@ export const HEX_MAP_RULES = {
   removeEntity: 'removeEntity',
   setPace: 'entitySettings',
   setEntitySight: 'entitySettings',
+  setDarkvision: 'entitySettings',
   advanceTurn: 'clock',
   rewindTurn: 'clock',
   goToTurn: 'clock',

@@ -62,6 +62,10 @@ const onPace = (event: Event): void => {
   store.setPace(store.selectedId, Number((event.target as HTMLInputElement).value))
 }
 
+const onDarkvision = (event: Event): void => {
+  store.setDarkvision(store.selectedId, (event.target as HTMLInputElement).checked)
+}
+
 const onSpacing = (event: Event): void => {
   store.setResourceSpacing(Number((event.target as HTMLInputElement).value))
 }
@@ -619,6 +623,15 @@ const olderTurns = computed(() => Math.max(0, store.adventureLog.length - TURNS_
               step="1"
               @input="onSight"
             />
+            <label v-if="store.may('entitySettings', store.selectedEntity)" class="row naming">
+              <span>darkvision</span>
+              <input
+                type="checkbox"
+                :checked="store.selectedEntity.darkvision"
+                aria-label="sees as far by night as by day"
+                @change="onDarkvision"
+              />
+            </label>
             <template v-if="orderable">
               <button
                 type="button"

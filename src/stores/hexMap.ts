@@ -581,6 +581,11 @@ export const useHexMapStore = defineStore('hexMap', () => {
     patch(id, { sight: clamp(Math.round(sight), { min: MIN_SIGHT, max: MAX_SIGHT }) })
   }
 
+  const setDarkvision = (id: string, darkvision: boolean): void => {
+    if (!may('entitySettings', entityOf(id))) return
+    patch(id, { darkvision })
+  }
+
   const vision = computed<VisionOptions>(() => {
     const one = selectedEntity.value
     return { radius: one ? sightAt(one, turn.value) : DEFAULT_SIGHT }
@@ -1564,7 +1569,9 @@ export const useHexMapStore = defineStore('hexMap', () => {
       recordVersion.value,
       dmView.value,
       field.value.radius,
-      entities.value.map((one) => `${one.id}:${one.sight}:${one.hidden}`).join(','),
+      entities.value
+        .map((one) => `${one.id}:${one.sight}:${one.darkvision}:${one.hidden}`)
+        .join(','),
     ].join('|')
 
     exploredVersion += 1
@@ -1887,6 +1894,7 @@ export const useHexMapStore = defineStore('hexMap', () => {
     recolorEntity: history.track(recolorEntity, (id) => `color:${id}`),
     setPace: history.track(setPace, (id) => `pace:${id}`),
     setEntitySight: history.track(setEntitySight, (id) => `sight:${id}`),
+    setDarkvision: history.track(setDarkvision),
     start,
     goal,
     partyHex,

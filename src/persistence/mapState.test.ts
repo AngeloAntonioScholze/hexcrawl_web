@@ -15,6 +15,7 @@ const party: Entity = {
   color: '#e0b25a',
   pacePerTurn: 1,
   sight: 5,
+  darkvision: false,
   hidden: false,
 }
 
@@ -26,6 +27,7 @@ const caravan: Entity = {
   color: '#6fa8dc',
   pacePerTurn: 0.5,
   sight: 4,
+  darkvision: true,
   hidden: true,
 }
 
@@ -230,6 +232,16 @@ describe('schema', () => {
 
     saveSnapshot(old, snapshot())
     expect(loadSnapshot(old)!.turn).toBe(2)
+  })
+
+  it('gives an entity saved before darkvision existed none', () => {
+    saveSnapshot(db, snapshot({ entities: [] }))
+    db.exec(`
+      INSERT INTO entity (id, ord, name, kind, owner, color, pace, sight, hidden)
+      VALUES ('party-1', 0, 'the party', 'party', 'player', '#e0b25a', 1, 5, 0)
+    `)
+
+    expect(loadSnapshot(db)!.entities[0].darkvision).toBe(false)
   })
 
   it('leaves an already current database alone', () => {

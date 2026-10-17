@@ -32,6 +32,7 @@ const entity = (id: string, kind: Entity['kind'], hidden: boolean): Entity => ({
   color: '#ffffff',
   pacePerTurn: 1,
   sight: 2,
+  darkvision: false,
   hidden,
 })
 

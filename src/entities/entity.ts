@@ -21,6 +21,8 @@ export interface Entity {
   pacePerTurn: number
   /** Daylight sight radius, in hexes; the dark cuts it down. */
   sight: number
+  /** Sees as far by night as by day. */
+  darkvision: boolean
   /** Kept off the players' map. */
   hidden: boolean
 }
@@ -55,10 +57,12 @@ export const MIN_NIGHT_SIGHT = 1
 
 /**
  * Dark does not slow anybody down, it blinds them: an entity keeps its pace
- * after nightfall and loses most of its horizon.
+ * after nightfall and loses most of its horizon, unless it has darkvision.
  */
 export const sightAt = (entity: Entity, turn: number): number =>
-  isNight(turn) ? Math.max(MIN_NIGHT_SIGHT, Math.round(entity.sight * NIGHT_SIGHT)) : entity.sight
+  isNight(turn) && !entity.darkvision
+    ? Math.max(MIN_NIGHT_SIGHT, Math.round(entity.sight * NIGHT_SIGHT))
+    : entity.sight
 
 /** What each kind is worth before anyone edits it: pace, then daylight sight. */
 export const KIND_DEFAULTS: Readonly<Record<EntityKind, { pacePerTurn: number; sight: number }>> = {
@@ -100,6 +104,7 @@ export function newEntity(
     owner,
     color: ENTITY_COLORS[index % ENTITY_COLORS.length],
     ...KIND_DEFAULTS[kind],
+    darkvision: false,
     hidden: owner === 'dm',
   }
 }

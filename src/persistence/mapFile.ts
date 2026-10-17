@@ -209,6 +209,7 @@ export const SNAPSHOT_FIELDS: { [K in keyof MapSnapshot]-?: Guard<MapSnapshot[K]
       color: isString,
       pacePerTurn: isNumber,
       sight: isNumber,
+      darkvision: isBoolean,
       hidden: isBoolean,
     }),
   ),
@@ -360,6 +361,12 @@ const ADDED_FIELD_DEFAULTS: {
 const withDefault = (key: string, value: unknown): unknown => {
   if (value === undefined && Object.hasOwn(ADDED_FIELD_DEFAULTS, key)) {
     return ADDED_FIELD_DEFAULTS[key as keyof typeof ADDED_FIELD_DEFAULTS]()
+  }
+  // An entity from before darkvision existed was blind by night like everyone.
+  if (key === 'entities' && Array.isArray(value)) {
+    return value.map((one: unknown) =>
+      isObject(one) && one.darkvision === undefined ? { ...one, darkvision: false } : one,
+    )
   }
   // Odds for a terrain the file never knew fall back to the default, as they do
   // when an older save is loaded.

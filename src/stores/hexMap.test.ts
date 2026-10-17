@@ -861,6 +861,36 @@ describe('the clock', () => {
     store.skipPhase()
     expect(store.reach).toBe(byDay)
   })
+
+  it('leaves an entity with darkvision its whole sight after dark', () => {
+    const store = setup()
+    store.select({ q: 0, r: 0 })
+    store.setEntitySight(store.selectedId, 6)
+    store.setDarkvision(store.selectedId, true)
+    const byDay = store.reach
+
+    store.skipPhase()
+
+    expect(store.clock.phase).toBe('night')
+    expect(store.reach).toBe(byDay)
+  })
+
+  it('widens what the night has seen when darkvision is given, and undoes it', () => {
+    const store = setup()
+    store.setEntitySight(store.selectedId, 2)
+    store.select({ q: 0, r: 0 })
+    for (let i = 0; i < TURNS_PER_PHASE; i++) store.advanceTurn()
+    store.select({ q: 4, r: 0 })
+    for (let i = 0; i < TURNS_PER_PHASE; i++) store.advanceTurn()
+    const blind = store.exploredCount
+
+    store.setDarkvision(store.selectedId, true)
+    expect(store.exploredCount).toBeGreaterThan(blind)
+
+    store.undo()
+    expect(store.selectedEntity?.darkvision).toBe(false)
+    expect(store.exploredCount).toBe(blind)
+  })
 })
 
 describe('winding the crawl back', () => {
@@ -2698,6 +2728,7 @@ describe("the store's permissions", () => {
     entitySettings: [
       ['setPace', (s, t) => s.setPace(t.party, 2)],
       ['setEntitySight', (s, t) => s.setEntitySight(t.party, 9)],
+      ['setDarkvision', (s, t) => s.setDarkvision(t.party, true)],
     ],
     clock: [
       ['advanceTurn', (s) => s.advanceTurn()],

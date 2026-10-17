@@ -33,6 +33,7 @@ const entity = (over: Partial<Entity> = {}): Entity => ({
   kind: 'party',
   owner: 'player',
   color: '#fff',
+  darkvision: false,
   hidden: false,
   ...KIND_DEFAULTS.party,
   ...over,
