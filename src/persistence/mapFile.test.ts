@@ -9,7 +9,7 @@ import { MAP_FILE_FORMAT, MAP_FILE_VERSION, parseMapFile, serialiseMap } from '.
 import type { MapSnapshot } from './mapState'
 
 const snapshot = (): MapSnapshot => ({
-  terrain: { seed: 4242, scale: 65, seaLevel: -0.15, relief: 9.5 },
+  terrain: { seed: 4242, scale: 65, seaLevel: -0.15, relief: 9.5, style: 'pangaea' },
   worldRadius: 150,
   fog: true,
   revealed: false,
@@ -206,6 +206,7 @@ describe('parseMapFile', () => {
     ['a field added later but malformed', (map) => (map.roads = null), 'roads'],
     ['a field of the wrong type', (map) => (map.worldRadius = '150'), 'worldRadius'],
     ['a number that is not finite', (map) => (map.terrain.relief = null), 'terrain'],
+    ['an unknown map style', (map) => (map.terrain.style = 'atoll'), 'terrain'],
     ['a negative turn', (map) => (map.turn = -1), 'turn'],
     ['an unknown entity kind', (map) => (map.entities[0].kind = 'dragon'), 'entities'],
     ['an entity missing a field', (map) => delete map.entities[1].hidden, 'entities'],
@@ -352,6 +353,14 @@ describe('parseMapFile', () => {
   it('opens an entity from before darkvision existed as blind by night', () => {
     const result = parseMapFile(tampered((file) => delete file.map.entities[1].darkvision))
     expect(result.ok && result.snapshot.entities[1].darkvision).toBe(false)
+  })
+
+  it('opens a file from before map styles on the classic generator', () => {
+    const result = parseMapFile(tampered((file) => delete file.map.terrain.style))
+    expect(result).toEqual({
+      ok: true,
+      snapshot: { ...snapshot(), terrain: { ...snapshot().terrain, style: 'classic' } },
+    })
   })
 
   it('gives a terrain the file has no odds for the default odds', () => {

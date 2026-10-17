@@ -18,6 +18,7 @@ import {
 import { SUPPLY_LIMITS, type Supply } from '../entities/supplies'
 import type { HexKey } from '../hex/coords'
 import type { TerrainControls } from '../stores/hexMap'
+import { MAP_STYLES, type MapStyle } from '../terrain/mapStyles'
 import { isRiverEdge, type RiverEdge } from '../terrain/rivers'
 import { isRoadEdge, type RoadEdge } from '../terrain/roads'
 import {
@@ -191,6 +192,7 @@ export const SNAPSHOT_FIELDS: { [K in keyof MapSnapshot]-?: Guard<MapSnapshot[K]
     scale: isNumber,
     seaLevel: isNumber,
     relief: isNumber,
+    style: oneOf<MapStyle>(...MAP_STYLES),
   }),
   worldRadius: isNumber,
   fog: isBoolean,
@@ -371,6 +373,8 @@ const withDefault = (key: string, value: unknown): unknown => {
   // Odds for a terrain the file never knew fall back to the default, as they do
   // when an older save is loaded.
   if (key === 'resourceChances' && isObject(value)) return { ...defaultResourceChances(), ...value }
+  // A file from before map styles was made by the classic generator.
+  if (key === 'terrain' && isObject(value)) return { style: 'classic', ...value }
   return value
 }
 

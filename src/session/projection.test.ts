@@ -44,7 +44,7 @@ const still = { carry: 0, pending: [], waypoints: [], riding: null }
  * A rider sits in the hidden caravan.
  */
 const snapshot = (): MapSnapshot => ({
-  terrain: { seed: 1234, scale: 1, seaLevel: 0, relief: 1 },
+  terrain: { seed: 1234, scale: 1, seaLevel: 0, relief: 1, style: 'classic' },
   worldRadius: 9,
   fog: true,
   revealed: false,

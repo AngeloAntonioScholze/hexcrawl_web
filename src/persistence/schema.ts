@@ -241,6 +241,10 @@ const MIGRATIONS: readonly string[] = [
   `
   ALTER TABLE entity ADD COLUMN darkvision INTEGER NOT NULL DEFAULT 0;
   `,
+  // Every map saved before styles was made by the classic generator.
+  `
+  ALTER TABLE map ADD COLUMN style TEXT NOT NULL DEFAULT 'classic';
+  `,
 ]
 
 export const SCHEMA_VERSION = MIGRATIONS.length

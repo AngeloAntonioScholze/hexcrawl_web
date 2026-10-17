@@ -32,7 +32,7 @@ const caravan: Entity = {
 }
 
 const snapshot = (patch: Partial<MapSnapshot> = {}): MapSnapshot => ({
-  terrain: { seed: 4242, scale: 65, seaLevel: -0.15, relief: 9.5 },
+  terrain: { seed: 4242, scale: 65, seaLevel: -0.15, relief: 9.5, style: 'pangaea' },
   worldRadius: 150,
   fog: false,
   revealed: true,
@@ -213,6 +213,7 @@ describe('schema', () => {
     expect(schemaVersion(old)).toBe(SCHEMA_VERSION)
     const loaded = loadSnapshot(old)!
     expect(loaded.terrain.seed).toBe(7)
+    expect(loaded.terrain.style).toBe('classic')
     expect(loaded.worldRadius).toBe(150)
     expect(loaded.turn).toBe(0)
     expect(loaded.entities).toEqual([])

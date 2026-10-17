@@ -1,6 +1,7 @@
 import { Color3 } from '@babylonjs/core/Maths/math.color'
 import type { Axial } from '../hex/coords'
 import { hexToWorld, type Layout } from '../hex/layout'
+import { createShape, type MapStyle } from './mapStyles'
 import { createFbm, type FbmOptions } from './perlin'
 
 export type TerrainId = 'deepWater' | 'water' | 'sand' | 'grass' | 'forest' | 'mountains' | 'peaks'
@@ -50,6 +51,10 @@ export interface TerrainOptions extends FbmOptions {
   contrast?: number
   /** Shifts the waterline: positive floods the map, negative drains it. */
   seaLevel?: number
+  /** The shape the land is pulled into; classic leaves the noise alone. */
+  style?: MapStyle
+  /** Hexes from the middle to the rim, which the shape is measured against. */
+  radius?: number
 }
 
 interface Band {
@@ -93,6 +98,7 @@ export const TERRAIN_DEFAULTS = {
   reliefCurve: 1.3,
   contrast: 2,
   seaLevel: 0,
+  style: 'classic',
 } as const
 
 const clamp = (value: number, min: number, max: number): number =>
@@ -158,6 +164,18 @@ export function createPainter(
   }
 }
 
+/**
+ * World units from the middle to the nearest stretch of the rim. A hex world's
+ * corners stand further out than its edges, so measuring to the edges is what
+ * keeps a shape's ocean clear of every side and not only the corners.
+ */
+function rimOf(layout: Layout, radius: number | undefined): number {
+  if (radius === undefined) return Infinity
+  const middle = hexToWorld(layout, { q: 0, r: 0 })
+  const corner = hexToWorld(layout, { q: radius, r: 0 })
+  return (Math.hypot(corner.x - middle.x, corner.z - middle.z) * Math.sqrt(3)) / 2
+}
+
 export function createTerrain(
   layout: Layout,
   options: TerrainOptions = {},
@@ -169,12 +187,18 @@ export function createTerrain(
 
   const noise = createFbm(seed, options)
   const elevationOf = elevationCurve(options)
+  const middle = hexToWorld(layout, { q: 0, r: 0 })
+  const shape = createShape(options.style ?? TERRAIN_DEFAULTS.style, {
+    seed,
+    rim: rimOf(layout, options.radius),
+  })
 
   return (hex: Axial): TerrainTile => {
     // Sampled in world space rather than axial space, or the skew between the
     // two axes stretches the noise along one diagonal.
     const world = hexToWorld(layout, hex)
-    const raw = noise(world.x / scale, world.z / scale)
+    const noisy = noise(world.x / scale, world.z / scale)
+    const raw = shape(noisy, world.x - middle.x, world.z - middle.z)
     const height = clamp((raw - seaLevel) * contrast, -1, 1)
     const band = bandFor(height)
 

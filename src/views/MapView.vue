@@ -30,6 +30,7 @@ import {
 } from '../stores/hexMap'
 import { useMapLibraryStore } from '../stores/mapLibrary'
 import { useSessionStore } from '../stores/session'
+import { MAP_STYLE_LABELS, MAP_STYLES, type MapStyle } from '../terrain/mapStyles'
 import { RESOURCE_SPACING_LIMITS, countByOrigin } from '../terrain/resources'
 import { TERRAIN_IDS, TERRAIN_LABELS, type TerrainId } from '../terrain/terrain'
 import { KM_PER_HEX } from '../terrain/travel'
@@ -108,6 +109,10 @@ const generateResources = (): void => {
 
 const onTerrain = (key: 'scale' | 'seaLevel' | 'relief', event: Event): void => {
   store.setTerrain({ [key]: Number((event.target as HTMLInputElement).value) })
+}
+
+const onStyle = (event: Event): void => {
+  store.setTerrain({ style: (event.target as HTMLSelectElement).value as MapStyle })
 }
 
 const addKind = ref<EntityKind>('caravan')
@@ -300,6 +305,15 @@ const olderTurns = computed(() => Math.max(0, store.adventureLog.length - TURNS_
                 >
                   {{ size }}
                 </button>
+              </div>
+
+              <div class="row">
+                <span>map style</span>
+                <select :value="store.terrain.style" @change="onStyle">
+                  <option v-for="style in MAP_STYLES" :key="style" :value="style">
+                    {{ MAP_STYLE_LABELS[style] }}
+                  </option>
+                </select>
               </div>
 
               <div class="row">

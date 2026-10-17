@@ -9,6 +9,7 @@ import type { SupplyEntry } from '../entities/supplies'
 import type { HexEvent, HexLocation } from '../hex/content'
 import type { HexKey } from '../hex/coords'
 import type { Origin, TerrainControls } from '../stores/hexMap'
+import type { MapStyle } from '../terrain/mapStyles'
 import type { RiverEdge } from '../terrain/rivers'
 import type { RoadEdge } from '../terrain/roads'
 import {
@@ -100,8 +101,8 @@ const SAVE_MAP = `
   INSERT OR REPLACE INTO map
     (id, seed, scale, sea_level, relief, world_radius, fog, show_sight,
      show_history, turn, selected_id, resource_spacing, revealed,
-     fog_see_through)
-  VALUES (1, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+     fog_see_through, style)
+  VALUES (1, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
 `
 
 const flag = (value: boolean): number => (value ? 1 : 0)
@@ -139,6 +140,7 @@ export function saveSnapshot(db: Database, snapshot: MapSnapshot): void {
         snapshot.resourceSpacing,
         flag(snapshot.revealed),
         flag(snapshot.fogSeeThrough),
+        snapshot.terrain.style,
       ],
     })
 
@@ -428,6 +430,7 @@ export function loadSnapshot(db: Database): MapSnapshot | null {
       scale: Number(row.scale),
       seaLevel: Number(row.sea_level),
       relief: Number(row.relief),
+      style: String(row.style) as MapStyle,
     },
     worldRadius: Number(row.world_radius),
     fog: Number(row.fog) === 1,

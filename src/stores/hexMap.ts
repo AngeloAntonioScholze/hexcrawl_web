@@ -81,6 +81,7 @@ import { hexKey, line, parseKey, range, type Axial, type HexKey } from '../hex/c
 import type { VisionOptions } from '../hex/vision'
 import type { MapSnapshot } from '../persistence/mapState'
 import { fieldFromTiles, withOverrides, type TerrainField } from '../terrain/field'
+import { MAP_STYLES, type MapStyle } from '../terrain/mapStyles'
 import { scatterResources } from '../terrain/resourceGen'
 import { riverEdge, riverKey, type Rivers } from '../terrain/rivers'
 import { roadEdge, roadKey, withoutRoadAt, withRoad, type Roads } from '../terrain/roads'
@@ -189,6 +190,8 @@ export interface TerrainControls {
   scale: number
   seaLevel: number
   relief: number
+  /** The shape the land is pulled into; classic is the generator from before styles. */
+  style: MapStyle
 }
 
 export const TERRAIN_LIMITS = {
@@ -364,6 +367,7 @@ export const useHexMapStore = defineStore('hexMap', () => {
     scale: TERRAIN_DEFAULTS.scale,
     seaLevel: TERRAIN_DEFAULTS.seaLevel,
     relief: TERRAIN_DEFAULTS.relief,
+    style: TERRAIN_DEFAULTS.style,
   })
 
   const clock = computed<Clock>(() => clockAt(turn.value))
@@ -1680,7 +1684,11 @@ export const useHexMapStore = defineStore('hexMap', () => {
   })
 
   const sameTerrain = (a: TerrainControls, b: TerrainControls): boolean =>
-    a.seed === b.seed && a.scale === b.scale && a.seaLevel === b.seaLevel && a.relief === b.relief
+    a.seed === b.seed &&
+    a.scale === b.scale &&
+    a.seaLevel === b.seaLevel &&
+    a.relief === b.relief &&
+    a.style === b.style
 
   const setTerrain = (change: Partial<TerrainControls>): void => {
     if (!may('terrain')) return
@@ -1690,6 +1698,7 @@ export const useHexMapStore = defineStore('hexMap', () => {
       scale: clamp(merged.scale, TERRAIN_LIMITS.scale),
       seaLevel: clamp(merged.seaLevel, TERRAIN_LIMITS.seaLevel),
       relief: clamp(merged.relief, TERRAIN_LIMITS.relief),
+      style: MAP_STYLES.includes(merged.style) ? merged.style : terrain.value.style,
     }
 
     // A slider dragged back to where it started is not a new world: without

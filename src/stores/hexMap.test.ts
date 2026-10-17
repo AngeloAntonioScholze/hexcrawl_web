@@ -1163,6 +1163,42 @@ describe('the paths drawn on the map', () => {
     store.dmView = false
     expect(store.paths).toHaveLength(1)
   })
+
+  it('starts on the classic generator, so a map from before styles keeps its ground', () => {
+    expect(setup().terrain.style).toBe('classic')
+  })
+
+  it('starts the crawl over when the map style changes', () => {
+    const store = setup()
+    sendEast(store, 3)
+    store.advanceTurn()
+
+    store.setTerrain({ style: 'continents' })
+
+    expect(store.terrain.style).toBe('continents')
+    expect(store.turn).toBe(0)
+  })
+
+  it('keeps the style it has when handed one it does not know', () => {
+    const store = setup()
+    store.setTerrain({ style: 'pangaea' })
+
+    store.setTerrain({ style: 'atoll' as never })
+
+    expect(store.terrain.style).toBe('pangaea')
+  })
+
+  it('carries the map style through a save', () => {
+    const store = setup()
+    store.setTerrain({ style: 'archipelago' })
+    const saved = store.snapshot
+
+    setActivePinia(createPinia())
+    const fresh = setup()
+    fresh.restore(saved)
+
+    expect(fresh.terrain.style).toBe('archipelago')
+  })
 })
 
 describe('chained orders', () => {
@@ -2759,6 +2795,7 @@ describe("the store's permissions", () => {
       ['setField', (s) => s.setField(fieldFromTiles(flatField(2)))],
       ['setTiles', (s) => s.setTiles(flatField(2))],
       ['setTerrain', (s) => s.setTerrain({ seed: 7 })],
+      ['setTerrain style', (s) => s.setTerrain({ style: 'archipelago' })],
       ['reseed', (s) => s.reseed()],
       ['setWorldRadius', (s) => s.setWorldRadius(20)],
       ['setWorldSize', (s) => s.setWorldSize('small')],
