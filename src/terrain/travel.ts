@@ -234,3 +234,44 @@ export function joinLegs(start: Axial, legs: readonly Route[]): Route {
     km: legs.reduce((total, leg) => total + leg.km, 0),
   }
 }
+
+/**
+ * How many of the steps a mover can pay for out of one turn's budget, counted
+ * in hexes the way a turn is resolved: a flat step is one, a climb two. The
+ * first step is always granted, however dear: a caravan's half-hex pace or a
+ * party facing a climb would otherwise never be sent anywhere, and that step
+ * is simply walked across more than one turn.
+ */
+export function affordableSteps(costsKm: readonly number[], budget: number): number {
+  let left = budget
+  let steps = 0
+  for (const km of costsKm) {
+    const cost = km / KM_PER_HEX
+    if (left < cost && steps > 0) break
+    left -= cost
+    steps++
+  }
+  return steps
+}
+
+/**
+ * The stretch of a route a mover gets through in a turn with `budget` hexes to
+ * spend, its first hex included. Step costs are read off the map as a turn
+ * reads them, so the end of the stretch is where the mover will stand.
+ */
+export function withinReach(
+  field: TerrainField,
+  hexes: readonly Axial[],
+  budget: number,
+  options: RouteOptions = {},
+): Axial[] {
+  const roads = options.roads ?? new Set()
+  const costs: number[] = []
+  for (let i = 1; i < hexes.length; i++) {
+    const from = field.at(hexes[i - 1])
+    const to = field.at(hexes[i])
+    if (!from || !to) break
+    costs.push(stepKmOn(roads, from, to, options.movement, options.rivers))
+  }
+  return hexes.slice(0, affordableSteps(costs, budget) + 1)
+}

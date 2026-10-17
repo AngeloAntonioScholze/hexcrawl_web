@@ -4,6 +4,7 @@ import { distance, hexKey, range, type Axial, type HexKey } from '../hex/coords'
 import { createLayout } from '../hex/layout'
 import { createTerrain, isWater, type TerrainTile } from './terrain'
 import {
+  affordableSteps,
   besideLand,
   CLIMB_MULTIPLIER,
   CLIMB_THRESHOLD,
@@ -19,6 +20,7 @@ import {
   shoreOf,
   stepCostKm,
   stepKmOn,
+  withinReach,
 } from './travel'
 import { fieldFromTiles } from './field'
 import type { Rivers } from './rivers'
@@ -555,5 +557,65 @@ describe('chainRoute', () => {
         { q: 3, r: 0 },
       ]),
     ).toBeNull()
+  })
+})
+
+describe('affordableSteps', () => {
+  const flat = KM_PER_HEX
+  const climb = KM_PER_HEX * CLIMB_MULTIPLIER
+
+  it('pays for whole hexes out of the budget and stops at the first it cannot', () => {
+    expect(affordableSteps([flat, flat, flat, flat], 3)).toBe(3)
+    expect(affordableSteps([flat, climb, flat], 2)).toBe(1)
+    expect(affordableSteps([flat, climb, flat], 3)).toBe(2)
+  })
+
+  it('spends what was carried over on top of the pace', () => {
+    expect(affordableSteps([flat, flat], 0.5 + 1)).toBe(1)
+    expect(affordableSteps([flat, flat], 1 + 1)).toBe(2)
+  })
+
+  it('always grants the first step, however dear, so a slow mover can be sent off', () => {
+    expect(affordableSteps([flat, flat], 0.5)).toBe(1)
+    expect(affordableSteps([climb, flat], 1)).toBe(1)
+  })
+
+  it('takes no steps on a route with none', () => {
+    expect(affordableSteps([], 3)).toBe(0)
+  })
+})
+
+describe('withinReach', () => {
+  const east = (to: number): Axial[] => Array.from({ length: to + 1 }, (_, q) => ({ q, r: 0 }))
+
+  it('cuts a route back to the hexes a turn reaches, start included', () => {
+    const field = fieldFromTiles(flatField(6))
+    expect(withinReach(field, east(5), 2)).toEqual(east(2))
+  })
+
+  it('leaves a route already within reach whole', () => {
+    const field = fieldFromTiles(flatField(6))
+    expect(withinReach(field, east(2), 3)).toEqual(east(2))
+  })
+
+  it('charges climbs and fords as a turn does', () => {
+    const climb = mapOf(east(4).map((hex) => [hex, hex.q >= 2 ? 2 : 1] as [Axial, number]))
+    expect(withinReach(fieldFromTiles(climb), east(4), 2)).toEqual(east(1))
+    expect(withinReach(fieldFromTiles(climb), east(4), 3)).toEqual(east(2))
+
+    const river: Rivers = withRoad(new Set(), [
+      { q: 1, r: -1 },
+      { q: 1, r: 0 },
+      { q: 1, r: 1 },
+    ])
+    expect(withinReach(fieldFromTiles(flatField(6)), east(4), 2, { rivers: river })).toEqual(
+      east(1),
+    )
+  })
+
+  it('grades the climb where a road runs', () => {
+    const climb = mapOf(east(4).map((hex) => [hex, hex.q >= 2 ? 2 : 1] as [Axial, number]))
+    const roads = withRoad(new Set(), east(4))
+    expect(withinReach(fieldFromTiles(climb), east(4), 2, { roads })).toEqual(east(2))
   })
 })

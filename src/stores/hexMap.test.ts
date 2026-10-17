@@ -726,6 +726,7 @@ describe('clicking the map', () => {
   it('routes as before in player view and selects nothing', () => {
     const store = setup()
     store.select({ q: 0, r: 0 })
+    store.setPace(store.selectedId, 3)
     store.dmView = false
 
     store.click({ q: 2, r: 0 })
@@ -751,6 +752,7 @@ describe('clicking the map', () => {
   it('takes back the order just given when its goal is clicked again', () => {
     const store = setup()
     store.select({ q: 0, r: 0 })
+    store.setPace(store.selectedId, 3)
     store.dmView = false
 
     store.click({ q: 2, r: 0 })
@@ -767,7 +769,7 @@ describe('clicking the map', () => {
     const store = setup()
     store.select({ q: 0, r: 0 })
     store.dmView = false
-    store.click({ q: 4, r: 0 })
+    asDm(store, () => store.click({ q: 4, r: 0 }))
     asDm(store, () => store.advanceTurn())
 
     store.click({ q: 1, r: 2 })
@@ -807,6 +809,7 @@ describe('clicking the map', () => {
   it('undoes taking an order back as one step', () => {
     const store = setup()
     store.select({ q: 0, r: 0 })
+    store.setPace(store.selectedId, 3)
     store.dmView = false
     store.click({ q: 2, r: 0 })
     store.click({ q: 2, r: 0 })
@@ -1305,6 +1308,120 @@ describe('the paths drawn on the map', () => {
 
     store.dmView = false
     expect(store.paths).toHaveLength(1)
+  })
+})
+
+describe("a player's reach", () => {
+  /** The party put down at the middle, with the players' view up. */
+  const atTable = (): Store => {
+    const store = setup()
+    store.select({ q: 0, r: 0 })
+    store.dmView = false
+    return store
+  }
+
+  const eastTo = (to: number): HexKey[] =>
+    Array.from({ length: to + 1 }, (_, q) => hexKey({ q, r: 0 }))
+
+  it('fills a click past one turn only as far as a turn reaches, along the same road', () => {
+    const store = atTable()
+
+    store.click({ q: 5, r: 0 })
+
+    expect(store.goal).toBe('1,0')
+    expect(store.legs.map((leg) => leg.to)).toEqual(['1,0'])
+    expect(store.routeTurns).toBe(1)
+  })
+
+  it('reaches as far as the pace goes', () => {
+    const store = atTable()
+    asDm(store, () => store.setPace(store.selectedId, 2.5))
+
+    store.click({ q: 5, r: 0 })
+    expect(store.goal).toBe('2,0')
+  })
+
+  it('never stops a DM order short', () => {
+    const store = setup()
+    store.select({ q: 0, r: 0 })
+
+    store.click({ q: 5, r: 0 })
+    expect(store.goal).toBe('5,0')
+  })
+
+  it('holds an order sent in for a player to the same reach', () => {
+    const store = setup()
+    store.select({ q: 0, r: 0 })
+    const id = store.selectedId
+
+    store.actAs(PLAYER, () =>
+      store.queueAction(id, { kind: 'move', route: eastTo(5), waypoints: ['3,0', '5,0'] }),
+    )
+
+    expect(store.queue.get(id)).toEqual({ kind: 'move', route: eastTo(1), waypoints: ['1,0'] })
+  })
+
+  it('keeps the stops a player reaches this turn and ends on where the turn stops', () => {
+    const store = setup()
+    store.select({ q: 0, r: 0 })
+    const id = store.selectedId
+    store.setPace(id, 3)
+
+    store.actAs(PLAYER, () =>
+      store.queueAction(id, { kind: 'move', route: eastTo(5), waypoints: ['1,0', '5,0'] }),
+    )
+
+    expect(store.queue.get(id)).toEqual({
+      kind: 'move',
+      route: eastTo(3),
+      waypoints: ['1,0', '3,0'],
+    })
+  })
+
+  it('adds no further stop on a shift-click, but sends the party that way instead', () => {
+    const store = atTable()
+    store.click({ q: 1, r: 0 })
+
+    store.click({ q: 0, r: 3 }, true)
+
+    expect(store.legs.map((leg) => leg.to)).toEqual(['0,1'])
+  })
+
+  it('takes the order back when the same click past reach is made again', () => {
+    const store = atTable()
+
+    store.click({ q: 5, r: 0 })
+    store.click({ q: 5, r: 0 })
+
+    expect(store.goal).toBeNull()
+    expect(store.queue.size).toBe(0)
+  })
+
+  it('still sends a slow caravan off, a step it walks across two turns', () => {
+    const store = setup()
+    const wagon = store.addEntity('the wagon', 'caravan')!.id
+    store.selectEntity(wagon)
+    store.select({ q: 0, r: 0 })
+    store.dmView = false
+
+    store.click({ q: 4, r: 0 })
+    expect(store.goal).toBe('1,0')
+
+    asDm(store, () => store.advanceTurn())
+    expect(store.start).toBe('0,0')
+    asDm(store, () => store.advanceTurn())
+    expect(store.start).toBe('1,0')
+  })
+
+  it('counts what the walker carried over from the turn before', () => {
+    const store = atTable()
+    const id = store.selectedId
+    asDm(store, () => store.setPace(id, 1.5))
+    store.click({ q: 1, r: 0 })
+    asDm(store, () => store.advanceTurn())
+
+    store.click({ q: 5, r: 0 })
+    expect(store.goal).toBe('3,0')
   })
 })
 
@@ -3035,8 +3152,8 @@ describe("the store's permissions", () => {
     const store = setup()
     const { party } = table(store)
 
-    store.click({ q: 1, r: 1 })
-    expect(store.goal).toBe('1,1')
+    store.click({ q: 1, r: 0 })
+    expect(store.goal).toBe('1,0')
     store.clear()
     expect(store.goal).toBeNull()
     store.queueAction(party, { kind: 'camp' })
@@ -3048,10 +3165,10 @@ describe("the store's permissions", () => {
     table(store)
     expect(store.dmTool).toBe('paint')
 
-    store.click({ q: 1, r: 1 })
+    store.click({ q: 1, r: 0 })
 
     expect(store.terrainOverrides.size).toBe(0)
-    expect(store.goal).toBe('1,1')
+    expect(store.goal).toBe('1,0')
   })
 
   it('lets a player rename their own party and keep its inventory', () => {
@@ -3107,13 +3224,13 @@ describe("the store's permissions", () => {
       store.renameEntity(caravan, 'the friends')
       store.renameEntity(party, 'the company')
       store.setDmTool('select')
-      store.click({ q: 1, r: 1 })
+      store.click({ q: 1, r: 0 })
     })
 
     expect(store.entities.find((one) => one.id === caravan)?.name).toBe('the smugglers')
     expect(store.entities.find((one) => one.id === party)?.name).toBe('the company')
     expect(store.dmTool).toBe('paint')
-    expect(store.goal).toBe('1,1')
+    expect(store.goal).toBe('1,0')
     expect(store.terrainOverrides.size).toBe(0)
     expect(store.viewer).toEqual(DM)
   })

@@ -103,7 +103,9 @@ import {
   joinLegs,
   KM_PER_HEX,
   shoreOf,
+  withinReach,
   type Route,
+  type RouteOptions,
   type Shore,
 } from '../terrain/travel'
 import { clockAt, nextPhaseTurn, type Clock, type Phase } from '../time/clock'
@@ -1013,11 +1015,47 @@ export const useHexMapStore = defineStore('hexMap', () => {
     supplies.value = cutSupplies(supplies.value, turn.value)
   }
 
+  /**
+   * Whether a player's orders stop at what the walker covers in one turn. The
+   * DM's never do; lifting this lets the players plan the long way round too.
+   */
+  const playerReachCapped = ref(true)
+
+  const reachCapped = (): boolean =>
+    playerReachCapped.value && (actingFor ?? viewer.value).role !== 'dm'
+
+  /**
+   * A player's move cut back to the ground the walker covers this turn, along
+   * the very route asked for, so a click past its reach still sets it going
+   * that way. The stops it gets through are kept and its end becomes the last
+   * one. Judged here rather than at the click, so an order sent in from afar
+   * is held to it too.
+   */
+  const withinTurn = (id: string, action: Action): Action => {
+    if (action.kind !== 'move' || !reachCapped()) return action
+    const walker = entities.value.find((one) => one.id === id)
+    if (!walker) return action
+    const { at, carry } = stateOf(id)
+    const ahead = action.route[0] === at ? action.route.slice(1) : action.route
+    const hexes = at ? [at, ...ahead] : ahead
+    const route = withinReach(
+      field.value,
+      hexes.map(parseKey),
+      carry + walker.pacePerTurn,
+      routeOptions(id),
+    ).map(hexKey)
+    const end = route[route.length - 1]
+    const passed = new Set(route.slice(1))
+    const waypoints = action.waypoints.filter((stop) => passed.has(stop))
+    if (end && end !== at && waypoints[waypoints.length - 1] !== end) waypoints.push(end)
+    return { kind: 'move', route, waypoints }
+  }
+
   const queueAction = (id: string, action: Action): void => {
     if (!may('order', entityOf(id))) return
     truncate()
     const next = new Map(queue.value)
-    next.set(id, action)
+    next.set(id, withinTurn(id, action))
     queue.value = next
   }
 
@@ -1050,15 +1088,18 @@ export const useHexMapStore = defineStore('hexMap', () => {
   })
 
   // Whoever does the walking decides what ground the route may cross.
-  const legsFrom = (walker: string, from: HexKey, waypoints: readonly HexKey[]): Route[] | null => {
+  const routeOptions = (walker: string): RouteOptions => {
     const kind = entities.value.find((one) => one.id === walker)?.kind ?? 'party'
-    return chainRoute(field.value, parseKey(from), waypoints.map(parseKey), {
+    return {
       movement: KIND_MOVEMENT[kind],
       roads: roads.value,
       rivers: rivers.value,
       harbours: isCarrier(kind) ? undefined : harbours.value,
-    })
+    }
   }
+
+  const legsFrom = (walker: string, from: HexKey, waypoints: readonly HexKey[]): Route[] | null =>
+    chainRoute(field.value, parseKey(from), waypoints.map(parseKey), routeOptions(walker))
 
   /** The stops an entity is headed through: the queued order's, or the standing one's. */
   const waypointsFor = (id: string): readonly HexKey[] => {
@@ -1084,13 +1125,18 @@ export const useHexMapStore = defineStore('hexMap', () => {
    * refused whole and the order already standing is left alone. A rider at
    * sea takes no order at all: there is nowhere to step off to.
    */
-  const orderChain = (id: string, waypoints: readonly HexKey[]): void => {
+  const planChain = (id: string, waypoints: readonly HexKey[]): Action | null => {
     const at = stateOf(id).at
-    if (!at || atSea(id)) return
+    if (!at || atSea(id)) return null
     const legs = legsFrom(id, at, waypoints)
-    if (!legs) return
+    if (!legs) return null
     const route = joinLegs(parseKey(at), legs).hexes.map(hexKey)
-    queueAction(id, { kind: 'move', route, waypoints: [...waypoints] })
+    return withinTurn(id, { kind: 'move', route, waypoints: [...waypoints] })
+  }
+
+  const orderChain = (id: string, waypoints: readonly HexKey[]): void => {
+    const order = planChain(id, waypoints)
+    if (order) queueAction(id, order)
   }
 
   /**
@@ -1110,7 +1156,8 @@ export const useHexMapStore = defineStore('hexMap', () => {
       return
     }
 
-    if (!append) {
+    // A player's order reaches one turn ahead, so there is no further stop to add.
+    if (!append || reachCapped()) {
       orderChain(id, key === at ? [] : [key])
       return
     }
@@ -1266,14 +1313,16 @@ export const useHexMapStore = defineStore('hexMap', () => {
     const id = selectedId.value
     const queued = queue.value.get(id)
     // Against the last stop rather than the route's end, so a second click on
-    // the ground the entity stands on still calls its order off.
-    if (
-      !append &&
-      queued?.kind === 'move' &&
-      key === queued.waypoints[queued.waypoints.length - 1]
-    ) {
-      dropQueued(id)
-      return
+    // the ground the entity stands on still calls its order off. A player's
+    // click past their reach stops short of it, so the same click again is
+    // judged by where its order would stop.
+    const last = queued?.kind === 'move' ? queued.waypoints[queued.waypoints.length - 1] : null
+    if (!append && last && key !== null) {
+      const again = key === last ? null : planChain(id, [key])
+      if (key === last || (again?.kind === 'move' && again.waypoints.at(-1) === last)) {
+        dropQueued(id)
+        return
+      }
     }
     select(hex, append)
   }
