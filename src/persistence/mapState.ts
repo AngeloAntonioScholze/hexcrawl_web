@@ -8,6 +8,7 @@ import type { Merchant, MerchantType } from '../entities/merchant'
 import type { SupplyEntry } from '../entities/supplies'
 import type { HexEvent, HexLocation } from '../hex/content'
 import type { HexKey } from '../hex/coords'
+import type { Seat } from '../session/seats'
 import type { Origin, TerrainControls } from '../stores/hexMap'
 import type { MapStyle } from '../terrain/mapStyles'
 import type { RiverEdge } from '../terrain/rivers'
@@ -95,6 +96,8 @@ export interface MapSnapshot {
   rivers: readonly RiverEdge[]
   /** Hexes the DM painted over, with the terrain each was painted. */
   terrainOverrides: readonly { hex: HexKey; terrain: TerrainId }[]
+  /** Which token each player who has joined a session on this map is tied to. */
+  seats: readonly Seat[]
 }
 
 const SAVE_MAP = `
@@ -405,6 +408,16 @@ export function saveSnapshot(db: Database, snapshot: MapSnapshot): void {
     } finally {
       override.finalize()
     }
+
+    db.exec('DELETE FROM seat')
+    const seat = db.prepare('INSERT INTO seat (name, ord, entity_id) VALUES (?, ?, ?)')
+    try {
+      snapshot.seats.forEach((one, index) => {
+        seat.bind([one.name, index, one.entityId]).stepReset()
+      })
+    } finally {
+      seat.finalize()
+    }
   })
 }
 
@@ -557,5 +570,9 @@ export function loadSnapshot(db: Database): MapSnapshot | null {
         hex: String(one.hex) as HexKey,
         terrain: String(one.terrain) as TerrainId,
       })),
+    seats: db.selectObjects('SELECT * FROM seat ORDER BY ord').map((one) => ({
+      name: String(one.name),
+      entityId: String(one.entity_id),
+    })),
   }
 }

@@ -176,6 +176,10 @@ const snapshot = (patch: Partial<MapSnapshot> = {}): MapSnapshot => ({
     { hex: '-2,1' as HexKey, terrain: 'peaks' },
     { hex: '3,0' as HexKey, terrain: 'water' },
   ],
+  seats: [
+    { name: 'Tom', entityId: 'caravan-1' },
+    { name: 'Mira', entityId: 'party-1' },
+  ],
   ...patch,
 })
 
@@ -230,6 +234,7 @@ describe('schema', () => {
     expect(loaded.roads).toEqual([])
     expect(loaded.rivers).toEqual([])
     expect(loaded.terrainOverrides).toEqual([])
+    expect(loaded.seats).toEqual([])
 
     saveSnapshot(old, snapshot())
     expect(loadSnapshot(old)!.turn).toBe(2)
@@ -475,6 +480,16 @@ describe('map state', () => {
 
     saveSnapshot(db, snapshot({ terrainOverrides: [] }))
     expect(loadSnapshot(db)!.terrainOverrides).toEqual([])
+  })
+
+  it('round-trips the seats in the order players were seated', () => {
+    const saved = snapshot()
+    saveSnapshot(db, saved)
+
+    expect(loadSnapshot(db)!.seats).toEqual(saved.seats)
+
+    saveSnapshot(db, snapshot({ seats: [] }))
+    expect(loadSnapshot(db)!.seats).toEqual([])
   })
 
   it('keeps the record in the order the turns were spent', () => {

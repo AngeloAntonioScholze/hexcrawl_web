@@ -1,7 +1,7 @@
 import { parseChunk, type Chunk } from './wireChunks'
 
 /** Bumped when a message changes shape, so an older tab is turned away rather than misread. */
-export const PROTOCOL_VERSION = 2
+export const PROTOCOL_VERSION = 3
 
 export const MAX_NAME_LENGTH = 40
 
@@ -14,6 +14,8 @@ export type SessionMessage =
   | { type: 'ping'; at: number }
   | { type: 'pong'; at: number }
   | { type: 'welcome' }
+  /** The token that is the guest's to play, sent once it is in. */
+  | { type: 'seat'; entityId: string }
   | { type: 'pending' }
   | { type: 'refused'; reason: RefusalReason }
   | { type: 'kicked' }
@@ -68,6 +70,11 @@ const parseMessage = (msg: unknown): SessionMessage | null => {
     case 'kicked':
     case 'resync':
       return hasExactly(msg, ['type']) ? { type: msg.type } : null
+    case 'seat': {
+      const { entityId } = msg
+      if (!hasExactly(msg, ['type', 'entityId']) || typeof entityId !== 'string') return null
+      return entityId === '' ? null : { type: 'seat', entityId }
+    }
     case 'state': {
       const { seq } = msg
       const chunk = parseChunk(msg.chunk)

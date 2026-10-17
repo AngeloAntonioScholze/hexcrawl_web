@@ -17,6 +17,7 @@ import {
 } from '../entities/merchant'
 import { SUPPLY_LIMITS, type Supply } from '../entities/supplies'
 import type { HexKey } from '../hex/coords'
+import type { Seat } from '../session/seats'
 import type { TerrainControls } from '../stores/hexMap'
 import { MAP_STYLES, type MapStyle } from '../terrain/mapStyles'
 import { isRiverEdge, type RiverEdge } from '../terrain/rivers'
@@ -317,6 +318,7 @@ export const SNAPSHOT_FIELDS: { [K in keyof MapSnapshot]-?: Guard<MapSnapshot[K]
       terrain: oneOf<TerrainId>(...TERRAIN_IDS),
     }),
   ),
+  seats: listOf(shape<Seat>({ name: isString, entityId: isString })),
 }
 
 /** The fields every version 1 file has carried since the first export. */
@@ -358,6 +360,7 @@ const ADDED_FIELD_DEFAULTS: {
   terrainOverrides: () => [],
   supplies: () => [],
   items: () => [],
+  seats: () => [],
 }
 
 const withDefault = (key: string, value: unknown): unknown => {

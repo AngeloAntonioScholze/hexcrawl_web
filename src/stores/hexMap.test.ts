@@ -1062,6 +1062,113 @@ describe('entities', () => {
   })
 })
 
+describe('players seated at the table', () => {
+  it('gives a new name a party of its own, off the map', () => {
+    const store = setup()
+
+    const token = store.seatPlayer(' Mira ')!
+
+    expect(token).toMatchObject({ name: 'Mira', kind: 'party', owner: 'player', hidden: false })
+    expect(store.entities.at(-1)).toEqual(token)
+    expect(store.states.get(token.id)?.at ?? null).toBeNull()
+    expect(store.seats).toEqual([{ name: 'Mira', entityId: token.id }])
+  })
+
+  it('hands a name coming back the token it had', () => {
+    const store = setup()
+    const first = store.seatPlayer('Mira')!
+
+    expect(store.seatPlayer('mira')).toEqual(first)
+    expect(store.entities).toHaveLength(2)
+    expect(store.seats).toHaveLength(1)
+  })
+
+  it('makes a new token once the DM has removed the old one', () => {
+    const store = setup()
+    const first = store.seatPlayer('Mira')!
+    store.removeEntity(first.id)
+
+    const second = store.seatPlayer('Mira')!
+
+    expect(second.id).not.toBe(first.id)
+    expect(store.seats).toEqual([{ name: 'Mira', entityId: second.id }])
+  })
+
+  it('keeps the seats with the map', () => {
+    const store = setup()
+    const token = store.seatPlayer('Mira')!
+    const saved = store.snapshot
+
+    setActivePinia(createPinia())
+    const fresh = setup()
+    fresh.restore(saved)
+
+    expect(fresh.seats).toEqual([{ name: 'Mira', entityId: token.id }])
+    expect(fresh.seatPlayer('Mira')?.id).toBe(token.id)
+  })
+
+  it('lets the player set their token down once, then only order it', () => {
+    const store = setup()
+    const token = store.seatPlayer('Mira')!
+    store.dmView = false
+
+    store.actAs(PLAYER, () => store.place(token.id, '1,0'))
+    store.actAs(PLAYER, () => store.place(token.id, '2,0'))
+
+    store.selectEntity(token.id)
+    expect(store.start).toBe('1,0')
+  })
+})
+
+describe("a seated player's browser", () => {
+  it('selects nothing but its own token', () => {
+    const store = setup()
+    const token = store.actAs(DM, () => store.addEntity('Mira'))!
+    const other = store.actAs(DM, () => store.addEntity('the scout'))!
+    store.dmView = false
+
+    store.seatedId = token.id
+    store.selectEntity(other.id)
+
+    expect(store.selectedId).toBe(token.id)
+    expect(store.selectedEntity?.id).toBe(token.id)
+  })
+
+  it('has nobody selected until its token arrives', () => {
+    const store = setup()
+    store.dmView = false
+
+    store.seatedId = 'not-yet-here'
+    const before = store.snapshot
+
+    expect(store.selectedEntity).toBeNull()
+    store.click({ q: 1, r: 0 })
+    expect(store.snapshot).toEqual(before)
+  })
+
+  it('puts its own token down with a click', () => {
+    const store = setup()
+    const token = store.actAs(DM, () => store.addEntity('Mira'))!
+    store.dmView = false
+    store.seatedId = token.id
+
+    store.click({ q: 1, r: 0 })
+
+    expect(store.start).toBe('1,0')
+  })
+
+  it('frees the selection again once unseated', () => {
+    const store = setup()
+    const token = store.addEntity('Mira')!
+    store.seatedId = token.id
+    store.seatedId = null
+
+    store.selectEntity(store.entities[0].id)
+
+    expect(store.selectedId).toBe(store.entities[0].id)
+  })
+})
+
 describe('the world', () => {
   it('starts the crawl over on a new world', () => {
     const store = setup()
@@ -1081,6 +1188,42 @@ describe('the world', () => {
     store.setTerrain({ scale: TERRAIN_LIMITS.scale.max + 100 })
 
     expect(store.terrain.scale).toBe(TERRAIN_LIMITS.scale.max)
+  })
+
+  it('starts on the classic generator, so a map from before styles keeps its ground', () => {
+    expect(setup().terrain.style).toBe('classic')
+  })
+
+  it('starts the crawl over when the map style changes', () => {
+    const store = setup()
+    sendEast(store, 3)
+    store.advanceTurn()
+
+    store.setTerrain({ style: 'continents' })
+
+    expect(store.terrain.style).toBe('continents')
+    expect(store.turn).toBe(0)
+  })
+
+  it('keeps the style it has when handed one it does not know', () => {
+    const store = setup()
+    store.setTerrain({ style: 'pangaea' })
+
+    store.setTerrain({ style: 'atoll' as never })
+
+    expect(store.terrain.style).toBe('pangaea')
+  })
+
+  it('carries the map style through a save', () => {
+    const store = setup()
+    store.setTerrain({ style: 'archipelago' })
+    const saved = store.snapshot
+
+    setActivePinia(createPinia())
+    const fresh = setup()
+    fresh.restore(saved)
+
+    expect(fresh.terrain.style).toBe('archipelago')
   })
 })
 
@@ -1162,42 +1305,6 @@ describe('the paths drawn on the map', () => {
 
     store.dmView = false
     expect(store.paths).toHaveLength(1)
-  })
-
-  it('starts on the classic generator, so a map from before styles keeps its ground', () => {
-    expect(setup().terrain.style).toBe('classic')
-  })
-
-  it('starts the crawl over when the map style changes', () => {
-    const store = setup()
-    sendEast(store, 3)
-    store.advanceTurn()
-
-    store.setTerrain({ style: 'continents' })
-
-    expect(store.terrain.style).toBe('continents')
-    expect(store.turn).toBe(0)
-  })
-
-  it('keeps the style it has when handed one it does not know', () => {
-    const store = setup()
-    store.setTerrain({ style: 'pangaea' })
-
-    store.setTerrain({ style: 'atoll' as never })
-
-    expect(store.terrain.style).toBe('pangaea')
-  })
-
-  it('carries the map style through a save', () => {
-    const store = setup()
-    store.setTerrain({ style: 'archipelago' })
-    const saved = store.snapshot
-
-    setActivePinia(createPinia())
-    const fresh = setup()
-    fresh.restore(saved)
-
-    expect(fresh.terrain.style).toBe('archipelago')
   })
 })
 
@@ -2759,7 +2866,10 @@ describe("the store's permissions", () => {
       ['removeItem', (s, t) => s.removeItem(t.loot)],
     ],
     transferItem: [['transferItem', (s, t) => s.transferItem(t.loot, t.caravan, 2)]],
-    addEntity: [['addEntity', (s) => s.addEntity('the stranger')]],
+    addEntity: [
+      ['addEntity', (s) => s.addEntity('the stranger')],
+      ['seatPlayer', (s) => s.seatPlayer('Mira')],
+    ],
     removeEntity: [['removeEntity', (s, t) => s.removeEntity(t.party)]],
     entitySettings: [
       ['setPace', (s, t) => s.setPace(t.party, 2)],

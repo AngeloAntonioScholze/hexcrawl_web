@@ -2,6 +2,7 @@ import { createPinia, setActivePinia } from 'pinia'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 import type { SessionMessage } from '../session/messages'
 import type { Session, SessionHandlers } from '../session/peer'
+import { useHexMapStore } from './hexMap'
 import { parseLastRoom, REOPEN_WINDOW_MS, reasonFor, roomLink, useSessionStore } from './session'
 
 const opened = vi.hoisted(() => ({
@@ -140,7 +141,7 @@ describe('the session store', () => {
     expect(session.players).toEqual([])
 
     opened.handlers?.message?.({ type: 'hello', name: 'Tobin' }, 'guest-1')
-    expect(opened.sent.at(-1)).toEqual({ message: { type: 'welcome' }, to: 'guest-1' })
+    expect(opened.sent.at(-2)).toEqual({ message: { type: 'welcome' }, to: 'guest-1' })
     expect(session.players).toEqual([{ name: 'Tobin', peerId: 'guest-1' }])
 
     opened.handlers?.peer?.('guest-1', false)
@@ -155,7 +156,7 @@ describe('the session store', () => {
     session.setLocked(true)
 
     opened.handlers?.message?.({ type: 'hello', name: 'tobin ' }, 'guest-2')
-    expect(opened.sent.at(-1)).toEqual({ message: { type: 'welcome' }, to: 'guest-2' })
+    expect(opened.sent.at(-2)).toEqual({ message: { type: 'welcome' }, to: 'guest-2' })
     expect(session.players).toEqual([{ name: 'Tobin', peerId: 'guest-2' }])
   })
 
@@ -164,8 +165,65 @@ describe('the session store', () => {
     await session.host('Mara')
     opened.handlers?.message?.({ type: 'hello', name: 'Tobin' }, 'guest-1')
     opened.handlers?.message?.({ type: 'hello', name: 'Tobin' }, 'guest-1')
-    expect(opened.sent).toHaveLength(1)
+    expect(opened.sent.map(({ message }) => message.type)).toEqual(['welcome', 'seat'])
     expect(opened.dropped).toEqual([])
+  })
+
+  it('gives each newcomer a token of their own, off the map', async () => {
+    const session = useSessionStore()
+    const map = useHexMapStore()
+    await session.host('Mara')
+
+    opened.handlers?.message?.({ type: 'hello', name: 'Tobin' }, 'guest-1')
+
+    const token = map.entities.at(-1)!
+    expect(token).toMatchObject({ name: 'Tobin', owner: 'player', kind: 'party' })
+    expect(map.states.get(token.id)?.at ?? null).toBeNull()
+    expect(opened.sent.at(-1)).toEqual({
+      message: { type: 'seat', entityId: token.id },
+      to: 'guest-1',
+    })
+  })
+
+  it('hands a player coming back by name the token they had', async () => {
+    const session = useSessionStore()
+    const map = useHexMapStore()
+    await session.host('Mara')
+    opened.handlers?.message?.({ type: 'hello', name: 'Tobin' }, 'guest-1')
+    const first = opened.sent.at(-1)
+    opened.handlers?.peer?.('guest-1', false)
+    const count = map.entities.length
+
+    opened.handlers?.message?.({ type: 'hello', name: ' TOBIN' }, 'guest-2')
+
+    expect(map.entities).toHaveLength(count)
+    expect(opened.sent.at(-1)).toEqual({ ...first, to: 'guest-2' })
+  })
+
+  it('seats a newcomer while the DM is looking at the player view', async () => {
+    const session = useSessionStore()
+    const map = useHexMapStore()
+    map.dmView = false
+    await session.host('Mara')
+
+    opened.handlers?.message?.({ type: 'hello', name: 'Tobin' }, 'guest-1')
+
+    expect(map.entities.at(-1)?.name).toBe('Tobin')
+    expect(opened.sent.at(-1)?.message.type).toBe('seat')
+  })
+
+  it('seats nobody who is waiting or turned away', async () => {
+    const session = useSessionStore()
+    const map = useHexMapStore()
+    await session.host('Mara')
+    session.setApproval(true)
+    const count = map.entities.length
+
+    opened.handlers?.message?.({ type: 'hello', name: 'Tobin' }, 'guest-1')
+    session.decline('guest-1')
+
+    expect(map.entities).toHaveLength(count)
+    expect(opened.sent.map(({ message }) => message.type)).toEqual(['pending', 'refused'])
   })
 
   it('turns away a name already here and shows it the door', async () => {
@@ -211,7 +269,7 @@ describe('the session store', () => {
     expect(session.players).toEqual([])
 
     session.accept('guest-1')
-    expect(opened.sent.at(-1)).toEqual({ message: { type: 'welcome' }, to: 'guest-1' })
+    expect(opened.sent.at(-2)).toEqual({ message: { type: 'welcome' }, to: 'guest-1' })
     expect(session.players).toEqual([{ name: 'Tobin', peerId: 'guest-1' }])
 
     session.decline('guest-2')
@@ -292,6 +350,33 @@ describe('the session store', () => {
     expect(session.admission).toBe('pending')
     opened.handlers?.message?.({ type: 'welcome' }, 'hexcrawl-abcdef')
     expect(session.admission).toBe('admitted')
+  })
+
+  it("locks a guest's selection to the token the host gave it, until it leaves", async () => {
+    const session = useSessionStore()
+    const map = useHexMapStore()
+    await session.join('Tobin', 'abcdef')
+    opened.handlers?.peer?.('hexcrawl-abcdef', true)
+    opened.handlers?.message?.({ type: 'welcome' }, 'hexcrawl-abcdef')
+
+    opened.handlers?.message?.({ type: 'seat', entityId: 'e-tobin' }, 'hexcrawl-abcdef')
+    expect(map.seatedId).toBe('e-tobin')
+    expect(map.selectedId).toBe('e-tobin')
+
+    session.leave()
+    expect(map.seatedId).toBeNull()
+  })
+
+  it('unseats a guest the DM removes', async () => {
+    const session = useSessionStore()
+    const map = useHexMapStore()
+    await session.join('Tobin', 'abcdef')
+    opened.handlers?.peer?.('hexcrawl-abcdef', true)
+    opened.handlers?.message?.({ type: 'seat', entityId: 'e-tobin' }, 'hexcrawl-abcdef')
+
+    opened.handlers?.message?.({ type: 'kicked' }, 'hexcrawl-abcdef')
+    expect(session.status).toBe('error')
+    expect(map.seatedId).toBeNull()
   })
 
   it('tells a refused guest why, not that the connection was lost', async () => {

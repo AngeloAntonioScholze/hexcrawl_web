@@ -11,7 +11,9 @@ import {
   type SessionHandlers,
   type SessionStatus,
 } from '../session/peer'
+import { DM } from '../session/permissions'
 import { normaliseRoomCode, ROOM_PREFIX } from '../session/roomCode'
+import { useHexMapStore } from './hexMap'
 
 /** Why there is no room, or no longer one, in words a player can act on. */
 export type SessionReason =
@@ -165,7 +167,13 @@ export const useSessionStore = defineStore('session', () => {
   const players = computed(() => playersOf(door.value))
   const pending = computed(() => askingOf(door.value))
 
+  // A guest's browser plays only the token the host gave it, and only while in the room.
+  const unseat = (): void => {
+    useHexMapStore().seatedId = null
+  }
+
   const leave = (): void => {
+    unseat()
     run++
     session?.close()
     session = null
@@ -181,6 +189,7 @@ export const useSessionStore = defineStore('session', () => {
     // Closing the room reports 'closed' back through its handlers, which would
     // otherwise write over the reason with a lost connection.
     run++
+    unseat()
     status.value = 'error'
     reason.value = why
     admission.value = null
@@ -189,11 +198,26 @@ export const useSessionStore = defineStore('session', () => {
     closing?.close()
   }
 
+  /**
+   * Hands a guest just let in the token that is theirs: the one their name has
+   * on this map, or a new one off the map for them to set down. The host is
+   * always the DM, whichever view this browser is showing.
+   */
+  const seat = (peerId: string): void => {
+    const key = [...door.value.online].find(([, peer]) => peer === peerId)?.[0]
+    const name = key === undefined ? undefined : door.value.known.get(key)
+    if (name === undefined) return
+    const map = useHexMapStore()
+    const token = map.actAs(DM, () => map.seatPlayer(name))
+    if (token) session?.send({ type: 'seat', entityId: token.id }, peerId)
+  }
+
   /** Answers a guest, and shows a refused one the door once the answer has gone. */
   const reply = (decision: room.Decision, to: string): void => {
     door.value = decision.state
     session?.send(decision.reply, to)
     if (decision.reply.type === 'refused') session?.drop(to)
+    if (decision.reply.type === 'welcome') seat(to)
   }
 
   const onHostMessage = (message: SessionMessage, from: string): void => {
@@ -211,6 +235,9 @@ export const useSessionStore = defineStore('session', () => {
         break
       case 'welcome':
         admission.value = 'admitted'
+        break
+      case 'seat':
+        useHexMapStore().seatedId = message.entityId
         break
       case 'refused':
         fail(message.reason)

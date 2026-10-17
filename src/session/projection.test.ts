@@ -208,6 +208,7 @@ const snapshot = (): MapSnapshot => ({
     { a: '-7,1', b: '-6,1' },
   ],
   terrainOverrides: [{ hex: '-8,0', terrain: 'peaks' }],
+  seats: [{ name: 'Mira', entityId: 'party' }],
 })
 
 const project = (map: MapSnapshot = snapshot()): PlayerProjection => projectForPlayers(map, field)
@@ -317,9 +318,14 @@ describe('what the players never get', () => {
       'showHistory',
       'fog',
       'fogSeeThrough',
+      'seats',
     ]) {
       expect(view).not.toHaveProperty(key)
     }
+  })
+
+  it('leaves out who is seated at which token', () => {
+    expect(JSON.stringify(project())).not.toContain('Mira')
   })
 })
 

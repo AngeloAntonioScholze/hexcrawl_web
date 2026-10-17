@@ -245,6 +245,13 @@ const MIGRATIONS: readonly string[] = [
   `
   ALTER TABLE map ADD COLUMN style TEXT NOT NULL DEFAULT 'classic';
   `,
+  `
+  CREATE TABLE seat (
+    name TEXT NOT NULL,
+    ord INTEGER NOT NULL,
+    entity_id TEXT NOT NULL
+  );
+  `,
 ]
 
 export const SCHEMA_VERSION = MIGRATIONS.length

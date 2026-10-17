@@ -122,6 +122,7 @@ import {
   type Target,
   type Viewer,
 } from '../session/permissions'
+import { seatOf, withSeat, type Seat } from '../session/seats'
 import { createHistory, slotOf } from './history'
 
 const NOTHING_IN_SIGHT: PartySight = { radius: 0, visible: new Set(), blocked: new Set() }
@@ -247,6 +248,16 @@ export const useHexMapStore = defineStore('hexMap', () => {
 
   /** Empty when the map has been cleared of everybody; there is no stand-in. */
   const selectedId = ref<string>(entities.value[0].id)
+
+  /** Which token each player who has joined a session on this map plays, by name. */
+  const seats = shallowRef<readonly Seat[]>([])
+
+  /**
+   * The one entity a joined player's browser plays; null everywhere else. While
+   * set, nothing else can be selected, even before the DM's map has brought it.
+   * Never saved: it belongs to the room, not the map.
+   */
+  const seatedId = ref<string | null>(null)
 
   /** The turn the crawl stands at; nothing moves except by one passing. */
   const turn = ref(0)
@@ -406,17 +417,19 @@ export const useHexMapStore = defineStore('hexMap', () => {
     roadTail: slotOf(roadTail),
     rivers: slotOf(rivers),
     terrainOverrides: slotOf(terrainOverrides),
+    seats: slotOf(seats),
   })
 
   /**
    * Whoever the map is currently listening to, or nobody at all: a map can be
    * emptied of entities, and an empty map has no orders to give.
    */
-  const selectedEntity = computed<Entity | null>(
-    () =>
-      entities.value.find((one) => one.id === selectedId.value) ??
-      entities.value.find((one) => dmView.value || !one.hidden) ??
-      null,
+  const selectedEntity = computed<Entity | null>(() =>
+    seatedId.value !== null
+      ? (entities.value.find((one) => one.id === seatedId.value) ?? null)
+      : (entities.value.find((one) => one.id === selectedId.value) ??
+        entities.value.find((one) => dmView.value || !one.hidden) ??
+        null),
   )
 
   const openingState = (id: string, at: number): EntityState => {
@@ -510,6 +523,7 @@ export const useHexMapStore = defineStore('hexMap', () => {
 
   /** An empty id picks nobody, leaving the DM's clicks free to look the ground over. */
   const selectEntity = (id: string): void => {
+    if (seatedId.value !== null) return
     if (id === '' || entities.value.some((one) => one.id === id)) selectedId.value = id
   }
 
@@ -526,6 +540,22 @@ export const useHexMapStore = defineStore('hexMap', () => {
       owner,
     )
     entities.value = [...entities.value, made]
+    return made
+  }
+
+  /**
+   * The token a player who joins the session plays: their own party, named
+   * after them and off the map until they set it down, made the first time
+   * their name sits at this map. A name coming back takes up the token it had,
+   * so long as the DM has not removed it since.
+   */
+  const seatPlayer = (name: string): Entity | null => {
+    if (!may('addEntity')) return null
+    const seated = seatOf(seats.value, name, (id) => entityOf(id) !== undefined)
+    if (seated) return entityOf(seated.entityId) ?? null
+    const made = newEntity(name.trim(), entities.value.length, 'party', 'player')
+    entities.value = [...entities.value, made]
+    seats.value = withSeat(seats.value, name, made.id)
     return made
   }
 
@@ -1768,6 +1798,7 @@ export const useHexMapStore = defineStore('hexMap', () => {
       hex,
       terrain: terrainId,
     })),
+    seats: seats.value,
   }))
 
   // Terrain goes in first: laying down a new world is what wipes the map, so
@@ -1807,6 +1838,7 @@ export const useHexMapStore = defineStore('hexMap', () => {
     setFrames(Array.from({ length: byTurn.size }, (_, at) => frameAt(at)))
     turn.value = Math.max(0, Math.min(frames.value.length, saved.turn))
     queue.value = new Map(saved.queue.map(({ entityId, action }) => [entityId, action]))
+    seats.value = saved.seats.map((one) => ({ ...one }))
 
     notes.value = new Map(saved.notes.map(({ hex, text }) => [hex, text]))
     const grouped = <T>(rows: readonly ({ hex: HexKey } & T)[]): Map<HexKey, T[]> => {
@@ -1876,6 +1908,16 @@ export const useHexMapStore = defineStore('hexMap', () => {
     { flush: 'sync' },
   )
 
+  // A seated player's every order is for their own token, whatever an undo or
+  // a newly arrived map would make the selection.
+  watch(
+    [seatedId, selectedId],
+    ([seated, selected]) => {
+      if (seated !== null && selected !== seated) selectedId.value = seated
+    },
+    { flush: 'sync' },
+  )
+
   // Changing tools, or leaving the DM's view, ends the road or river in hand.
   watch(
     [dmTool, dmView],
@@ -1898,6 +1940,9 @@ export const useHexMapStore = defineStore('hexMap', () => {
     selectedEntity,
     selectEntity,
     addEntity: history.track(addEntity),
+    seats,
+    seatedId,
+    seatPlayer: history.track(seatPlayer),
     removeEntity: history.track(removeEntity),
     renameEntity: history.track(renameEntity),
     recolorEntity: history.track(recolorEntity, (id) => `color:${id}`),

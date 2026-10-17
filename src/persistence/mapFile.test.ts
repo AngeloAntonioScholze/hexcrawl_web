@@ -140,6 +140,7 @@ const snapshot = (): MapSnapshot => ({
   ],
   rivers: [{ a: '0,1' as HexKey, b: '1,0' as HexKey }],
   terrainOverrides: [{ hex: '1,0' as HexKey, terrain: 'mountains' }],
+  seats: [{ name: 'Mira', entityId: 'party-1' }],
 })
 
 // Breaking the file in every way it can be broken is the point, so the edits
@@ -308,6 +309,7 @@ describe('parseMapFile', () => {
       (map) => (map.terrainOverrides[0].hex = 'here'),
       'terrainOverrides',
     ],
+    ['a seat with no token', (map) => delete map.seats[0].entityId, 'seats'],
   ])('turns away %s, naming the field', (_, edit, field) => {
     expect(rejected(tampered((file) => edit(file.map)))).toContain(`"${field}"`)
   })
@@ -345,6 +347,7 @@ describe('parseMapFile', () => {
     ['terrainOverrides', []],
     ['supplies', []],
     ['items', []],
+    ['seats', []],
   ])('opens a file from before %s existed with the default', (field, fallback) => {
     const result = parseMapFile(tampered((file) => delete file.map[field]))
     expect(result).toEqual({ ok: true, snapshot: { ...snapshot(), [field]: fallback } })

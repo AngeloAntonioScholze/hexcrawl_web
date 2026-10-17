@@ -107,6 +107,8 @@ export const HEX_MAP_RULES = {
   removeItem: 'editInventory',
   transferItem: 'transferItem',
   addEntity: 'addEntity',
+  // Giving a player who joins the session their token is adding an entity.
+  seatPlayer: 'addEntity',
   removeEntity: 'removeEntity',
   setPace: 'entitySettings',
   setEntitySight: 'entitySettings',
