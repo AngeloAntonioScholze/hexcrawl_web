@@ -106,6 +106,17 @@ export function bandFor(height: number): Band {
 }
 
 /**
+ * The dry ground that stands on a step. Every step has exactly one land band,
+ * so ground brought down a step can take that band's colour and still read
+ * true to a player judging the climb by colour.
+ */
+export function landAt(level: number): TerrainId {
+  const band = BANDS.find((each) => each.limit > 0 && each.level === level)
+  if (!band) throw new RangeError(`no land stands on level ${level}`)
+  return band.id
+}
+
+/**
  * How tall a tile is drawn for its noise height. Water sits flat at one sea
  * floor height so it reads as a surface; land climbs from the shoreline with
  * the noise above sea level. The curve is what puts air between a plain and a

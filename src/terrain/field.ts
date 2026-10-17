@@ -1,6 +1,15 @@
 import { distance, hexKey, type Axial, type HexKey } from '../hex/coords'
 import type { Layout } from '../hex/layout'
-import { createTerrain, type TerrainId, type TerrainOptions, type TerrainTile } from './terrain'
+import { settledLevel } from './slopes'
+import {
+  createPainter,
+  createTerrain,
+  landAt,
+  MAX_LEVEL,
+  type TerrainId,
+  type TerrainOptions,
+  type TerrainTile,
+} from './terrain'
 
 const ORIGIN: Axial = { q: 0, r: 0 }
 
@@ -25,9 +34,31 @@ export interface TerrainFieldOptions extends TerrainOptions {
 }
 
 export function createTerrainField(layout: Layout, options: TerrainFieldOptions): TerrainField {
-  const { radius, ...terrain } = options
-  const tileAt = createTerrain(layout, terrain)
+  const { radius } = options
+  const tileAt = createTerrain(layout, options)
+  const lower = createPainter(options)
   const memo = new Map<HexKey, TerrainTile>()
+
+  // The noise's own ground, before the slopes are let down. Settling a hex
+  // reads a few rings round it and neighbours share most of those rings, so
+  // keeping them holds a whole window to about one noise sample a hex. Ground
+  // just past the rim is read too, so the rim does not shape the slopes. It is
+  // a flat array over the square round the world rather than a map because
+  // these lookups are most of what a cold window costs, and hashing a key for
+  // each cost as much again as the noise; no hex inside the rim reads further
+  // out than MAX_LEVEL, which is what bounds the square.
+  const reach = radius + MAX_LEVEL
+  const side = 2 * reach + 1
+  const raw: (TerrainTile | undefined)[] = new Array(side * side)
+  const rawAt = (q: number, r: number): TerrainTile => {
+    const index = (q + reach) * side + r + reach
+    const known = raw[index]
+    if (known) return known
+    const made = tileAt({ q, r })
+    raw[index] = made
+    return made
+  }
+  const rawLevel = (q: number, r: number): number => rawAt(q, r).level
 
   return {
     radius,
@@ -43,7 +74,11 @@ export function createTerrainField(layout: Layout, options: TerrainFieldOptions)
       const known = memo.get(key)
       if (known) return known
 
-      const made = tileAt(hex)
+      // Only dry ground is ever brought down, and never below the first step
+      // above the beach, so the sea and the coastline stay where the noise put them.
+      const ground = rawAt(hex.q, hex.r)
+      const level = settledLevel(hex, rawLevel)
+      const made = level === ground.level ? ground : lower(ground, landAt(level))
       memo.set(key, made)
       return made
     },
