@@ -14,6 +14,7 @@ import { useDebugMode } from '../composables/useDebugMode'
 import { MIN_MAX_ZOOM } from '../composables/useHexWindow'
 import { useStage } from '../composables/useStage'
 import { useUndoKeys } from '../composables/useUndoKeys'
+import { useViewMode } from '../composables/useViewMode'
 import { useZoomLimit } from '../composables/useZoomLimit'
 import type { EntityKind } from '../entities/entity'
 import { carriesInventory } from '../entities/inventory'
@@ -72,10 +73,12 @@ const onChance = (terrainId: TerrainId, event: Event): void => {
 const debug = useDebugMode()
 const session = useSessionStore()
 
+useViewMode(store, session)
+
 // The host is always the DM; peeking at the players' view is a debugging aid,
 // and turning it off hands the DM their own view back.
 watchEffect(() => {
-  if (!debug.value && !store.dmView) store.dmView = true
+  if (!debug.value && !store.dmView && session.role !== 'guest') store.dmView = true
 })
 
 // Picking the picked token again puts it down, so the DM's clicks go back to the ground.

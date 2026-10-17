@@ -24,7 +24,6 @@ const plain = (snapshot: MapSnapshot): MapSnapshot => ({
   fogSeeThrough: snapshot.fogSeeThrough,
   showSight: snapshot.showSight,
   showHistory: snapshot.showHistory,
-  dmView: snapshot.dmView,
   turn: snapshot.turn,
   selectedId: snapshot.selectedId,
   entities: snapshot.entities.map((one) => ({ ...one })),

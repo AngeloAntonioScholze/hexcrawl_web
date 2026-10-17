@@ -198,7 +198,6 @@ export const SNAPSHOT_FIELDS: { [K in keyof MapSnapshot]-?: Guard<MapSnapshot[K]
   fogSeeThrough: isBoolean,
   showSight: isBoolean,
   showHistory: isBoolean,
-  dmView: isBoolean,
   turn: isTurn,
   selectedId: isString,
   entities: listOf(
@@ -325,7 +324,6 @@ type OriginalField = keyof Pick<
   | 'fog'
   | 'showSight'
   | 'showHistory'
-  | 'dmView'
   | 'turn'
   | 'selectedId'
   | 'entities'

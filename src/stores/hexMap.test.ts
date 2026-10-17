@@ -781,7 +781,6 @@ describe('clicking the map', () => {
   it('takes the whole chain back from its last stop, but not on shift-click', () => {
     const store = setup()
     store.select({ q: 0, r: 0 })
-    store.dmView = false
     store.click({ q: 2, r: 0 })
     store.click({ q: 2, r: 2 }, true)
 

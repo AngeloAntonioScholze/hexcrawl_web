@@ -56,7 +56,6 @@ export interface MapSnapshot {
   fogSeeThrough: boolean
   showSight: boolean
   showHistory: boolean
-  dmView: boolean
   /** The turn the crawl stands on; the clock reads off it. */
   turn: number
   selectedId: string
@@ -100,9 +99,9 @@ export interface MapSnapshot {
 const SAVE_MAP = `
   INSERT OR REPLACE INTO map
     (id, seed, scale, sea_level, relief, world_radius, fog, show_sight,
-     show_history, dm_view, turn, selected_id, resource_spacing, revealed,
+     show_history, turn, selected_id, resource_spacing, revealed,
      fog_see_through)
-  VALUES (1, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+  VALUES (1, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
 `
 
 const flag = (value: boolean): number => (value ? 1 : 0)
@@ -135,7 +134,6 @@ export function saveSnapshot(db: Database, snapshot: MapSnapshot): void {
         flag(snapshot.fog),
         flag(snapshot.showSight),
         flag(snapshot.showHistory),
-        flag(snapshot.dmView),
         snapshot.turn,
         snapshot.selectedId,
         snapshot.resourceSpacing,
@@ -435,7 +433,6 @@ export function loadSnapshot(db: Database): MapSnapshot | null {
     fogSeeThrough: Number(row.fog_see_through) === 1,
     showSight: Number(row.show_sight) === 1,
     showHistory: Number(row.show_history) === 1,
-    dmView: Number(row.dm_view) === 1,
     turn: Number(row.turn),
     selectedId: String(row.selected_id ?? entities[0]?.id ?? ''),
     entities,

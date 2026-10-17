@@ -50,7 +50,6 @@ const snapshot = (): MapSnapshot => ({
   fogSeeThrough: false,
   showSight: true,
   showHistory: true,
-  dmView: true,
   turn: 1,
   selectedId: 'spy',
   entities: [

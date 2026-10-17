@@ -1720,7 +1720,6 @@ export const useHexMapStore = defineStore('hexMap', () => {
     fogSeeThrough: fogSeeThrough.value,
     showSight: showSight.value,
     showHistory: showHistory.value,
-    dmView: dmView.value,
     turn: turn.value,
     selectedId: selectedId.value,
     entities: entities.value,
@@ -1766,7 +1765,6 @@ export const useHexMapStore = defineStore('hexMap', () => {
     fogSeeThrough.value = saved.fogSeeThrough
     showSight.value = saved.showSight
     showHistory.value = saved.showHistory
-    dmView.value = saved.dmView
     // Taken as saved, nobody included: an empty board is one the DM cleared, and
     // the opening party only belongs to a map that was never saved at all.
     entities.value = saved.entities.map((one) => ({ ...one }))

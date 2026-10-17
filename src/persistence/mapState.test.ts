@@ -37,7 +37,6 @@ const snapshot = (patch: Partial<MapSnapshot> = {}): MapSnapshot => ({
   fogSeeThrough: true,
   showSight: true,
   showHistory: true,
-  dmView: false,
   turn: 2,
   selectedId: party.id,
   entities: [party, caravan],
@@ -257,7 +256,6 @@ describe('map state', () => {
     expect(loaded.fog).toBe(false)
     expect(loaded.showSight).toBe(true)
     expect(loaded.showHistory).toBe(true)
-    expect(loaded.dmView).toBe(false)
     expect(loaded.turn).toBe(2)
     expect(loaded.selectedId).toBe(party.id)
     expect(loaded.entities).toEqual(saved.entities)

@@ -16,7 +16,6 @@ const snapshot = (): MapSnapshot => ({
   fogSeeThrough: false,
   showSight: false,
   showHistory: true,
-  dmView: false,
   turn: 1,
   selectedId: 'party-1',
   entities: [
@@ -315,7 +314,6 @@ describe('parseMapFile', () => {
     'fog',
     'showSight',
     'showHistory',
-    'dmView',
     'turn',
     'selectedId',
     'entities',
@@ -354,6 +352,11 @@ describe('parseMapFile', () => {
       ...snapshot().resourceChances,
       peaks: defaultResourceChances().peaks,
     })
+  })
+
+  it('opens a file that still carries a view mode, and leaves the view mode behind', () => {
+    const result = parseMapFile(tampered((file) => (file.map.dmView = false)))
+    expect(result).toEqual({ ok: true, snapshot: snapshot() })
   })
 })
 
@@ -426,6 +429,20 @@ describe('a map carried out and back in', () => {
     expect(fresh.snapshot).toEqual(store.snapshot)
     expect(fresh.catalog).toEqual(store.catalog)
     expect(serialiseMap(fresh.snapshot)).toBe(exported)
+  })
+
+  it("carries out no view mode, and a file opened leaves this browser's view as it was", () => {
+    const store = useHexMapStore()
+    store.setTiles(flatField())
+    store.dmView = false
+    const exported = serialiseMap(store.snapshot)
+    expect(JSON.parse(exported).map).not.toHaveProperty('dmView')
+
+    store.dmView = true
+    const result = parseMapFile(exported)
+    if (!result.ok) throw new Error(result.error)
+    store.restore(result.snapshot)
+    expect(store.dmView).toBe(true)
   })
 
   it('comes back with nobody on it when the file has no entities', () => {
