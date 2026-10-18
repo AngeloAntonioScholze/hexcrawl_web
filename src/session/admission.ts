@@ -64,8 +64,17 @@ const admit = (state: Admission, name: string, peerId: string): Decision => {
   }
 }
 
-/** The answer to a peer's hello. */
-export function decide(state: Admission, name: string, peerId: string): Decision {
+/**
+ * The answer to a peer's hello. A `returning` name, one that already has a
+ * seat at this table from before the room was opened, is let back in like a
+ * known one: a DM who reloads and reopens finds the door forgot everyone.
+ */
+export function decide(
+  state: Admission,
+  name: string,
+  peerId: string,
+  returning = false,
+): Decision {
   const key = nameKey(name)
   const refuse = (reason: RefusalReason): Decision => ({
     state,
@@ -74,7 +83,7 @@ export function decide(state: Admission, name: string, peerId: string): Decision
 
   if (state.kicked.has(key)) return refuse('kicked')
   if (state.online.has(key) || pendingPeer(state, key) !== undefined) return refuse('name-taken')
-  if (state.known.has(key)) return admit(state, name, peerId)
+  if (state.known.has(key) || returning) return admit(state, name, peerId)
   if (state.locked) return refuse('locked')
   if (state.approval)
     return {

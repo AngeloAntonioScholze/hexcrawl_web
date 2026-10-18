@@ -109,6 +109,24 @@ describe('decide', () => {
     expect(decide(room, 'MIRA', 'p1').reply).toEqual({ type: 'welcome' })
   })
 
+  it('lets a returning name in past the lock and approval, and remembers it', () => {
+    const room = openRoom({ locked: true, approval: true })
+    const { state, reply } = decide(room, ' Mira', 'p1', true)
+    expect(reply).toEqual({ type: 'welcome' })
+    expect(state.known.get('mira')).toBe('Mira')
+    expect(state.online.get('mira')).toBe('p1')
+  })
+
+  it('still refuses a returning name that is kicked or online now', () => {
+    const kicked = kick(openRoom(), 'Mira').state
+    expect(decide(kicked, 'Mira', 'p1', true).reply).toEqual({ type: 'refused', reason: 'kicked' })
+    const online = joined(openRoom(), 'Mira', 'p1')
+    expect(decide(online, 'Mira', 'p2', true).reply).toEqual({
+      type: 'refused',
+      reason: 'name-taken',
+    })
+  })
+
   it('keeps the first display form on a reconnect in another case', () => {
     const room = disconnect(joined(openRoom(), 'Mira', 'p1'), 'p1')
     expect(decide(room, 'MIRA', 'p2').state.known.get('mira')).toBe('Mira')

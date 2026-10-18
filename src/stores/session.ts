@@ -12,7 +12,9 @@ import {
   type SessionStatus,
 } from '../session/peer'
 import { DM } from '../session/permissions'
+import { createRetry, type Retry } from '../session/retry'
 import { normaliseRoomCode, ROOM_PREFIX } from '../session/roomCode'
+import { seatOf, type Seat } from '../session/seats'
 import { useHexMapStore } from './hexMap'
 
 /** Why there is no room, or no longer one, in words a player can act on. */
@@ -27,6 +29,7 @@ export type SessionReason =
   | 'locked'
   | 'declined'
   | 'kicked'
+  | 'dm-gone'
   | 'unknown'
 
 export const REASON_TEXT: Readonly<Record<SessionReason, string>> = {
@@ -40,6 +43,7 @@ export const REASON_TEXT: Readonly<Record<SessionReason, string>> = {
   locked: 'the room is locked',
   declined: 'the DM turned the request away',
   kicked: 'the DM removed you from the session',
+  'dm-gone': "the DM left and didn't come back",
   unknown: 'something went wrong connecting',
 }
 
@@ -156,7 +160,10 @@ export const useSessionStore = defineStore('session', () => {
   const door = shallowRef(room.openRoom())
   /** A guest's standing with the host; null when not in a room as a guest. */
   const admission = ref<Admission | null>(null)
+  /** A guest that was in has lost the host and is trying the room again. */
+  const reconnecting = ref(false)
   let session: Session | null = null
+  let retry: Retry | null = null
   // Each host or join bumps this, so a room still opening when it is left or
   // replaced cannot write over the one that took its place.
   let run = 0
@@ -172,7 +179,14 @@ export const useSessionStore = defineStore('session', () => {
     useHexMapStore().seatedId = null
   }
 
+  const stopRetrying = (): void => {
+    retry?.stop()
+    retry = null
+    reconnecting.value = false
+  }
+
   const leave = (): void => {
+    stopRetrying()
     unseat()
     run++
     session?.close()
@@ -189,6 +203,7 @@ export const useSessionStore = defineStore('session', () => {
     // Closing the room reports 'closed' back through its handlers, which would
     // otherwise write over the reason with a lost connection.
     run++
+    stopRetrying()
     unseat()
     status.value = 'error'
     reason.value = why
@@ -220,12 +235,21 @@ export const useSessionStore = defineStore('session', () => {
     if (decision.reply.type === 'welcome') seat(to)
   }
 
+  // A name with a token on this map was let in before, if not by this room:
+  // after a reload the door has forgotten everyone, but the map has not.
+  const seatFor = (name: string): Seat | undefined => {
+    const map = useHexMapStore()
+    return seatOf(map.seats, name, (id) => map.entities.some((one) => one.id === id))
+  }
+
   const onHostMessage = (message: SessionMessage, from: string): void => {
     if (message.type !== 'hello') return
     // A connection says hello once; another from one already in or waiting is ignored.
     const state = door.value
     if (state.pending.has(from) || [...state.online.values()].includes(from)) return
-    reply(room.decide(state, message.name, from), from)
+    // A returning name shows as it was first seated, not as typed this time.
+    const seated = seatFor(message.name)
+    reply(room.decide(state, seated?.name ?? message.name, from, seated !== undefined), from)
   }
 
   const onGuestMessage = (message: SessionMessage): void => {
@@ -235,12 +259,16 @@ export const useSessionStore = defineStore('session', () => {
         break
       case 'welcome':
         admission.value = 'admitted'
+        stopRetrying()
         break
       case 'seat':
         useHexMapStore().seatedId = message.entityId
         break
       case 'refused':
-        fail(message.reason)
+        // Back before the host has noticed the old connection go, the name
+        // still looks taken; it frees up once it does.
+        if (reconnecting.value && message.reason === 'name-taken') lost()
+        else fail(message.reason)
         break
       case 'kicked':
         fail('kicked')
@@ -278,23 +306,37 @@ export const useSessionStore = defineStore('session', () => {
     session?.drop(peerId)
   }
 
-  const start = async (
+  /**
+   * A guest that was in has lost the host: the map stays as it last was, and
+   * the same code is tried again until the DM is back or the window runs out.
+   */
+  const lost = (): void => {
+    run++
+    const closing = session
+    session = null
+    closing?.close()
+    const dialling = code.value
+    if (dialling === null) return fail('dm-gone')
+    status.value = 'connecting'
+    admission.value = null
+    reconnecting.value = true
+    retry ??= createRetry(() => void connect('guest', (handlers) => joinRoom(dialling, handlers)))
+    if (!retry.schedule()) fail('dm-gone')
+  }
+
+  const connect = async (
     as: Session['role'],
-    name: string,
     open: (handlers: SessionHandlers) => Promise<Session>,
   ): Promise<void> => {
-    leave()
-    const mine = run
-    role.value = as
-    myName.value = cleanName(name, as === 'host' ? 'DM' : 'player')
+    const mine = ++run
     status.value = 'connecting'
 
     const handlers: SessionHandlers = {
       status: (next, _detail, errorType) => {
         if (mine !== run) return
-        if (next === 'error') fail(reasonFor(errorType))
-        else if (next === 'closed') fail('lost')
-        else status.value = next
+        if (next === 'open' || next === 'connecting') status.value = next
+        else if (as === 'guest' && (reconnecting.value || admission.value === 'admitted')) lost()
+        else fail(next === 'error' ? reasonFor(errorType) : 'lost')
       },
       message: (message, from) => {
         if (mine !== run) return
@@ -326,6 +368,17 @@ export const useSessionStore = defineStore('session', () => {
     }
   }
 
+  const start = (
+    as: Session['role'],
+    name: string,
+    open: (handlers: SessionHandlers) => Promise<Session>,
+  ): Promise<void> => {
+    leave()
+    role.value = as
+    myName.value = cleanName(name, as === 'host' ? 'DM' : 'player')
+    return connect(as, open)
+  }
+
   const host = (name: string, options: HostOptions = {}): Promise<void> =>
     start('host', name, (handlers) => hostRoom(handlers, options))
 
@@ -346,6 +399,7 @@ export const useSessionStore = defineStore('session', () => {
     error,
     myName,
     admission,
+    reconnecting,
     locked,
     approval,
     players,

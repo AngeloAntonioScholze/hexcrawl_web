@@ -28,7 +28,8 @@ const connecting = computed(
 )
 const waiting = computed(() => asGuest.value && session.admission === 'pending')
 const admitted = computed(() => asGuest.value && session.admission === 'admitted')
-const connected = computed(() => waiting.value || admitted.value)
+const reconnecting = computed(() => asGuest.value && session.reconnecting)
+const connected = computed(() => waiting.value || admitted.value || reconnecting.value)
 const codeValid = computed(() => normaliseRoomCode(props.code) !== null)
 const ready = computed(() => props.name.trim() !== '' && codeValid.value)
 
@@ -74,7 +75,8 @@ const typed = (event: Event): string => (event.target as HTMLInputElement).value
     </label>
     <p v-if="code.trim() && !codeValid" class="note">a room code is six letters and digits</p>
 
-    <p v-if="waiting" class="note" role="status">waiting for the DM to let you in</p>
+    <p v-if="reconnecting" class="note" role="status">the DM left — reconnecting…</p>
+    <p v-else-if="waiting" class="note" role="status">waiting for the DM to let you in</p>
     <p v-else-if="admitted" class="note" role="status">connected — waiting for the DM's map</p>
     <template v-else>
       <button type="submit" class="primary" :disabled="!ready || connecting">

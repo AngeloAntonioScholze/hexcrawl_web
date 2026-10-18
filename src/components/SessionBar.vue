@@ -63,7 +63,10 @@ const leave = async (): Promise<void> => {
     </p>
     <p v-else-if="copied === 'yes'" class="note" role="status">link copied</p>
 
-    <p v-if="session.error" class="error" role="alert">{{ session.error }}</p>
+    <p v-if="session.reconnecting" class="reconnecting" role="status">
+      the DM left — reconnecting…
+    </p>
+    <p v-else-if="session.error" class="error" role="alert">{{ session.error }}</p>
 
     <template v-if="hosting">
       <div class="row toggles">
@@ -280,6 +283,11 @@ button:hover {
 
 .error {
   color: #e07a6a;
+}
+
+.reconnecting {
+  margin: 0;
+  color: #e0b46a;
 }
 
 .link {

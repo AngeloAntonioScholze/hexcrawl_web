@@ -12,6 +12,7 @@ const opened = vi.hoisted(() => ({
   closed: 0,
   options: undefined as { code?: string } | undefined,
   refuse: null as string | null,
+  joins: [] as string[],
 }))
 
 vi.mock('../session/peer', async (importOriginal) => {
@@ -38,8 +39,9 @@ vi.mock('../session/peer', async (importOriginal) => {
     },
     joinRoom: async (input: string, handlers: SessionHandlers) => {
       opened.handlers = handlers
+      opened.joins.push(input)
       handlers.status?.('connecting')
-      return fake('guest', `hexcrawl-${input}`)
+      return fake('guest', input.startsWith('hexcrawl-') ? input : `hexcrawl-${input}`)
     },
   }
 })
@@ -52,6 +54,7 @@ beforeEach(() => {
   opened.closed = 0
   opened.options = undefined
   opened.refuse = null
+  opened.joins = []
   const stored = new Map<string, string>()
   vi.stubGlobal('localStorage', {
     getItem: (key: string) => stored.get(key) ?? null,
@@ -433,5 +436,177 @@ describe('the session store', () => {
     expect(session.status).toBe('idle')
     expect(session.error).toBeNull()
     expect(session.admission).toBeNull()
+  })
+})
+
+describe('drops and resumes', () => {
+  const HOST = 'hexcrawl-abcdef'
+
+  beforeEach(() => {
+    vi.useFakeTimers()
+    return () => vi.useRealTimers()
+  })
+
+  /** A guest let in and seated, as the host would have it. */
+  const seated = async (): Promise<ReturnType<typeof useSessionStore>> => {
+    const session = useSessionStore()
+    await session.join('Tobin', 'abcdef')
+    opened.handlers?.peer?.(HOST, true)
+    opened.handlers?.status?.('open')
+    opened.handlers?.message?.({ type: 'welcome' }, HOST)
+    opened.handlers?.message?.({ type: 'seat', entityId: 'e-tobin' }, HOST)
+    return session
+  }
+
+  const dmLeaves = (): void => {
+    opened.handlers?.peer?.(HOST, false)
+    opened.handlers?.status?.('closed')
+  }
+
+  it('keeps a seated player on the frozen map while it tries the room again', async () => {
+    const session = await seated()
+    dmLeaves()
+
+    expect(session.reconnecting).toBe(true)
+    expect(session.status).toBe('connecting')
+    expect(session.error).toBeNull()
+    expect(session.role).toBe('guest')
+    expect(useHexMapStore().seatedId).toBe('e-tobin')
+    expect(opened.joins).toEqual(['abcdef'])
+
+    await vi.advanceTimersByTimeAsync(2999)
+    expect(opened.joins).toHaveLength(1)
+    await vi.advanceTimersByTimeAsync(1)
+    expect(opened.joins).toEqual(['abcdef', HOST])
+  })
+
+  it('says hello again on the way back in and takes the seat it is given', async () => {
+    const session = await seated()
+    dmLeaves()
+    await vi.advanceTimersByTimeAsync(3000)
+    opened.sent = []
+
+    opened.handlers?.peer?.(HOST, true)
+    opened.handlers?.status?.('open')
+    expect(opened.sent).toEqual([{ message: { type: 'hello', name: 'Tobin' }, to: HOST }])
+    opened.handlers?.message?.({ type: 'welcome' }, HOST)
+    opened.handlers?.message?.({ type: 'seat', entityId: 'e-tobin' }, HOST)
+
+    expect(session.reconnecting).toBe(false)
+    expect(session.admission).toBe('admitted')
+    expect(useHexMapStore().seatedId).toBe('e-tobin')
+    await vi.advanceTimersByTimeAsync(30_000)
+    expect(opened.joins).toHaveLength(2)
+  })
+
+  it('tries every few seconds while the room is not there, and gives up after ten minutes', async () => {
+    const session = await seated()
+    dmLeaves()
+
+    for (let tries = 0; tries < 400 && session.reconnecting; tries++) {
+      await vi.advanceTimersByTimeAsync(3000)
+      opened.handlers?.status?.('error', 'Could not connect', 'peer-unavailable')
+    }
+
+    expect(session.reconnecting).toBe(false)
+    expect(session.status).toBe('error')
+    expect(session.error).toBe("the DM left and didn't come back")
+    expect(useHexMapStore().seatedId).toBeNull()
+    // The first join, then one every three seconds for ten minutes.
+    expect(opened.joins).toHaveLength(201)
+  })
+
+  it('keeps trying while the host still holds the old connection under its name', async () => {
+    const session = await seated()
+    dmLeaves()
+    await vi.advanceTimersByTimeAsync(3000)
+    opened.handlers?.peer?.(HOST, true)
+    opened.handlers?.message?.({ type: 'refused', reason: 'name-taken' }, HOST)
+
+    expect(session.reconnecting).toBe(true)
+    await vi.advanceTimersByTimeAsync(3000)
+    expect(opened.joins).toHaveLength(3)
+  })
+
+  it('stops for good when the room turns it away for any other reason', async () => {
+    const session = await seated()
+    dmLeaves()
+    await vi.advanceTimersByTimeAsync(3000)
+    opened.handlers?.peer?.(HOST, true)
+    opened.handlers?.message?.({ type: 'kicked' }, HOST)
+
+    expect(session.reconnecting).toBe(false)
+    expect(session.error).toBe('the DM removed you from the session')
+    await vi.advanceTimersByTimeAsync(30_000)
+    expect(opened.joins).toHaveLength(2)
+  })
+
+  it('stops trying once the player leaves', async () => {
+    const session = await seated()
+    dmLeaves()
+    session.leave()
+
+    expect(session.reconnecting).toBe(false)
+    expect(session.status).toBe('idle')
+    await vi.advanceTimersByTimeAsync(30_000)
+    expect(opened.joins).toHaveLength(1)
+  })
+
+  it('does not retry a room it was never let into', async () => {
+    const session = useSessionStore()
+    await session.join('Tobin', 'abcdef')
+    opened.handlers?.peer?.(HOST, true)
+    opened.handlers?.message?.({ type: 'pending' }, HOST)
+    dmLeaves()
+
+    expect(session.reconnecting).toBe(false)
+    expect(session.error).toBe('the connection to the room was lost')
+    await vi.advanceTimersByTimeAsync(30_000)
+    expect(opened.joins).toHaveLength(1)
+  })
+
+  it("leaves a dropped player's token where it stands, offline", async () => {
+    const session = useSessionStore()
+    const map = useHexMapStore()
+    await session.host('Mara')
+    opened.handlers?.message?.({ type: 'hello', name: 'Tobin' }, 'guest-1')
+    const token = map.entities.at(-1)
+
+    opened.handlers?.peer?.('guest-1', false)
+    expect(session.players).toEqual([{ name: 'Tobin', peerId: null }])
+    expect(map.entities.at(-1)).toEqual(token)
+  })
+
+  it('lets a seated player back into a reopened room past the lock, at the same token', async () => {
+    const session = useSessionStore()
+    const map = useHexMapStore()
+    await session.host('Mara')
+    opened.handlers?.message?.({ type: 'hello', name: 'Tobin' }, 'guest-1')
+    const seat = opened.sent.at(-1)?.message
+
+    await session.host('Mara', { code: HOST })
+    session.setLocked(true)
+    session.setApproval(true)
+    const count = map.entities.length
+    opened.sent = []
+    opened.handlers?.message?.({ type: 'hello', name: 'tobin' }, 'guest-2')
+
+    expect(opened.sent.map(({ message }) => message)).toEqual([{ type: 'welcome' }, seat])
+    expect(map.entities).toHaveLength(count)
+    expect(session.players).toEqual([{ name: 'Tobin', peerId: 'guest-2' }])
+  })
+
+  it('still keeps a new name out of a reopened, locked room', async () => {
+    const session = useSessionStore()
+    await session.host('Mara')
+    opened.handlers?.message?.({ type: 'hello', name: 'Tobin' }, 'guest-1')
+
+    await session.host('Mara', { code: HOST })
+    session.setLocked(true)
+    opened.handlers?.message?.({ type: 'hello', name: 'Ilse' }, 'guest-2')
+    expect(opened.sent.at(-1)).toEqual({
+      message: { type: 'refused', reason: 'locked' },
+      to: 'guest-2',
+    })
   })
 })
