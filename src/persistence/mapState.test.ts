@@ -192,6 +192,7 @@ const snapshot = (patch: Partial<MapSnapshot> = {}): MapSnapshot => ({
     { name: 'Tom', entityId: 'caravan-1' },
     { name: 'Mira', entityId: 'party-1' },
   ],
+  characters: [{ entityId: 'party-1', purse: 45, level: 2 }],
   ...patch,
 })
 
@@ -249,6 +250,7 @@ describe('schema', () => {
     expect(loaded.terrainOverrides).toEqual([])
     expect(loaded.seats).toEqual([])
     expect(loaded.playerReachCapped).toBe(true)
+    expect(loaded.characters).toEqual([])
 
     saveSnapshot(old, snapshot())
     expect(loadSnapshot(old)!.turn).toBe(2)
@@ -514,6 +516,19 @@ describe('map state', () => {
 
     saveSnapshot(db, snapshot({ seats: [] }))
     expect(loadSnapshot(db)!.seats).toEqual([])
+  })
+
+  it('round-trips every purse and level in the order first edited', () => {
+    const characters = [
+      { entityId: 'npc-1', purse: 999999, level: 20 },
+      { entityId: 'party-1', purse: 0, level: 1 },
+    ]
+    saveSnapshot(db, snapshot({ characters }))
+
+    expect(loadSnapshot(db)!.characters).toEqual(characters)
+
+    saveSnapshot(db, snapshot({ characters: [] }))
+    expect(loadSnapshot(db)!.characters).toEqual([])
   })
 
   it('keeps the record in the order the turns were spent', () => {

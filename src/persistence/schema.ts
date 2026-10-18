@@ -267,6 +267,14 @@ const MIGRATIONS: readonly string[] = [
     charisma INTEGER NOT NULL
   ) WITHOUT ROWID;
   `,
+  `
+  CREATE TABLE character (
+    entity_id TEXT PRIMARY KEY,
+    ord INTEGER NOT NULL,
+    purse INTEGER NOT NULL,
+    level INTEGER NOT NULL
+  );
+  `,
 ]
 
 export const SCHEMA_VERSION = MIGRATIONS.length

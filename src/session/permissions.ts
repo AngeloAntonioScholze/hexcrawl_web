@@ -17,6 +17,7 @@ export type Action =
   | 'editInventory'
   | 'transferItem'
   | 'abilities'
+  | 'editCharacter'
   | 'addEntity'
   | 'removeEntity'
   | 'entitySettings'
@@ -76,6 +77,7 @@ const PLAYER_RULES: Partial<Record<Action, (viewer: Viewer, target?: Target) => 
   editInventory: ownsTarget,
   transferItem: mayTransfer,
   abilities: ownsTarget,
+  editCharacter: ownsTarget,
 }
 
 /**
@@ -109,6 +111,8 @@ export const HEX_MAP_RULES = {
   removeItem: 'editInventory',
   transferItem: 'transferItem',
   setAbility: 'abilities',
+  setPurse: 'editCharacter',
+  setLevel: 'editCharacter',
   addEntity: 'addEntity',
   // Giving a player who joins the session their token is adding an entity.
   seatPlayer: 'addEntity',

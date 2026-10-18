@@ -153,6 +153,7 @@ const snapshot = (): MapSnapshot => ({
   rivers: [{ a: '0,1' as HexKey, b: '1,0' as HexKey }],
   terrainOverrides: [{ hex: '1,0' as HexKey, terrain: 'mountains' }],
   seats: [{ name: 'Mira', entityId: 'party-1' }],
+  characters: [{ entityId: 'party-1', purse: 120, level: 3 }],
 })
 
 // Breaking the file in every way it can be broken is the point, so the edits
@@ -326,6 +327,15 @@ describe('parseMapFile', () => {
       'terrainOverrides',
     ],
     ['a seat with no token', (map) => delete map.seats[0].entityId, 'seats'],
+    ['a purse in debt', (map) => (map.characters[0].purse = -1), 'characters'],
+    ['half a coin in a purse', (map) => (map.characters[0].purse = 2.5), 'characters'],
+    ['a level past 20', (map) => (map.characters[0].level = 21), 'characters'],
+    ['a level of none', (map) => (map.characters[0].level = 0), 'characters'],
+    [
+      'two characters for one entity',
+      (map) => map.characters.push({ entityId: 'party-1', purse: 0, level: 1 }),
+      'characters',
+    ],
   ])('turns away %s, naming the field', (_, edit, field) => {
     expect(rejected(tampered((file) => edit(file.map)))).toContain(`"${field}"`)
   })
@@ -366,6 +376,7 @@ describe('parseMapFile', () => {
     ['items', []],
     ['seats', []],
     ['playerReachCapped', true],
+    ['characters', []],
   ])('opens a file from before %s existed with the default', (field, fallback) => {
     const result = parseMapFile(tampered((file) => delete file.map[field]))
     expect(result).toEqual({ ok: true, snapshot: { ...snapshot(), [field]: fallback } })

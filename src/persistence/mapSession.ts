@@ -65,6 +65,7 @@ const plain = (snapshot: MapSnapshot): MapSnapshot => ({
   rivers: snapshot.rivers.map((one) => ({ ...one })),
   terrainOverrides: snapshot.terrainOverrides.map((one) => ({ ...one })),
   seats: snapshot.seats.map((one) => ({ ...one })),
+  characters: snapshot.characters.map((one) => ({ ...one })),
 })
 
 interface Pending {

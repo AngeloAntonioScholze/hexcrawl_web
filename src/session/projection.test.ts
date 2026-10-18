@@ -230,6 +230,10 @@ const snapshot = (): MapSnapshot => ({
   ],
   terrainOverrides: [{ hex: '-8,0', terrain: 'peaks' }],
   seats: [{ name: 'Mira', entityId: 'party' }],
+  characters: [
+    { entityId: 'spy', purse: 777, level: 11 },
+    { entityId: 'party', purse: 12, level: 3 },
+  ],
 })
 
 const project = (map: MapSnapshot = snapshot()): PlayerProjection => projectForPlayers(map, field)
@@ -269,6 +273,7 @@ describe('what the players never get', () => {
     expect(view.items.map((one) => one.id)).toEqual(['i-party', 'i-caravan'])
     expect(view.merchants.map((one) => one.id)).toEqual(['m-shown'])
     expect(view.supplies).toEqual([{ entityId: 'caravan', food: 10, gold: 20 }])
+    expect(JSON.stringify(view.characters)).not.toContain('777')
   })
 
   it("gives every visible party and npc its scores, and none of a hidden one's", () => {
@@ -393,6 +398,13 @@ describe('what the players do get', () => {
       { entityId: 'party', action: { kind: 'move', route: ['2,0'], waypoints: ['2,0'] } },
     ])
     expect(view.record.map((row) => row.entityId)).toEqual(['party', 'caravan', 'stowaway'])
+  })
+
+  it('has the purse and level of every visible party and npc, untouched ones at the defaults', () => {
+    expect(project().characters).toEqual([
+      { entityId: 'party', purse: 12, level: 3 },
+      { entityId: 'stowaway', purse: 0, level: 1 },
+    ])
   })
 
   it('has what the visible entities saw on every turn so far, and what is in sight now', () => {

@@ -3,6 +3,7 @@ import { roadSpans } from '../engine/roadSegments'
 import { createPinia, setActivePinia } from 'pinia'
 import { beforeEach, describe, expect, it } from 'vitest'
 import { catalogFor, DEFAULT_CATALOG, unlockedServices } from '../entities/catalog'
+import { CHARACTER_LEVELS, PURSE_LIMITS } from '../entities/character'
 import { hexKey, range, type Axial, type HexKey } from '../hex/coords'
 import {
   DEFAULT_RESOURCE_SPACING,
@@ -3036,6 +3037,111 @@ describe('encounter tables', () => {
   })
 })
 
+describe('purses and levels', () => {
+  it('start every party and npc with an empty purse at the first level', () => {
+    const store = setup()
+    const npc = store.addEntity('the hermit', 'npc', 'dm')!.id
+
+    expect(store.characterOf(store.selectedId)).toEqual({ purse: 0, level: 1 })
+    expect(store.characterOf(npc)).toEqual({ purse: 0, level: 1 })
+    expect(store.snapshot.characters).toEqual([])
+  })
+
+  it('give caravans and ships neither, and turn edits to them away', () => {
+    const store = setup()
+    const wagon = store.addEntity('the wagon', 'caravan')!.id
+    const ship = store.addEntity('the cog', 'ship')!.id
+
+    store.setPurse(wagon, 50)
+    store.setLevel(ship, 4)
+
+    expect(store.characterOf(wagon)).toBeNull()
+    expect(store.characterOf(ship)).toBeNull()
+    expect(store.characterOf('nobody')).toBeNull()
+    expect(store.characters.size).toBe(0)
+  })
+
+  it('keep whole coins and levels inside their limits', () => {
+    const store = setup()
+    const party = store.selectedId
+
+    store.setPurse(party, -10)
+    store.setLevel(party, 0)
+    expect(store.characterOf(party)).toEqual({ purse: 0, level: 1 })
+
+    store.setPurse(party, 1e12)
+    store.setLevel(party, 7.6)
+    expect(store.characterOf(party)).toEqual({ purse: PURSE_LIMITS.max, level: 8 })
+
+    store.setLevel(party, 40)
+    expect(store.characterOf(party)?.level).toBe(CHARACTER_LEVELS.max)
+  })
+
+  it('leave the caravan gold where it was', () => {
+    const store = setup()
+    const wagon = store.addEntity('the wagon', 'caravan')!.id
+    store.setSupply(wagon, 'gold', 30)
+
+    store.setPurse(store.selectedId, 5)
+
+    expect(store.suppliesOf(wagon).gold).toBe(30)
+  })
+
+  it('take a run of edits back in one undo, and put it back with redo', () => {
+    const store = setup()
+    const party = store.selectedId
+    store.setPurse(party, 1)
+    store.setPurse(party, 12)
+    store.setPurse(party, 120)
+    store.setLevel(party, 5)
+
+    store.undo()
+    expect(store.characterOf(party)).toEqual({ purse: 120, level: 1 })
+    store.undo()
+    expect(store.characterOf(party)).toEqual({ purse: 0, level: 1 })
+    expect(store.canUndo).toBe(false)
+
+    store.redo()
+    store.redo()
+    expect(store.characterOf(party)).toEqual({ purse: 120, level: 5 })
+  })
+
+  it('leave no undo step for an edit that changes nothing', () => {
+    const store = setup()
+    store.setPurse(store.selectedId, -3)
+    store.setLevel(store.selectedId, 1)
+    expect(store.canUndo).toBe(false)
+  })
+
+  it('go with the entity they belong to, and come back with an undo', () => {
+    const store = setup()
+    const npc = store.addEntity('the hermit', 'npc')!.id
+    store.setPurse(npc, 9)
+
+    store.removeEntity(npc)
+    expect(store.characters.has(npc)).toBe(false)
+
+    store.undo()
+    expect(store.characterOf(npc)).toEqual({ purse: 9, level: 1 })
+  })
+
+  it('are kept with the map', () => {
+    const store = setup()
+    const party = store.selectedId
+    store.setPurse(party, 33)
+    store.setLevel(party, 6)
+    const saved = store.snapshot
+    expect(saved.characters).toEqual([{ entityId: party, purse: 33, level: 6 }])
+
+    setActivePinia(createPinia())
+    const fresh = setup()
+    fresh.restore(saved)
+
+    expect(fresh.characterOf(party)).toEqual({ purse: 33, level: 6 })
+    expect(fresh.snapshot.characters).toEqual(saved.characters)
+  })
+})
+
 describe("the store's permissions", () => {
   /**
    * A table set up by the DM before the players take the screen: the party
@@ -3123,6 +3229,10 @@ describe("the store's permissions", () => {
       ['removeItem', (s, t) => s.removeItem(t.loot)],
     ],
     transferItem: [['transferItem', (s, t) => s.transferItem(t.loot, t.caravan, 2)]],
+    editCharacter: [
+      ['setPurse', (s, t) => s.setPurse(t.bandits, 40)],
+      ['setLevel', (s, t) => s.setLevel(t.lookout, 5)],
+    ],
     addEntity: [
       ['addEntity', (s) => s.addEntity('the stranger')],
       ['seatPlayer', (s) => s.seatPlayer('Mira')],
@@ -3333,6 +3443,17 @@ describe("the store's permissions", () => {
     store.setAbility(party, 'dexterity', 15)
 
     expect(store.abilitiesOf(party)?.dexterity).toBe(15)
+  })
+
+  it('lets a player set the purse and level of their own parties', () => {
+    const store = setup()
+    const { party, scout } = table(store)
+
+    store.setPurse(party, 25)
+    store.setLevel(scout, 4)
+
+    expect(store.characterOf(party)).toEqual({ purse: 25, level: 1 })
+    expect(store.characterOf(scout)).toEqual({ purse: 0, level: 4 })
   })
 
   it('lets a player recolour their own party, to a colour and nothing else', () => {

@@ -8,6 +8,7 @@ import {
 import { isAbilityScore } from '../entities/abilities'
 import type { Action, ActionKind, ActionRecord } from '../entities/action'
 import type { CatalogEntry, CatalogKind, CatalogOverride, CatalogPatch } from '../entities/catalog'
+import { CHARACTER_LEVELS, PURSE_LIMITS } from '../entities/character'
 import type { Entity, EntityKind, Owner } from '../entities/entity'
 import { QUANTITY_LIMITS, type Item } from '../entities/inventory'
 import {
@@ -37,6 +38,7 @@ import type {
   MapSnapshot,
   SavedAbilities,
   SavedAction,
+  SavedCharacter,
   SavedOrigin,
   SavedState,
   SavedSupply,
@@ -194,6 +196,24 @@ const isCatalogOverrides: Guard<readonly CatalogOverride[]> = (
 ): value is readonly CatalogOverride[] =>
   listOf(isCatalogOverride)(value) && new Set(value.map((one) => one.id)).size === value.length
 
+const isWhole =
+  ({ min, max }: { min: number; max: number }): Guard<number> =>
+  (value): value is number =>
+    Number.isInteger(value) && (value as number) >= min && (value as number) <= max
+
+// Keyed by entity, so two for one entity would leave which one counts up to
+// the order they happen to be read in.
+const isCharacters: Guard<readonly SavedCharacter[]> = (
+  value,
+): value is readonly SavedCharacter[] =>
+  listOf(
+    shape<SavedCharacter>({
+      entityId: isString,
+      purse: isWhole(PURSE_LIMITS),
+      level: isWhole(CHARACTER_LEVELS),
+    }),
+  )(value) && new Set(value.map((one) => one.entityId)).size === value.length
+
 /** One check per snapshot field; a new field is one line here and one in ADDED_FIELD_DEFAULTS. */
 export const SNAPSHOT_FIELDS: { [K in keyof MapSnapshot]-?: Guard<MapSnapshot[K]> } = {
   terrain: shape<TerrainControls>({
@@ -339,6 +359,7 @@ export const SNAPSHOT_FIELDS: { [K in keyof MapSnapshot]-?: Guard<MapSnapshot[K]
     }),
   ),
   seats: listOf(shape<Seat>({ name: isString, entityId: isString })),
+  characters: isCharacters,
 }
 
 /** The fields every version 1 file has carried since the first export. */
@@ -384,6 +405,7 @@ const ADDED_FIELD_DEFAULTS: {
   abilities: () => [],
   items: () => [],
   seats: () => [],
+  characters: () => [],
 }
 
 const withDefault = (key: string, value: unknown): unknown => {

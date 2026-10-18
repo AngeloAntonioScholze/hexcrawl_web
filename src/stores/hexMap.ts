@@ -31,6 +31,13 @@ import {
   type CatalogPatch,
 } from '../entities/catalog'
 import {
+  characterIn,
+  editCharacter,
+  hasCharacter,
+  type Character,
+  type CharacterSheet,
+} from '../entities/character'
+import {
   carriesInventory,
   clampQuantity,
   cleanWeight,
@@ -310,6 +317,9 @@ export const useHexMapStore = defineStore('hexMap', () => {
    * missing here stands at the defaults. Like the crews, a new world keeps them.
    */
   const abilities = shallowRef<ReadonlyMap<string, Abilities>>(new Map())
+  /** The purse and level of each party and npc, as edited by hand; the rest stand at the defaults. */
+  const characters = shallowRef<CharacterSheet>(new Map())
+
   /** The DM's changes to what merchants offer; like the crews, a new world keeps them. */
   const catalogOverrides = shallowRef<readonly CatalogOverride[]>([])
   const catalog = computed<readonly CatalogEntry[]>(() =>
@@ -439,6 +449,7 @@ export const useHexMapStore = defineStore('hexMap', () => {
     rivers: slotOf(rivers),
     terrainOverrides: slotOf(terrainOverrides),
     seats: slotOf(seats),
+    characters: slotOf(characters),
   })
 
   /**
@@ -615,6 +626,11 @@ export const useHexMapStore = defineStore('hexMap', () => {
       const scores = new Map(abilities.value)
       scores.delete(id)
       abilities.value = scores
+    }
+    if (characters.value.has(id)) {
+      const sheet = new Map(characters.value)
+      sheet.delete(id)
+      characters.value = sheet
     }
   }
 
@@ -885,6 +901,27 @@ export const useHexMapStore = defineStore('hexMap', () => {
     const from = items.value.find((one) => one.id === id)
     if (!from || !inventoryPartners(from.ownerId).some((one) => one.id === toId)) return
     items.value = moveItem(items.value, id, toId, quantity)
+  }
+
+  /** A party's or an npc's own purse and level; null for anything else, which has neither. */
+  const characterOf = (id: string): Character | null => {
+    const one = entityOf(id)
+    return one && hasCharacter(one.kind) ? characterIn(characters.value, id) : null
+  }
+
+  const setCharacter = (id: string, change: Partial<Character>): void => {
+    if (characterOf(id)) characters.value = editCharacter(characters.value, id, change)
+  }
+
+  /** Coin a party or an npc has to its own name, not the caravan's gold. */
+  const setPurse = (id: string, purse: number): void => {
+    if (!may('editCharacter', entityOf(id))) return
+    setCharacter(id, { purse })
+  }
+
+  const setLevel = (id: string, level: number): void => {
+    if (!may('editCharacter', entityOf(id))) return
+    setCharacter(id, { level })
   }
 
   /** What a caravan's wagons hold on the turn the crawl stands on. */
@@ -1890,6 +1927,7 @@ export const useHexMapStore = defineStore('hexMap', () => {
       terrain: terrainId,
     })),
     seats: seats.value,
+    characters: [...characters.value].map(([entityId, one]) => ({ entityId, ...one })),
   }))
 
   // Terrain goes in first: laying down a new world is what wipes the map, so
@@ -1949,6 +1987,9 @@ export const useHexMapStore = defineStore('hexMap', () => {
     for (const entries of stores.values()) entries.sort((a, b) => a.turn - b.turn)
     supplies.value = stores
     abilities.value = new Map(saved.abilities.map(({ entityId, ...scores }) => [entityId, scores]))
+    characters.value = new Map(
+      saved.characters.map(({ entityId, purse, level }) => [entityId, { purse, level }]),
+    )
     catalogOverrides.value = saved.catalogOverrides.map((one) => ({ ...one }))
     resources.value = saved.resources.map((one) => ({ ...one }))
     resourceChances.value = { ...saved.resourceChances }
@@ -2165,6 +2206,10 @@ export const useHexMapStore = defineStore('hexMap', () => {
     abilities,
     abilitiesOf,
     setAbility: history.track(setAbility, (id, ability) => `ability:${id}:${ability}`),
+    characters,
+    characterOf,
+    setPurse: history.track(setPurse, (id) => `purse:${id}`),
+    setLevel: history.track(setLevel, (id) => `level:${id}`),
     catalogOverrides,
     catalog,
     editCatalogEntry: history.track(editCatalogEntry, (id) => `catalog:${id}`),

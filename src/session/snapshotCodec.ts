@@ -87,6 +87,7 @@ export const PROJECTION_FIELDS: {
   events: SNAPSHOT_FIELDS.events,
   roads: SNAPSHOT_FIELDS.roads,
   rivers: SNAPSHOT_FIELDS.rivers,
+  characters: SNAPSHOT_FIELDS.characters,
 }
 
 export const PROJECTION_KEYS = Object.keys(PROJECTION_FIELDS) as (keyof PlayerProjection)[]

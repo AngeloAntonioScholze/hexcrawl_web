@@ -1,5 +1,6 @@
 import { defaultAbilities, hasAbilities, type Abilities } from '../entities/abilities'
 import type { CatalogOverride } from '../entities/catalog'
+import { characterIn, hasCharacter } from '../entities/character'
 import type { ActionRecord } from '../entities/action'
 import { idleState, sightAt, type Entity, type EntityState } from '../entities/entity'
 import type { Item } from '../entities/inventory'
@@ -12,7 +13,7 @@ import { roadSpans } from '../engine/roadSegments'
 import type { HexEvent, HexLocation } from '../hex/content'
 import { hexKey, parseKey, range, type HexKey } from '../hex/coords'
 import { knownSet, withoutHidden, type FogEdits } from '../hex/fogEdits'
-import type { MapSnapshot, SavedAction, SavedOrigin } from '../persistence/mapState'
+import type { MapSnapshot, SavedAction, SavedCharacter, SavedOrigin } from '../persistence/mapState'
 import type { TerrainField } from '../terrain/field'
 import type { Resource } from '../terrain/resources'
 import { roadKey, type RoadEdge } from '../terrain/roads'
@@ -84,6 +85,8 @@ export interface PlayerProjection {
   events: ({ hex: HexKey } & HexEvent)[]
   roads: RoadEdge[]
   rivers: RoadEdge[]
+  /** The purse and level of every visible party and npc, the defaults spelled out. */
+  characters: SavedCharacter[]
 }
 
 const byHex = (a: HexKey, b: HexKey): number => {
@@ -246,6 +249,10 @@ export function projectForPlayers(snapshot: MapSnapshot, field: TerrainField): P
       ({ a, b }) => ({ a, b }),
     )
 
+  const sheet = new Map(
+    snapshot.characters.map(({ entityId, ...character }) => [entityId, character]),
+  )
+
   const ledger = new Map<string, SupplyEntry[]>()
   for (const { entityId, ...entry } of snapshot.supplies) {
     ledger.set(entityId, [...(ledger.get(entityId) ?? []), entry])
@@ -303,5 +310,8 @@ export function projectForPlayers(snapshot: MapSnapshot, field: TerrainField): P
     events: flatten(onPoi(events)),
     roads: edgesShown(snapshot.roads),
     rivers: edgesShown(snapshot.rivers),
+    characters: shown
+      .filter((one) => hasCharacter(one.kind))
+      .map((one) => ({ entityId: one.id, ...characterIn(sheet, one.id) })),
   }
 }

@@ -24,6 +24,7 @@ const ENTITY_ACTIONS: readonly Action[] = [
   'recolorEntity',
   'editInventory',
   'abilities',
+  'editCharacter',
 ]
 
 const DM_ONLY: readonly Action[] = [
@@ -136,6 +137,7 @@ const HEX_MAP_FREE = new Set([
   'atSea',
   'merchantsOf',
   'itemsOf',
+  'characterOf',
   'inventoryPartners',
   'suppliesOf',
   'abilitiesOf',

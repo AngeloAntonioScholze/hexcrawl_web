@@ -3,6 +3,7 @@ import type { EncounterOverride } from '../encounters/tables'
 import type { Abilities } from '../entities/abilities'
 import type { Action, ActionKind, ActionRecord } from '../entities/action'
 import type { CatalogOverride } from '../entities/catalog'
+import type { Character } from '../entities/character'
 import type { Entity, EntityKind, EntityState, Owner } from '../entities/entity'
 import type { Item } from '../entities/inventory'
 import type { Merchant, MerchantType } from '../entities/merchant'
@@ -38,6 +39,10 @@ export interface SavedSupply extends SupplyEntry {
 }
 
 export interface SavedAbilities extends Abilities {
+  entityId: string
+}
+
+export interface SavedCharacter extends Character {
   entityId: string
 }
 
@@ -107,6 +112,8 @@ export interface MapSnapshot {
   terrainOverrides: readonly { hex: HexKey; terrain: TerrainId }[]
   /** Which token each player who has joined a session on this map is tied to. */
   seats: readonly Seat[]
+  /** The purse and level of every party and npc edited off the defaults, in the order first edited. */
+  characters: readonly SavedCharacter[]
 }
 
 const SAVE_MAP = `
@@ -452,6 +459,18 @@ export function saveSnapshot(db: Database, snapshot: MapSnapshot): void {
     } finally {
       seat.finalize()
     }
+
+    db.exec('DELETE FROM character')
+    const character = db.prepare(
+      'INSERT INTO character (entity_id, ord, purse, level) VALUES (?, ?, ?, ?)',
+    )
+    try {
+      snapshot.characters.forEach((one, index) => {
+        character.bind([one.entityId, index, one.purse, one.level]).stepReset()
+      })
+    } finally {
+      character.finalize()
+    }
   })
 }
 
@@ -617,6 +636,11 @@ export function loadSnapshot(db: Database): MapSnapshot | null {
     seats: db.selectObjects('SELECT * FROM seat ORDER BY ord').map((one) => ({
       name: String(one.name),
       entityId: String(one.entity_id),
+    })),
+    characters: db.selectObjects('SELECT * FROM character ORDER BY ord').map((one) => ({
+      entityId: String(one.entity_id),
+      purse: Number(one.purse),
+      level: Number(one.level),
     })),
   }
 }
