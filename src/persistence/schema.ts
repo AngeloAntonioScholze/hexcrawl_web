@@ -256,6 +256,17 @@ const MIGRATIONS: readonly string[] = [
   `
   ALTER TABLE map ADD COLUMN player_reach_capped INTEGER NOT NULL DEFAULT 1;
   `,
+  `
+  CREATE TABLE entity_ability (
+    entity_id TEXT PRIMARY KEY,
+    strength INTEGER NOT NULL,
+    dexterity INTEGER NOT NULL,
+    constitution INTEGER NOT NULL,
+    intelligence INTEGER NOT NULL,
+    wisdom INTEGER NOT NULL,
+    charisma INTEGER NOT NULL
+  ) WITHOUT ROWID;
+  `,
 ]
 
 export const SCHEMA_VERSION = MIGRATIONS.length

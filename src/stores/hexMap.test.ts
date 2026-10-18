@@ -2204,6 +2204,103 @@ describe("a caravan's stores", () => {
   })
 })
 
+describe('ability scores', () => {
+  const tens = {
+    strength: 10,
+    dexterity: 10,
+    constitution: 10,
+    intelligence: 10,
+    wisdom: 10,
+    charisma: 10,
+  }
+
+  it('stand at ten for parties and npcs, and are absent on caravans and ships', () => {
+    const store = setup()
+    const npc = store.addEntity('the hermit', 'npc', 'dm')!.id
+    const caravan = store.addEntity('the caravan', 'caravan')!.id
+    const ship = store.addEntity('the cog', 'ship')!.id
+
+    expect(store.abilitiesOf(store.selectedId)).toEqual(tens)
+    expect(store.abilitiesOf(npc)).toEqual(tens)
+    expect(store.abilitiesOf(caravan)).toBeNull()
+    expect(store.abilitiesOf(ship)).toBeNull()
+    expect(store.abilitiesOf('nobody')).toBeNull()
+  })
+
+  it('are set one at a time, as whole numbers from one to twenty', () => {
+    const store = setup()
+    const party = store.selectedId
+
+    store.setAbility(party, 'strength', 17)
+    store.setAbility(party, 'dexterity', 30)
+    store.setAbility(party, 'charisma', 0)
+    store.setAbility(party, 'wisdom', 12.6)
+
+    expect(store.abilitiesOf(party)).toEqual({
+      ...tens,
+      strength: 17,
+      dexterity: 20,
+      charisma: 1,
+      wisdom: 13,
+    })
+  })
+
+  it('are never written onto a caravan', () => {
+    const store = setup()
+    const caravan = store.addEntity('the caravan', 'caravan')!.id
+
+    store.setAbility(caravan, 'strength', 18)
+
+    expect(store.abilities.has(caravan)).toBe(false)
+  })
+
+  it('undo as one step for a run of edits to one score', () => {
+    const store = setup()
+    const party = store.selectedId
+
+    store.setAbility(party, 'strength', 11)
+    store.setAbility(party, 'strength', 12)
+    store.setAbility(party, 'strength', 13)
+    store.undo()
+
+    expect(store.abilitiesOf(party)).toEqual(tens)
+  })
+
+  it('go with their entity, and come back with an undo', () => {
+    const store = setup()
+    const npc = store.addEntity('the hermit', 'npc')!.id
+    store.setAbility(npc, 'wisdom', 18)
+
+    store.removeEntity(npc)
+    expect(store.abilities.has(npc)).toBe(false)
+
+    store.undo()
+    expect(store.abilitiesOf(npc)?.wisdom).toBe(18)
+  })
+
+  it('survive a new world', () => {
+    const store = setup()
+    store.setAbility(store.selectedId, 'intelligence', 15)
+
+    store.setTerrain({ seed: 99 })
+
+    expect(store.abilitiesOf(store.selectedId)?.intelligence).toBe(15)
+  })
+
+  it('come back from a snapshot as they were saved', () => {
+    const store = setup()
+    const party = store.selectedId
+    store.setAbility(party, 'constitution', 16)
+    const saved = store.snapshot
+
+    setActivePinia(createPinia())
+    const fresh = setup()
+    fresh.restore(saved)
+
+    expect(fresh.abilitiesOf(party)).toEqual({ ...tens, constitution: 16 })
+  })
+})
+
 describe('an inventory', () => {
   /** A caravan at the middle with the party walked aboard it from two hexes east. */
   const aboard = (store: Store): { party: string; caravan: string } => {
@@ -3044,6 +3141,7 @@ describe("the store's permissions", () => {
       ['skipPhase', (s) => s.skipPhase()],
     ],
     supplies: [['setSupply', (s, t) => s.setSupply(t.wagon, 'food', 5)]],
+    abilities: [['setAbility', (s, t) => s.setAbility(t.bandits, 'strength', 18)]],
     merchants: [
       ['addMerchant', (s, t) => s.addMerchant(t.caravan, 'cook')],
       ['removeMerchant', (s, t) => s.removeMerchant(t.merchant)],
@@ -3226,6 +3324,15 @@ describe("the store's permissions", () => {
 
     expect(store.entities.find((one) => one.id === party)?.name).toBe('the company')
     expect(store.itemsOf(party)).toMatchObject([{ id: rope, quantity: 3 }])
+  })
+
+  it("lets a player set their own party's scores", () => {
+    const store = setup()
+    const { party } = table(store)
+
+    store.setAbility(party, 'dexterity', 15)
+
+    expect(store.abilitiesOf(party)?.dexterity).toBe(15)
   })
 
   it('lets a player recolour their own party, to a colour and nothing else', () => {

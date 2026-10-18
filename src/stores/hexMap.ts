@@ -1,5 +1,12 @@
 import { acceptHMRUpdate, defineStore } from 'pinia'
 import { computed, ref, shallowRef, watch } from 'vue'
+import {
+  clampAbility,
+  defaultAbilities,
+  hasAbilities,
+  type Abilities,
+  type Ability,
+} from '../entities/abilities'
 import type { Action, ActionRecord } from '../entities/action'
 import {
   idleState,
@@ -298,6 +305,11 @@ export const useHexMapStore = defineStore('hexMap', () => {
   /** What each caravan's wagons hold, turn by turn, as the DM has set it. */
   const supplies = shallowRef<SupplyLedger>(new Map())
 
+  /**
+   * The scores of every party and npc somebody has written any down for; one
+   * missing here stands at the defaults. Like the crews, a new world keeps them.
+   */
+  const abilities = shallowRef<ReadonlyMap<string, Abilities>>(new Map())
   /** The DM's changes to what merchants offer; like the crews, a new world keeps them. */
   const catalogOverrides = shallowRef<readonly CatalogOverride[]>([])
   const catalog = computed<readonly CatalogEntry[]>(() =>
@@ -413,6 +425,7 @@ export const useHexMapStore = defineStore('hexMap', () => {
     merchants: slotOf(merchants),
     items: slotOf(items),
     supplies: slotOf(supplies),
+    abilities: slotOf(abilities),
     catalogOverrides: slotOf(catalogOverrides),
     resources: slotOf(resources),
     resourceChances: slotOf(resourceChances),
@@ -596,6 +609,12 @@ export const useHexMapStore = defineStore('hexMap', () => {
       const stores = new Map(supplies.value)
       stores.delete(id)
       supplies.value = stores
+    }
+
+    if (abilities.value.has(id)) {
+      const scores = new Map(abilities.value)
+      scores.delete(id)
+      abilities.value = scores
     }
   }
 
@@ -880,6 +899,22 @@ export const useHexMapStore = defineStore('hexMap', () => {
     const kind = entities.value.find((one) => one.id === id)?.kind
     if (!kind || !carriesSupplies(kind)) return
     supplies.value = editSupply(supplies.value, id, turn.value, supply, value)
+  }
+
+  /** An entity's six scores; null for the kinds that have none. */
+  const abilitiesOf = (id: string): Abilities | null => {
+    const kind = entityOf(id)?.kind
+    if (!kind || !hasAbilities(kind)) return null
+    return abilities.value.get(id) ?? defaultAbilities()
+  }
+
+  const setAbility = (id: string, ability: Ability, value: number): void => {
+    if (!may('abilities', entityOf(id))) return
+    const scores = abilitiesOf(id)
+    if (!scores) return
+    const score = clampAbility(value)
+    if (scores[ability] === score) return
+    abilities.value = new Map(abilities.value).set(id, { ...scores, [ability]: score })
   }
 
   const editCatalogEntry = (id: string, patch: CatalogPatch): void => {
@@ -1838,6 +1873,7 @@ export const useHexMapStore = defineStore('hexMap', () => {
     supplies: [...supplies.value].flatMap(([entityId, entries]) =>
       entries.map((entry) => ({ entityId, ...entry })),
     ),
+    abilities: [...abilities.value].map(([entityId, scores]) => ({ entityId, ...scores })),
     catalogOverrides: catalogOverrides.value,
     resources: resources.value,
     resourceChances: resourceChances.value,
@@ -1912,6 +1948,7 @@ export const useHexMapStore = defineStore('hexMap', () => {
     }
     for (const entries of stores.values()) entries.sort((a, b) => a.turn - b.turn)
     supplies.value = stores
+    abilities.value = new Map(saved.abilities.map(({ entityId, ...scores }) => [entityId, scores]))
     catalogOverrides.value = saved.catalogOverrides.map((one) => ({ ...one }))
     resources.value = saved.resources.map((one) => ({ ...one }))
     resourceChances.value = { ...saved.resourceChances }
@@ -2125,6 +2162,9 @@ export const useHexMapStore = defineStore('hexMap', () => {
     supplies,
     suppliesOf,
     setSupply: history.track(setSupply, (id, supply) => `supply:${id}:${supply}`),
+    abilities,
+    abilitiesOf,
+    setAbility: history.track(setAbility, (id, ability) => `ability:${id}:${ability}`),
     catalogOverrides,
     catalog,
     editCatalogEntry: history.track(editCatalogEntry, (id) => `catalog:${id}`),

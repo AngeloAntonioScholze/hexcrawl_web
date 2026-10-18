@@ -100,6 +100,17 @@ const snapshot = (patch: Partial<MapSnapshot> = {}): MapSnapshot => ({
     { entityId: caravan.id, turn: 0, food: 40, gold: 120 },
     { entityId: caravan.id, turn: 2, food: 35, gold: 120 },
   ],
+  abilities: [
+    {
+      entityId: party.id,
+      strength: 16,
+      dexterity: 12,
+      constitution: 14,
+      intelligence: 8,
+      wisdom: 10,
+      charisma: 3,
+    },
+  ],
   notes: [
     { hex: '0,0' as HexKey, text: 'ruined watchtower' },
     { hex: '1,0' as HexKey, text: 'smells of smoke' },
@@ -226,6 +237,7 @@ describe('schema', () => {
     expect(loaded.merchants).toEqual([])
     expect(loaded.items).toEqual([])
     expect(loaded.supplies).toEqual([])
+    expect(loaded.abilities).toEqual([])
     expect(loaded.catalogOverrides).toEqual([])
     expect(loaded.resources).toEqual([])
     expect(loaded.resourceChances).toEqual(defaultResourceChances())
@@ -462,6 +474,16 @@ describe('map state', () => {
 
     saveSnapshot(db, snapshot({ supplies: saved.supplies.slice(0, 1) }))
     expect(loadSnapshot(db)!.supplies).toEqual(saved.supplies.slice(0, 1))
+  })
+
+  it('round-trips the scores written down, and lets them be wiped', () => {
+    const saved = snapshot()
+    saveSnapshot(db, saved)
+
+    expect(loadSnapshot(db)!.abilities).toEqual(saved.abilities)
+
+    saveSnapshot(db, snapshot({ abilities: [] }))
+    expect(loadSnapshot(db)!.abilities).toEqual([])
   })
 
   it('round-trips the catalog changes in the order they were made', () => {

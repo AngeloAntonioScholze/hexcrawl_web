@@ -16,6 +16,7 @@ export type Action =
   | 'recolorEntity'
   | 'editInventory'
   | 'transferItem'
+  | 'abilities'
   | 'addEntity'
   | 'removeEntity'
   | 'entitySettings'
@@ -74,6 +75,7 @@ const PLAYER_RULES: Partial<Record<Action, (viewer: Viewer, target?: Target) => 
   recolorEntity: ownsTarget,
   editInventory: ownsTarget,
   transferItem: mayTransfer,
+  abilities: ownsTarget,
 }
 
 /**
@@ -106,6 +108,7 @@ export const HEX_MAP_RULES = {
   editItem: 'editInventory',
   removeItem: 'editInventory',
   transferItem: 'transferItem',
+  setAbility: 'abilities',
   addEntity: 'addEntity',
   // Giving a player who joins the session their token is adding an entity.
   seatPlayer: 'addEntity',

@@ -71,6 +71,8 @@ export const PROJECTION_FIELDS: {
       gold: isSupply('gold'),
     }),
   ),
+  // The projection's rows are the saved ones with every default spelled out.
+  abilities: SNAPSHOT_FIELDS.abilities,
   merchants: SNAPSHOT_FIELDS.merchants,
   items: SNAPSHOT_FIELDS.items,
   catalogOverrides: SNAPSHOT_FIELDS.catalogOverrides,

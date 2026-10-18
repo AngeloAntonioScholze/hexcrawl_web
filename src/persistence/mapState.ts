@@ -1,5 +1,6 @@
 import type { Database } from '@sqlite.org/sqlite-wasm'
 import type { EncounterOverride } from '../encounters/tables'
+import type { Abilities } from '../entities/abilities'
 import type { Action, ActionKind, ActionRecord } from '../entities/action'
 import type { CatalogOverride } from '../entities/catalog'
 import type { Entity, EntityKind, EntityState, Owner } from '../entities/entity'
@@ -33,6 +34,10 @@ export interface SavedOrigin extends Origin {
 }
 
 export interface SavedSupply extends SupplyEntry {
+  entityId: string
+}
+
+export interface SavedAbilities extends Abilities {
   entityId: string
 }
 
@@ -73,6 +78,8 @@ export interface MapSnapshot {
   queue: readonly SavedAction[]
   /** Every hand edit to a caravan's stores, on the turn it was made. */
   supplies: readonly SavedSupply[]
+  /** The scores of the parties and npcs that have any written down; the rest stand at ten. */
+  abilities: readonly SavedAbilities[]
   notes: readonly { hex: HexKey; text: string }[]
   /** Listed hex by hex, each hex's in the order they were added. */
   events: readonly ({ hex: HexKey } & HexEvent)[]
@@ -412,6 +419,30 @@ export function saveSnapshot(db: Database, snapshot: MapSnapshot): void {
       override.finalize()
     }
 
+    db.exec('DELETE FROM entity_ability')
+    const ability = db.prepare(
+      `INSERT INTO entity_ability
+        (entity_id, strength, dexterity, constitution, intelligence, wisdom, charisma)
+      VALUES (?, ?, ?, ?, ?, ?, ?)`,
+    )
+    try {
+      for (const one of snapshot.abilities) {
+        ability
+          .bind([
+            one.entityId,
+            one.strength,
+            one.dexterity,
+            one.constitution,
+            one.intelligence,
+            one.wisdom,
+            one.charisma,
+          ])
+          .stepReset()
+      }
+    } finally {
+      ability.finalize()
+    }
+
     db.exec('DELETE FROM seat')
     const seat = db.prepare('INSERT INTO seat (name, ord, entity_id) VALUES (?, ?, ?)')
     try {
@@ -495,6 +526,15 @@ export function loadSnapshot(db: Database): MapSnapshot | null {
       entityId: String(one.entity_id),
       food: Number(one.food),
       gold: Number(one.gold),
+    })),
+    abilities: db.selectObjects('SELECT * FROM entity_ability ORDER BY entity_id').map((one) => ({
+      entityId: String(one.entity_id),
+      strength: Number(one.strength),
+      dexterity: Number(one.dexterity),
+      constitution: Number(one.constitution),
+      intelligence: Number(one.intelligence),
+      wisdom: Number(one.wisdom),
+      charisma: Number(one.charisma),
     })),
     notes: db.selectObjects('SELECT * FROM hex_note').map((one) => ({
       hex: String(one.hex) as HexKey,

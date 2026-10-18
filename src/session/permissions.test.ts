@@ -23,6 +23,7 @@ const ENTITY_ACTIONS: readonly Action[] = [
   'renameEntity',
   'recolorEntity',
   'editInventory',
+  'abilities',
 ]
 
 const DM_ONLY: readonly Action[] = [
@@ -137,6 +138,7 @@ const HEX_MAP_FREE = new Set([
   'itemsOf',
   'inventoryPartners',
   'suppliesOf',
+  'abilitiesOf',
   'resourcesOn',
   'encounterTable',
   // The check itself, and running the guarded functions as somebody else.

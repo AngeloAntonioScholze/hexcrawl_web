@@ -147,6 +147,26 @@ const snapshot = (): MapSnapshot => ({
     { entityId: 'caravan', turn: 0, food: 10, gold: 20 },
     { entityId: 'smugglers', turn: 0, food: 77, gold: 999 },
   ],
+  abilities: [
+    {
+      entityId: 'party',
+      strength: 16,
+      dexterity: 12,
+      constitution: 14,
+      intelligence: 8,
+      wisdom: 10,
+      charisma: 3,
+    },
+    {
+      entityId: 'spy',
+      strength: 9,
+      dexterity: 18,
+      constitution: 11,
+      intelligence: 15,
+      wisdom: 13,
+      charisma: 17,
+    },
+  ],
   notes: [{ hex: '0,0', text: 'the innkeeper is the spy' }],
   events: [
     { hex: '0,0', id: 'written', title: 'a signpost', description: 'points north' },
@@ -249,6 +269,29 @@ describe('what the players never get', () => {
     expect(view.items.map((one) => one.id)).toEqual(['i-party', 'i-caravan'])
     expect(view.merchants.map((one) => one.id)).toEqual(['m-shown'])
     expect(view.supplies).toEqual([{ entityId: 'caravan', food: 10, gold: 20 }])
+  })
+
+  it("gives every visible party and npc its scores, and none of a hidden one's", () => {
+    expect(project().abilities).toEqual([
+      {
+        entityId: 'party',
+        strength: 16,
+        dexterity: 12,
+        constitution: 14,
+        intelligence: 8,
+        wisdom: 10,
+        charisma: 3,
+      },
+      {
+        entityId: 'stowaway',
+        strength: 10,
+        dexterity: 10,
+        constitution: 10,
+        intelligence: 10,
+        wisdom: 10,
+        charisma: 10,
+      },
+    ])
   })
 
   it('does not name a hidden carrier its riders are in', () => {

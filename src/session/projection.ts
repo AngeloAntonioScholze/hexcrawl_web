@@ -1,3 +1,4 @@
+import { defaultAbilities, hasAbilities, type Abilities } from '../entities/abilities'
 import type { CatalogOverride } from '../entities/catalog'
 import type { ActionRecord } from '../entities/action'
 import { idleState, sightAt, type Entity, type EntityState } from '../entities/entity'
@@ -36,6 +37,10 @@ export interface PlayerSupplies extends Supplies {
   entityId: string
 }
 
+export interface PlayerAbilities extends Abilities {
+  entityId: string
+}
+
 /**
  * Everything a player may see of a map, as plain data: arrays and records only,
  * every list in a fixed order, so equal maps give equal JSON and a diff between
@@ -68,6 +73,8 @@ export interface PlayerProjection {
   queue: SavedAction[]
   /** What each visible caravan's wagons hold this turn. */
   supplies: PlayerSupplies[]
+  /** Every visible party's and npc's scores, the defaults spelled out. */
+  abilities: PlayerAbilities[]
   merchants: Merchant[]
   items: Item[]
   catalogOverrides: CatalogOverride[]
@@ -244,6 +251,8 @@ export function projectForPlayers(snapshot: MapSnapshot, field: TerrainField): P
     ledger.set(entityId, [...(ledger.get(entityId) ?? []), entry])
   }
 
+  const scores = new Map(snapshot.abilities.map(({ entityId, ...one }) => [entityId, one]))
+
   const states = shown.map((entity): PlayerState => {
     const state = record.stateAt(entity.id, turn)
     return {
@@ -281,6 +290,9 @@ export function projectForPlayers(snapshot: MapSnapshot, field: TerrainField): P
     supplies: shown
       .filter((one) => carriesSupplies(one.kind))
       .map((one) => ({ entityId: one.id, ...suppliesAt(ledger, one.id, turn) })),
+    abilities: shown
+      .filter((one) => hasAbilities(one.kind))
+      .map((one) => ({ entityId: one.id, ...(scores.get(one.id) ?? defaultAbilities()) })),
     merchants: snapshot.merchants
       .filter((one) => shownIds.has(one.caravanId))
       .map((one) => ({ ...one })),

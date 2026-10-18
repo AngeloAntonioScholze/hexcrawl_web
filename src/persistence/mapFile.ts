@@ -5,6 +5,7 @@ import {
   type EncounterOverride,
   type EncounterWhen,
 } from '../encounters/tables'
+import { isAbilityScore } from '../entities/abilities'
 import type { Action, ActionKind, ActionRecord } from '../entities/action'
 import type { CatalogEntry, CatalogKind, CatalogOverride, CatalogPatch } from '../entities/catalog'
 import type { Entity, EntityKind, Owner } from '../entities/entity'
@@ -32,7 +33,14 @@ import {
   type ResourceType,
 } from '../terrain/resources'
 import { TERRAIN_IDS, type TerrainId } from '../terrain/terrain'
-import type { MapSnapshot, SavedAction, SavedOrigin, SavedState, SavedSupply } from './mapState'
+import type {
+  MapSnapshot,
+  SavedAbilities,
+  SavedAction,
+  SavedOrigin,
+  SavedState,
+  SavedSupply,
+} from './mapState'
 
 export const MAP_FILE_FORMAT = 'hexcrawl-map'
 export const MAP_FILE_VERSION = 1
@@ -250,6 +258,17 @@ export const SNAPSHOT_FIELDS: { [K in keyof MapSnapshot]-?: Guard<MapSnapshot[K]
       gold: isSupply('gold'),
     }),
   ),
+  abilities: listOf(
+    shape<SavedAbilities>({
+      entityId: isString,
+      strength: isAbilityScore,
+      dexterity: isAbilityScore,
+      constitution: isAbilityScore,
+      intelligence: isAbilityScore,
+      wisdom: isAbilityScore,
+      charisma: isAbilityScore,
+    }),
+  ),
   notes: listOf(shape<MapSnapshot['notes'][number]>({ hex: isHex, text: isString })),
   events: listOf(
     shape<MapSnapshot['events'][number]>({
@@ -361,6 +380,8 @@ const ADDED_FIELD_DEFAULTS: {
   rivers: () => [],
   terrainOverrides: () => [],
   supplies: () => [],
+  // Nobody in a file from before scores had any written down: all of them stand at ten.
+  abilities: () => [],
   items: () => [],
   seats: () => [],
 }

@@ -43,6 +43,7 @@ const plain = (snapshot: MapSnapshot): MapSnapshot => ({
         : { ...action },
   })),
   supplies: snapshot.supplies.map((one) => ({ ...one })),
+  abilities: snapshot.abilities.map((one) => ({ ...one })),
   notes: snapshot.notes.map((one) => ({ ...one })),
   events: snapshot.events.map((one) => ({ ...one })),
   locations: snapshot.locations.map((one) => ({ ...one })),
