@@ -3,9 +3,13 @@ import { describe, expect, it } from 'vitest'
 import { hexKey, range, type Axial, type HexKey } from '../hex/coords'
 import { createLayout } from '../hex/layout'
 import { createTerrainField, fieldFromTiles, repainted, withOverrides } from './field'
+import { MAP_STYLES } from './mapStyles'
+import { settledLevel } from './slopes'
 import {
   bandFor,
   createPainter,
+  createTerrain,
+  landAt,
   TERRAIN_DEFAULTS,
   TERRAIN_IDS,
   type TerrainId,
@@ -58,6 +62,30 @@ describe('createTerrainField', () => {
     expect(b.terrain).toBe(a.terrain)
     expect(b.level).toBe(a.level)
     expect(b.elevation).toBeCloseTo(a.elevation)
+  })
+
+  it('settles every hex the way settling one hex alone would', () => {
+    const radius = 45
+    for (const style of MAP_STYLES) {
+      const options = { ...TERRAIN_DEFAULTS, octaves: 4, style, radius }
+      // The plain reading of the slopes, with nothing kept between hexes.
+      const noise = createTerrain(layout, options)
+      const lower = createPainter(options)
+      const expected = (hex: Axial): TerrainTile => {
+        const ground = noise(hex)
+        const level = settledLevel(hex, (q, r) => noise({ q, r }).level)
+        return level === ground.level ? ground : lower(ground, landAt(level))
+      }
+
+      const world = createTerrainField(layout, options)
+      // Read out of order, so no answer leans on its neighbours being read first.
+      const hexes = range({ q: 0, r: 0 }, radius).sort(
+        (a, b) => ((a.q * 7919 + a.r * 104729) % 97) - ((b.q * 7919 + b.r * 104729) % 97),
+      )
+      for (const hex of hexes) expect(world.at(hex)).toEqual(expected(hex))
+      expect(world.known).toBe(hexes.length)
+      expect(world.at({ q: radius + 1, r: 0 })).toBeUndefined()
+    }
   })
 })
 
