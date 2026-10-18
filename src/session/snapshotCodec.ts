@@ -38,6 +38,7 @@ export const PROJECTION_FIELDS: {
     day: isTurn,
   }),
   worldRadius: SNAPSHOT_FIELDS.worldRadius,
+  playerReachCapped: SNAPSHOT_FIELDS.playerReachCapped,
   explored: isHexes,
   visible: isHexes,
   tiles: listOf(

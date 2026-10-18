@@ -67,6 +67,10 @@ const onDarkvision = (event: Event): void => {
   store.setDarkvision(store.selectedId, (event.target as HTMLInputElement).checked)
 }
 
+const onReachUncapped = (event: Event): void => {
+  store.setPlayerReachCapped(!(event.target as HTMLInputElement).checked)
+}
+
 const onSpacing = (event: Event): void => {
   store.setResourceSpacing(Number((event.target as HTMLInputElement).value))
 }
@@ -549,6 +553,11 @@ const olderTurns = computed(() => Math.max(0, store.adventureLog.length - TURNS_
               }}
             </button>
           </div>
+
+          <label v-if="store.may('entitySettings')" class="control">
+            <input type="checkbox" :checked="!store.playerReachCapped" @change="onReachUncapped" />
+            <span>players may plan past one turn</span>
+          </label>
 
           <dl v-if="store.route" class="route">
             <dt>hexes left</dt>

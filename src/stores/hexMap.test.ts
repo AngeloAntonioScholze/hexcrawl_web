@@ -1423,6 +1423,49 @@ describe("a player's reach", () => {
     store.click({ q: 5, r: 0 })
     expect(store.goal).toBe('3,0')
   })
+
+  it('lets the players plan past one turn once the DM lifts the cap', () => {
+    const store = atTable()
+    asDm(store, () => store.setPlayerReachCapped(false))
+
+    store.click({ q: 5, r: 0 })
+    expect(store.goal).toBe('5,0')
+
+    store.click({ q: 2, r: 2 }, true)
+    expect(store.legs.map((leg) => leg.to)).toEqual(['5,0', '2,2'])
+  })
+
+  it('leaves an order sent in for a player whole once the cap is lifted', () => {
+    const store = setup()
+    store.select({ q: 0, r: 0 })
+    const id = store.selectedId
+    store.setPlayerReachCapped(false)
+
+    store.actAs(PLAYER, () =>
+      store.queueAction(id, { kind: 'move', route: eastTo(5), waypoints: ['3,0', '5,0'] }),
+    )
+
+    expect(store.queue.get(id)).toEqual({
+      kind: 'move',
+      route: eastTo(5),
+      waypoints: ['3,0', '5,0'],
+    })
+  })
+
+  it('saves the cap with the map, and the DM can take the change back', () => {
+    const store = setup()
+    expect(store.snapshot.playerReachCapped).toBe(true)
+
+    store.setPlayerReachCapped(false)
+    const saved = store.snapshot
+    expect(saved.playerReachCapped).toBe(false)
+
+    store.undo()
+    expect(store.playerReachCapped).toBe(true)
+
+    store.restore(saved)
+    expect(store.playerReachCapped).toBe(false)
+  })
 })
 
 describe('chained orders', () => {
@@ -2992,6 +3035,7 @@ describe("the store's permissions", () => {
       ['setPace', (s, t) => s.setPace(t.party, 2)],
       ['setEntitySight', (s, t) => s.setEntitySight(t.party, 9)],
       ['setDarkvision', (s, t) => s.setDarkvision(t.party, true)],
+      ['setPlayerReachCapped', (s) => s.setPlayerReachCapped(false)],
     ],
     clock: [
       ['advanceTurn', (s) => s.advanceTurn()],

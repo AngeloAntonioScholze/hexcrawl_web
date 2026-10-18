@@ -113,6 +113,8 @@ export const HEX_MAP_RULES = {
   setPace: 'entitySettings',
   setEntitySight: 'entitySettings',
   setDarkvision: 'entitySettings',
+  // Lifting the one-turn cap on players' orders is a rule for the whole table.
+  setPlayerReachCapped: 'entitySettings',
   advanceTurn: 'clock',
   rewindTurn: 'clock',
   goToTurn: 'clock',

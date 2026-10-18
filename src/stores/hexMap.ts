@@ -340,6 +340,11 @@ export const useHexMapStore = defineStore('hexMap', () => {
   const revealed = ref(false)
   /** The DM's view shows the ground under the fog, through a thin wash of it. */
   const fogSeeThrough = ref(false)
+  /**
+   * Whether a player's orders stop at what the walker covers in one turn. The
+   * DM's never do; lifting this lets the players plan the long way round too.
+   */
+  const playerReachCapped = ref(true)
   /** Hexes the DM has revealed to or hidden from the players by hand. */
   const fogEdits = shallowRef<FogEdits>(NO_FOG_EDITS)
   const showSight = ref(false)
@@ -414,6 +419,7 @@ export const useHexMapStore = defineStore('hexMap', () => {
     resourceSpacing: slotOf(resourceSpacing),
     fogEdits: slotOf(fogEdits),
     revealed: slotOf(revealed),
+    playerReachCapped: slotOf(playerReachCapped),
     encounterOverrides: slotOf(encounterOverrides),
     roads: slotOf(roads),
     roadTail: slotOf(roadTail),
@@ -1015,11 +1021,10 @@ export const useHexMapStore = defineStore('hexMap', () => {
     supplies.value = cutSupplies(supplies.value, turn.value)
   }
 
-  /**
-   * Whether a player's orders stop at what the walker covers in one turn. The
-   * DM's never do; lifting this lets the players plan the long way round too.
-   */
-  const playerReachCapped = ref(true)
+  const setPlayerReachCapped = (on: boolean): void => {
+    if (!may('entitySettings')) return
+    playerReachCapped.value = on
+  }
 
   const reachCapped = (): boolean =>
     playerReachCapped.value && (actingFor ?? viewer.value).role !== 'dm'
@@ -1813,6 +1818,7 @@ export const useHexMapStore = defineStore('hexMap', () => {
     fog: fog.value,
     revealed: revealed.value,
     fogSeeThrough: fogSeeThrough.value,
+    playerReachCapped: playerReachCapped.value,
     showSight: showSight.value,
     showHistory: showHistory.value,
     turn: turn.value,
@@ -1859,6 +1865,7 @@ export const useHexMapStore = defineStore('hexMap', () => {
     fog.value = saved.fog
     revealed.value = saved.revealed
     fogSeeThrough.value = saved.fogSeeThrough
+    playerReachCapped.value = saved.playerReachCapped
     showSight.value = saved.showSight
     showHistory.value = saved.showHistory
     // Taken as saved, nobody included: an empty board is one the DM cleared, and
@@ -2045,6 +2052,8 @@ export const useHexMapStore = defineStore('hexMap', () => {
     setRevealed: history.track(setRevealed),
     fogShown,
     fogSeeThrough,
+    playerReachCapped,
+    setPlayerReachCapped: history.track(setPlayerReachCapped),
     seeThrough,
     showSight,
     showHistory,

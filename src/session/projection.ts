@@ -48,6 +48,8 @@ export interface PlayerProjection {
   turn: number
   clock: Clock
   worldRadius: number
+  /** Whether the players' orders stop at one turn of movement, as the host judges them. */
+  playerReachCapped: boolean
   /**
    * Ground the players know: what the visible entities have seen, with the DM's
    * fog edits laid over; the whole world once the DM reveals the map.
@@ -259,6 +261,7 @@ export function projectForPlayers(snapshot: MapSnapshot, field: TerrainField): P
     turn,
     clock: clockAt(turn),
     worldRadius: snapshot.worldRadius,
+    playerReachCapped: snapshot.playerReachCapped,
     explored,
     visible: sorted(withoutHidden(inSight, edits.hidden)),
     tiles,

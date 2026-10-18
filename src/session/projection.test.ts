@@ -49,6 +49,7 @@ const snapshot = (): MapSnapshot => ({
   fog: true,
   revealed: false,
   fogSeeThrough: false,
+  playerReachCapped: false,
   showSight: true,
   showHistory: true,
   turn: 1,
@@ -335,6 +336,11 @@ describe('what the players do get', () => {
     expect(view.turn).toBe(1)
     expect(view.clock.turn).toBe(1)
     expect(view.worldRadius).toBe(9)
+  })
+
+  it("has the DM's word on whether their orders stop at one turn", () => {
+    expect(project().playerReachCapped).toBe(false)
+    expect(project({ ...snapshot(), playerReachCapped: true }).playerReachCapped).toBe(true)
   })
 
   it('has every visible entity where it stands now, with its orders', () => {

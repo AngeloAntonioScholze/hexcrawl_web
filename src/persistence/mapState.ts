@@ -56,6 +56,8 @@ export interface MapSnapshot {
   revealed: boolean
   /** The DM's view shows the ground under the fog, through a thin wash of it. */
   fogSeeThrough: boolean
+  /** Players' orders stop at what the walker covers in one turn; the DM can lift it. */
+  playerReachCapped: boolean
   showSight: boolean
   showHistory: boolean
   /** The turn the crawl stands on; the clock reads off it. */
@@ -104,8 +106,8 @@ const SAVE_MAP = `
   INSERT OR REPLACE INTO map
     (id, seed, scale, sea_level, relief, world_radius, fog, show_sight,
      show_history, turn, selected_id, resource_spacing, revealed,
-     fog_see_through, style)
-  VALUES (1, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+     fog_see_through, style, player_reach_capped)
+  VALUES (1, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
 `
 
 const flag = (value: boolean): number => (value ? 1 : 0)
@@ -144,6 +146,7 @@ export function saveSnapshot(db: Database, snapshot: MapSnapshot): void {
         flag(snapshot.revealed),
         flag(snapshot.fogSeeThrough),
         snapshot.terrain.style,
+        flag(snapshot.playerReachCapped),
       ],
     })
 
@@ -449,6 +452,7 @@ export function loadSnapshot(db: Database): MapSnapshot | null {
     fog: Number(row.fog) === 1,
     revealed: Number(row.revealed) === 1,
     fogSeeThrough: Number(row.fog_see_through) === 1,
+    playerReachCapped: Number(row.player_reach_capped) === 1,
     showSight: Number(row.show_sight) === 1,
     showHistory: Number(row.show_history) === 1,
     turn: Number(row.turn),

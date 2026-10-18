@@ -22,6 +22,7 @@ const plain = (snapshot: MapSnapshot): MapSnapshot => ({
   fog: snapshot.fog,
   revealed: snapshot.revealed,
   fogSeeThrough: snapshot.fogSeeThrough,
+  playerReachCapped: snapshot.playerReachCapped,
   showSight: snapshot.showSight,
   showHistory: snapshot.showHistory,
   turn: snapshot.turn,

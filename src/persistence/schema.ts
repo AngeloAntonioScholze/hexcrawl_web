@@ -252,6 +252,10 @@ const MIGRATIONS: readonly string[] = [
     entity_id TEXT NOT NULL
   );
   `,
+  // Every map saved before the DM could lift it held players to one turn.
+  `
+  ALTER TABLE map ADD COLUMN player_reach_capped INTEGER NOT NULL DEFAULT 1;
+  `,
 ]
 
 export const SCHEMA_VERSION = MIGRATIONS.length

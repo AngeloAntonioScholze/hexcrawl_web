@@ -14,6 +14,7 @@ const snapshot = (): MapSnapshot => ({
   fog: true,
   revealed: false,
   fogSeeThrough: false,
+  playerReachCapped: false,
   showSight: false,
   showHistory: true,
   turn: 1,
@@ -348,6 +349,7 @@ describe('parseMapFile', () => {
     ['supplies', []],
     ['items', []],
     ['seats', []],
+    ['playerReachCapped', true],
   ])('opens a file from before %s existed with the default', (field, fallback) => {
     const result = parseMapFile(tampered((file) => delete file.map[field]))
     expect(result).toEqual({ ok: true, snapshot: { ...snapshot(), [field]: fallback } })

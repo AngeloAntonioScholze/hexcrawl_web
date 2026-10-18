@@ -37,6 +37,7 @@ const snapshot = (patch: Partial<MapSnapshot> = {}): MapSnapshot => ({
   fog: false,
   revealed: true,
   fogSeeThrough: true,
+  playerReachCapped: false,
   showSight: true,
   showHistory: true,
   turn: 2,
@@ -235,6 +236,7 @@ describe('schema', () => {
     expect(loaded.rivers).toEqual([])
     expect(loaded.terrainOverrides).toEqual([])
     expect(loaded.seats).toEqual([])
+    expect(loaded.playerReachCapped).toBe(true)
 
     saveSnapshot(old, snapshot())
     expect(loadSnapshot(old)!.turn).toBe(2)
