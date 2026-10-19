@@ -275,6 +275,9 @@ const MIGRATIONS: readonly string[] = [
     level INTEGER NOT NULL
   );
   `,
+  `
+  ALTER TABLE entity ADD COLUMN portrait TEXT;
+  `,
 ]
 
 export const SCHEMA_VERSION = MIGRATIONS.length

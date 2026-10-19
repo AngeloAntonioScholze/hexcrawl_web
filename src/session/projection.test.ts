@@ -56,7 +56,7 @@ const snapshot = (): MapSnapshot => ({
   selectedId: 'spy',
   entities: [
     entity('party', 'party', false),
-    entity('caravan', 'caravan', false),
+    { ...entity('caravan', 'caravan', false), portrait: 'night-camp' },
     entity('spy', 'npc', true),
     entity('smugglers', 'caravan', true),
     entity('stowaway', 'party', false),
@@ -398,6 +398,11 @@ describe('what the players do get', () => {
       { entityId: 'party', action: { kind: 'move', route: ['2,0'], waypoints: ['2,0'] } },
     ])
     expect(view.record.map((row) => row.entityId)).toEqual(['party', 'caravan', 'stowaway'])
+  })
+
+  it("has a visible caravan's portrait", () => {
+    const view = project()
+    expect(view.entities.find((one) => one.id === 'caravan')?.portrait).toBe('night-camp')
   })
 
   it('has the purse and level of every visible party and npc, untouched ones at the defaults', () => {

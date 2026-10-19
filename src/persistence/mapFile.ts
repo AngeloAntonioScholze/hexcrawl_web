@@ -243,6 +243,8 @@ export const SNAPSHOT_FIELDS: { [K in keyof MapSnapshot]-?: Guard<MapSnapshot[K]
       sight: isNumber,
       darkvision: isBoolean,
       hidden: isBoolean,
+      // Any name passes: one from a build that shipped other art just shows no picture.
+      portrait: (value): value is string | undefined => value === undefined || isString(value),
     }),
   ),
   origins: listOf(shape<SavedOrigin>({ entityId: isString, turn: isTurn, hex: isHex })),

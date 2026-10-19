@@ -1,0 +1,30 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 320 240" width="320" height="240">
+  <defs>
+    <linearGradient id="sky" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0" stop-color="#c9b48f"/>
+      <stop offset="1" stop-color="#efd9b0"/>
+    </linearGradient>
+  </defs>
+  <rect width="320" height="240" fill="url(#sky)"/>
+  <circle cx="70" cy="120" r="30" fill="#f4e6c6"/>
+  <path d="M0 150 C60 118 110 128 160 140 C210 152 260 118 320 132 V240 H0Z" fill="#b99873"/>
+  <path d="M0 172 C70 150 140 166 200 160 C250 155 290 150 320 158 V240 H0Z" fill="#a2805d"/>
+  
+  <path d="M0 196 C100 190 220 192 320 198 V240 H0Z" fill="#8d6c4c"/>
+  
+  <g fill="#4a3626">
+    <path d="M64 196 l6 -26 h4 l-2 26z M84 196 l2 -26 h4 l1 26z M40 196 l3 -24 h4 l-1 24z M54 196 l1 -24 h4 l2 24z"/>
+    <path d="M34 152 c4 -10 18 -14 34 -12 c14 2 26 4 30 12 l2 22 c-4 4 -60 4 -66 0z"/>
+    <path d="M34 156 c-6 -6 -10 -16 -8 -22 c4 -4 10 -2 12 4 l2 14z"/>
+    <path d="M96 166 l38 4 v4 l-38 -2z"/>
+    <rect x="128" y="160" width="128" height="18" rx="2"/>
+    <circle cx="152" cy="186" r="18" fill="none" stroke="#4a3626" stroke-width="5"/>
+    <circle cx="232" cy="186" r="18" fill="none" stroke="#4a3626" stroke-width="5"/>
+    <circle cx="152" cy="186" r="4"/>
+    <circle cx="232" cy="186" r="4"/>
+    <path d="M152 170 v32 M136 186 h32 M232 170 v32 M216 186 h32" stroke="#4a3626" stroke-width="2"/>
+  </g>
+  <path d="M130 160 C126 104 258 104 254 160 Z" fill="#e6d4b0"/>
+  <path d="M162 160 C160 120 172 112 176 112 M208 112 C212 112 224 120 222 160" fill="none" stroke="#4a3626" stroke-width="2" opacity="0.45"/>
+
+</svg>

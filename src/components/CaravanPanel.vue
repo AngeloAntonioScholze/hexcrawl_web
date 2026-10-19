@@ -1,9 +1,11 @@
 <script setup lang="ts">
-import { computed, watch } from 'vue'
+import { computed, ref, watch } from 'vue'
+import { CARAVAN_PORTRAITS, caravanPortrait } from '../entities/portraits'
 import { useHexMapStore } from '../stores/hexMap'
 import CaravanMerchants from './CaravanMerchants.vue'
 import CaravanSupplies from './CaravanSupplies.vue'
 import InventoryList from './InventoryList.vue'
+import PopupDialog from './PopupDialog.vue'
 
 const store = useHexMapStore()
 
@@ -18,6 +20,15 @@ const toggle = (): void => store.setPanelOpen('caravan', collapsed.value, narrow
 
 const caravan = computed(() => store.shownCaravan)
 const riders = computed(() => (caravan.value ? store.ridersOf(caravan.value.id) : []))
+
+const picking = ref(false)
+const mayPick = computed(() => !!caravan.value && store.may('entitySettings', caravan.value))
+const portrait = computed(() => caravanPortrait(caravan.value?.portrait))
+
+const pick = (id: string | null): void => {
+  if (caravan.value) store.setPortrait(caravan.value.id, id)
+  picking.value = false
+}
 
 // As with the hex details, a phone keeps whatever was last chosen: opening
 // here would fold away the entities list the caravan was just picked from.
@@ -48,6 +59,19 @@ watch(
     </header>
 
     <div v-show="!collapsed" class="body">
+      <div v-if="mayPick" class="row portrait-row">
+        <span class="label">portrait</span>
+        <button
+          type="button"
+          class="portrait-choose"
+          :title="`choose a portrait for ${caravan.name}`"
+          @click="picking = true"
+        >
+          <img v-if="portrait" :src="portrait.url" alt="" class="thumb" />
+          <span>{{ portrait?.label ?? 'none' }}</span>
+        </button>
+      </div>
+
       <CaravanSupplies :caravan-id="caravan.id" />
 
       <InventoryList :owner-id="caravan.id" />
@@ -80,6 +104,34 @@ watch(
 
       <CaravanMerchants :caravan-id="caravan.id" />
     </div>
+
+    <PopupDialog v-if="mayPick" v-model="picking" :title="`${caravan.name}: portrait`">
+      <ul class="portraits">
+        <li>
+          <button
+            type="button"
+            class="none"
+            :class="{ here: !portrait }"
+            :aria-pressed="!portrait"
+            @click="pick(null)"
+          >
+            <span class="frame">none</span>
+            <span class="label">no portrait</span>
+          </button>
+        </li>
+        <li v-for="one in CARAVAN_PORTRAITS" :key="one.id">
+          <button
+            type="button"
+            :class="{ here: one.id === portrait?.id }"
+            :aria-pressed="one.id === portrait?.id"
+            @click="pick(one.id)"
+          >
+            <img :src="one.url" alt="" class="frame" />
+            <span class="label">{{ one.label }}</span>
+          </button>
+        </li>
+      </ul>
+    </PopupDialog>
   </aside>
 </template>
 
@@ -162,6 +214,82 @@ h1 {
 
 p {
   margin: 0;
+}
+
+.portrait-row {
+  align-items: center;
+  font-size: 0.78rem;
+}
+
+.portrait-choose {
+  display: flex;
+  align-items: center;
+  gap: 0.4rem;
+  padding: 0.1rem 0.3rem;
+  border: 1px solid var(--line);
+  border-radius: 0.25rem;
+  background: none;
+  color: inherit;
+  font: inherit;
+  cursor: pointer;
+}
+
+.portrait-choose:hover {
+  background: color-mix(in srgb, var(--line) 45%, transparent);
+}
+
+.thumb {
+  width: 2rem;
+  height: 1.5rem;
+  border-radius: 0.15rem;
+  object-fit: cover;
+}
+
+.portraits {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(9rem, 1fr));
+  gap: 0.6rem;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.portraits button {
+  display: flex;
+  width: 100%;
+  flex-direction: column;
+  gap: 0.3rem;
+  padding: 0.3rem;
+  border: 1px solid transparent;
+  border-radius: 0.35rem;
+  background: none;
+  color: inherit;
+  font: inherit;
+  font-size: 0.78rem;
+  cursor: pointer;
+}
+
+.portraits button:hover {
+  background: color-mix(in srgb, var(--line) 45%, transparent);
+}
+
+.portraits button.here {
+  border-color: var(--ink-dim);
+  background: color-mix(in srgb, var(--line) 70%, transparent);
+}
+
+.portraits .frame {
+  display: grid;
+  width: 100%;
+  aspect-ratio: 4 / 3;
+  place-items: center;
+  border-radius: 0.2rem;
+  object-fit: cover;
+}
+
+.portraits .none .frame {
+  border: 1px dashed var(--line);
+  color: var(--ink-dim);
 }
 
 .list {

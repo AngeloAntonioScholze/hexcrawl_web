@@ -42,6 +42,18 @@ const snapshot = (): MapSnapshot => ({
       darkvision: true,
       hidden: true,
     },
+    {
+      id: 'caravan-1',
+      name: 'the wagons',
+      kind: 'caravan',
+      owner: 'player',
+      color: '#8fbc6a',
+      pacePerTurn: 0.5,
+      sight: 4,
+      darkvision: false,
+      hidden: false,
+      portrait: 'forest-track',
+    },
   ],
   origins: [{ entityId: 'party-1', turn: 0, hex: '0,0' as HexKey }],
   record: [
@@ -225,6 +237,7 @@ describe('parseMapFile', () => {
     ['an unknown entity kind', (map) => (map.entities[0].kind = 'dragon'), 'entities'],
     ['an entity missing a field', (map) => delete map.entities[1].hidden, 'entities'],
     ['a darkvision that is not a flag', (map) => (map.entities[0].darkvision = 1), 'entities'],
+    ['a portrait that is not a name', (map) => (map.entities[2].portrait = 7), 'entities'],
     ['a list that is not a list', (map) => (map.notes = {}), 'notes'],
     ['a malformed hex key', (map) => (map.origins[0].hex = 'north'), 'origins'],
     ['a bad hex inside a path', (map) => map.record[0].entered.push('1;0'), 'record'],
@@ -385,6 +398,16 @@ describe('parseMapFile', () => {
   it('opens an entity from before darkvision existed as blind by night', () => {
     const result = parseMapFile(tampered((file) => delete file.map.entities[1].darkvision))
     expect(result.ok && result.snapshot.entities[1].darkvision).toBe(false)
+  })
+
+  it('opens a file from before portraits, its caravans going without one', () => {
+    const result = parseMapFile(tampered((file) => delete file.map.entities[2].portrait))
+    expect(result.ok && result.snapshot.entities[2]).not.toHaveProperty('portrait')
+  })
+
+  it('keeps a portrait this build does not ship, rather than turning the file away', () => {
+    const result = parseMapFile(tampered((file) => (file.map.entities[2].portrait = 'a-sketch')))
+    expect(result.ok && result.snapshot.entities[2].portrait).toBe('a-sketch')
   })
 
   it('opens a file from before map styles on the classic generator', () => {

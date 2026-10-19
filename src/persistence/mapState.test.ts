@@ -29,6 +29,7 @@ const caravan: Entity = {
   sight: 4,
   darkvision: true,
   hidden: true,
+  portrait: 'dusk-road',
 }
 
 const snapshot = (patch: Partial<MapSnapshot> = {}): MapSnapshot => ({

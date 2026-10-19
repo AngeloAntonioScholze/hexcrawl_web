@@ -1737,6 +1737,60 @@ describe('riding in a caravan', () => {
   })
 })
 
+describe("a caravan's portrait", () => {
+  const portraitOf = (store: Store, id: string): string | undefined =>
+    store.entities.find((one) => one.id === id)?.portrait
+
+  it('starts with none, and takes one of the bundled ones', () => {
+    const store = setup()
+    const caravan = store.addEntity('the wagons', 'caravan')!.id
+    expect(portraitOf(store, caravan)).toBeUndefined()
+
+    store.setPortrait(caravan, 'night-camp')
+    expect(portraitOf(store, caravan)).toBe('night-camp')
+  })
+
+  it('turns away a portrait the build does not ship, and keeps the one it had', () => {
+    const store = setup()
+    const caravan = store.addEntity('the wagons', 'caravan')!.id
+    store.setPortrait(caravan, 'night-camp')
+
+    store.setPortrait(caravan, 'a-sketch')
+    expect(portraitOf(store, caravan)).toBe('night-camp')
+  })
+
+  it('gives nothing but a caravan a portrait', () => {
+    const store = setup()
+    const party = store.entities[0].id
+    store.setPortrait(party, 'night-camp')
+    expect(portraitOf(store, party)).toBeUndefined()
+  })
+
+  it('takes the portrait down again, and undo puts it back', () => {
+    const store = setup()
+    const caravan = store.addEntity('the wagons', 'caravan')!.id
+    store.setPortrait(caravan, 'coast-road')
+
+    store.setPortrait(caravan, null)
+    expect(portraitOf(store, caravan)).toBeUndefined()
+
+    store.undo()
+    expect(portraitOf(store, caravan)).toBe('coast-road')
+  })
+
+  it('comes back from a snapshot with the portrait it was saved with', () => {
+    const store = setup()
+    const caravan = store.addEntity('the wagons', 'caravan')!.id
+    store.setPortrait(caravan, 'winter-pass')
+    const saved = store.snapshot
+
+    setActivePinia(createPinia())
+    const fresh = setup()
+    fresh.restore(saved)
+    expect(portraitOf(fresh, caravan)).toBe('winter-pass')
+  })
+})
+
 describe('riding a ship', () => {
   /** Land west of the meridian, open sea east of it: the 0,0 column is the coast. */
   const shore = (): Map<HexKey, TerrainTile> => {
@@ -3242,6 +3296,7 @@ describe("the store's permissions", () => {
       ['setPace', (s, t) => s.setPace(t.party, 2)],
       ['setEntitySight', (s, t) => s.setEntitySight(t.party, 9)],
       ['setDarkvision', (s, t) => s.setDarkvision(t.party, true)],
+      ['setPortrait', (s, t) => s.setPortrait(t.wagon, 'night-camp')],
       ['setPlayerReachCapped', (s) => s.setPlayerReachCapped(false)],
     ],
     clock: [

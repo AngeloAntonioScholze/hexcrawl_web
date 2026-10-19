@@ -25,6 +25,8 @@ export interface Entity {
   darkvision: boolean
   /** Kept off the players' map. */
   hidden: boolean
+  /** A caravan's picture, one of the bundled portraits; none until the DM picks one. */
+  portrait?: string
 }
 
 /** What an entity is standing on, and what it carries into the next turn. */

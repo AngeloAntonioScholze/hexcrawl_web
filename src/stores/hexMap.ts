@@ -53,6 +53,7 @@ import {
   type Merchant,
   type MerchantType,
 } from '../entities/merchant'
+import { caravanPortrait } from '../entities/portraits'
 import {
   carriesSupplies,
   cutSupplies,
@@ -661,6 +662,14 @@ export const useHexMapStore = defineStore('hexMap', () => {
   const setDarkvision = (id: string, darkvision: boolean): void => {
     if (!may('entitySettings', entityOf(id))) return
     patch(id, { darkvision })
+  }
+
+  /** Only a caravan has a picture, and only one of the bundled ones; null takes it down. */
+  const setPortrait = (id: string, portrait: string | null): void => {
+    const one = entityOf(id)
+    if (!may('entitySettings', one) || one?.kind !== 'caravan') return
+    if (portrait !== null && !caravanPortrait(portrait)) return
+    patch(id, { portrait: portrait ?? undefined })
   }
 
   const vision = computed<VisionOptions>(() => {
@@ -2083,6 +2092,7 @@ export const useHexMapStore = defineStore('hexMap', () => {
     setPace: history.track(setPace, (id) => `pace:${id}`),
     setEntitySight: history.track(setEntitySight, (id) => `sight:${id}`),
     setDarkvision: history.track(setDarkvision),
+    setPortrait: history.track(setPortrait),
     start,
     goal,
     partyHex,
