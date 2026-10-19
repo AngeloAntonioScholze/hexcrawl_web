@@ -1,7 +1,9 @@
-import { createPinia, setActivePinia } from 'pinia'
+import { createPinia, getActivePinia, setActivePinia, type Pinia } from 'pinia'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
-import type { SessionMessage } from '../session/messages'
+import { parseEnvelope, wrap, type SessionMessage } from '../session/messages'
 import type { Session, SessionHandlers } from '../session/peer'
+import { projectForPlayers } from '../session/projection'
+import { crawlStore } from '../session/snapshotFixture'
 import { useHexMapStore } from './hexMap'
 import { parseLastRoom, REOPEN_WINDOW_MS, reasonFor, roomLink, useSessionStore } from './session'
 
@@ -22,6 +24,11 @@ vi.mock('../session/peer', async (importOriginal) => {
     code,
     send: (message, to) => opened.sent.push({ message, to }),
     drop: (peerId) => opened.dropped.push(peerId),
+    channel: (peerId) => ({
+      send: (message) => opened.sent.push({ message, to: peerId }),
+      bufferedAmount: 0,
+      drained: () => Promise.resolve(),
+    }),
     close: () => {
       opened.closed++
       // As the real one does, closing reports back through the handlers.
@@ -608,5 +615,186 @@ describe('drops and resumes', () => {
       message: { type: 'refused', reason: 'locked' },
       to: 'guest-2',
     })
+  })
+})
+
+describe('the map over the wire', () => {
+  const HOST = 'hexcrawl-abcdef'
+  const GUEST = 'guest-1'
+  const syncs = new Set(['state', 'patch', 'resync'])
+
+  beforeEach(() => {
+    vi.useFakeTimers()
+    return () => vi.useRealTimers()
+  })
+
+  /**
+   * A DM hosting the test crawl and a player joining it, each in a browser of
+   * their own, on a line that carries every message through JSON and the
+   * envelope check. The fake sessions share one outbox: what the host sends
+   * names the guest, and what the guest sends names the host or nobody.
+   */
+  const room = async () => {
+    const map = crawlStore()
+    const hostPinia = getActivePinia()!
+    const dm = useSessionStore()
+    await dm.host('Mara')
+    const toHost = opened.handlers!
+
+    const guestPinia: Pinia = createPinia()
+    setActivePinia(guestPinia)
+    const player = useSessionStore()
+    await player.join('Tobin', 'abcdef')
+    const toGuest = opened.handlers!
+
+    /** Every message the host has put on the line to the guest. */
+    const toPlayer: SessionMessage[] = []
+
+    const deliver = async (): Promise<void> => {
+      for (let round = 0; round < 50; round++) {
+        setActivePinia(hostPinia)
+        await vi.advanceTimersByTimeAsync(200)
+        const batch = opened.sent.splice(0)
+        if (batch.length === 0) return
+        for (const { message, to } of batch) {
+          const wire = parseEnvelope(JSON.parse(JSON.stringify(wrap(message))))
+          expect(wire).not.toBeNull()
+          if (to === GUEST) {
+            toPlayer.push(wire!)
+            setActivePinia(guestPinia)
+            toGuest.message?.(wire!, HOST)
+          } else {
+            setActivePinia(hostPinia)
+            toHost.message?.(wire!, GUEST)
+          }
+        }
+      }
+      throw new Error('the line never went quiet')
+    }
+
+    const connect = async (): Promise<void> => {
+      setActivePinia(hostPinia)
+      toHost.peer?.(GUEST, true)
+      setActivePinia(guestPinia)
+      toGuest.peer?.(HOST, true)
+      toGuest.status?.('open')
+      await deliver()
+      setActivePinia(hostPinia)
+    }
+
+    const dmView = () => projectForPlayers(map.snapshot, map.field)
+    const sinceNow = (): (() => SessionMessage[]) => {
+      const from = toPlayer.length
+      return () => toPlayer.slice(from).filter((one) => syncs.has(one.type))
+    }
+
+    const asGuest = (act: () => void): void => {
+      setActivePinia(guestPinia)
+      act()
+      setActivePinia(hostPinia)
+    }
+
+    return { map, dm, player, toHost, toGuest, asGuest, deliver, connect, dmView, sinceNow }
+  }
+
+  it('starts a player off with the player view and keeps it in step', async () => {
+    const { map, player, deliver, connect, dmView, sinceNow } = await room()
+    const joining = sinceNow()
+    await connect()
+
+    expect(player.admission).toBe('admitted')
+    expect(joining().map((one) => one.type)).toContain('state')
+    expect(player.remote).toEqual(dmView())
+
+    const changing = sinceNow()
+    const caravan = map.entities.find((one) => one.kind === 'caravan')!
+    map.addItem(caravan.id, { name: 'rope' })
+    await deliver()
+
+    expect(changing().map((one) => one.type)).toEqual(['patch'])
+    expect(player.remote).toEqual(dmView())
+    expect(player.remote?.items.map((one) => one.name)).toContain('rope')
+  })
+
+  it('folds a burst of changes into one patch', async () => {
+    const { map, deliver, connect, sinceNow } = await room()
+    await connect()
+
+    const changing = sinceNow()
+    const caravan = map.entities.find((one) => one.kind === 'caravan')!
+    for (const name of ['rope', 'lamp', 'tent']) map.addItem(caravan.id, { name })
+    await deliver()
+    expect(changing().map((one) => one.type)).toEqual(['patch'])
+  })
+
+  it('never puts the hidden on the wire', async () => {
+    const { map, deliver, connect, sinceNow } = await room()
+    const spy = map.entities.find((one) => one.hidden)!
+    const everything = sinceNow()
+    await connect()
+    map.addItem(spy.id, { name: 'a forged letter' })
+    map.addItem(map.entities[0].id, { name: 'rope' })
+    await deliver()
+
+    const text = JSON.stringify(everything())
+    expect(everything().length).toBeGreaterThan(0)
+    for (const secret of [spy.id, spy.name, 'poison', 'a forged letter', 'innkeeper'])
+      expect(text).not.toContain(secret)
+  })
+
+  it('sends nothing more to a kicked player', async () => {
+    const { map, dm, player, deliver, connect, sinceNow } = await room()
+    await connect()
+    dm.kick('Tobin')
+    const after = sinceNow()
+    map.addItem(map.entities[0].id, { name: 'rope' })
+    await deliver()
+    expect(after()).toEqual([])
+    expect(player.remote).toBeNull()
+  })
+
+  it('sends nothing more to a player whose connection dropped', async () => {
+    const { map, toHost, deliver, connect, sinceNow } = await room()
+    await connect()
+    toHost.peer?.(GUEST, false)
+    const after = sinceNow()
+    map.addItem(map.entities[0].id, { name: 'rope' })
+    await deliver()
+    expect(after()).toEqual([])
+  })
+
+  it('stops sending once the DM leaves the room', async () => {
+    const { map, dm, deliver, connect, sinceNow } = await room()
+    await connect()
+    dm.leave()
+    const after = sinceNow()
+    map.addItem(map.entities[0].id, { name: 'rope' })
+    await deliver()
+    expect(after()).toEqual([])
+  })
+
+  it('keeps the frozen map through a drop and lets it go on leaving', async () => {
+    const { player, toGuest, asGuest, connect, dmView } = await room()
+    await connect()
+    const before = dmView()
+
+    asGuest(() => {
+      toGuest.peer?.(HOST, false)
+      toGuest.status?.('closed')
+    })
+    expect(player.reconnecting).toBe(true)
+    expect(player.remote).toEqual(before)
+    asGuest(() => player.leave())
+    expect(player.remote).toBeNull()
+  })
+
+  it('sends a player that lost track the whole state again', async () => {
+    const { player, toHost, deliver, connect, sinceNow } = await room()
+    await connect()
+    const asking = sinceNow()
+    toHost.message?.({ type: 'resync' }, GUEST)
+    await deliver()
+    expect(asking().map((one) => one.type)).toEqual(['state'])
+    expect(player.remote).not.toBeNull()
   })
 })

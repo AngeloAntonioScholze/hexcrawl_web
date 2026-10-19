@@ -1,5 +1,5 @@
 import { defineStore } from 'pinia'
-import { computed, ref, shallowRef } from 'vue'
+import { computed, ref, shallowRef, watch, type WatchHandle } from 'vue'
 import * as room from '../session/admission'
 import { MAX_NAME_LENGTH, type SessionMessage } from '../session/messages'
 import {
@@ -12,9 +12,18 @@ import {
   type SessionStatus,
 } from '../session/peer'
 import { DM } from '../session/permissions'
+import { projectForPlayers, type PlayerProjection } from '../session/projection'
 import { createRetry, type Retry } from '../session/retry'
 import { normaliseRoomCode, ROOM_PREFIX } from '../session/roomCode'
 import { seatOf, type Seat } from '../session/seats'
+import {
+  createCoalescer,
+  createStateGuest,
+  createStateHost,
+  type Coalescer,
+  type StateGuest,
+  type StateHost,
+} from '../session/stateSync'
 import { useHexMapStore } from './hexMap'
 
 /** Why there is no room, or no longer one, in words a player can act on. */
@@ -162,7 +171,20 @@ export const useSessionStore = defineStore('session', () => {
   const admission = ref<Admission | null>(null)
   /** A guest that was in has lost the host and is trying the room again. */
   const reconnecting = ref(false)
+  /**
+   * What the host last sent of the map, on a guest: the player view as the DM's
+   * browser has it. It outlives a dropped connection, so the map stays frozen
+   * as it was while the room is tried again, and goes with leaving or failing.
+   */
+  const remote = shallowRef<PlayerProjection | null>(null)
   let session: Session | null = null
+  // Following the host's map on a guest, or keeping guests in step on a host;
+  // each belongs to the one connection it was made for.
+  let stateGuest: StateGuest | null = null
+  let stateHost: StateHost | null = null
+  let broadcasts: Coalescer | null = null
+  let project: (() => PlayerProjection) | null = null
+  let stopWatching: WatchHandle | null = null
   let retry: Retry | null = null
   // Each host or join bumps this, so a room still opening when it is left or
   // replaced cannot write over the one that took its place.
@@ -179,6 +201,49 @@ export const useSessionStore = defineStore('session', () => {
     useHexMapStore().seatedId = null
   }
 
+  const stopSync = (): void => {
+    stopWatching?.()
+    stopWatching = null
+    broadcasts?.cancel()
+    broadcasts = null
+    stateHost = null
+    stateGuest = null
+    project = null
+  }
+
+  /**
+   * Starts keeping the guests let into this room in step with the map. Every
+   * change asks for a broadcast, folded into one projection a beat later: a
+   * drag or a turn can change the store many times over, and a projection of
+   * a long crawl is not free. With nobody in, no projection is made at all; a
+   * guest let in later is sent one made fresh.
+   */
+  const syncHost = (mine: number): void => {
+    const map = useHexMapStore()
+    const projectMap = (): PlayerProjection => projectForPlayers(map.snapshot, map.field)
+    const host = createStateHost({
+      channelFor: (peerId) => (mine === run ? session?.channel(peerId) : undefined),
+    })
+    const coalescer = createCoalescer(() => {
+      if (mine === run && door.value.online.size > 0) host.broadcast(projectMap())
+    })
+    stateHost = host
+    project = projectMap
+    broadcasts = coalescer
+    stopWatching = watch([() => map.snapshot, () => map.field], () => coalescer.request())
+  }
+
+  const syncGuest = (mine: number): void => {
+    stateGuest = createStateGuest({
+      send: (message) => {
+        if (mine === run) session?.send(message)
+      },
+      onChange: (projection) => {
+        if (mine === run) remote.value = projection
+      },
+    })
+  }
+
   const stopRetrying = (): void => {
     retry?.stop()
     retry = null
@@ -189,6 +254,8 @@ export const useSessionStore = defineStore('session', () => {
     stopRetrying()
     unseat()
     run++
+    stopSync()
+    remote.value = null
     session?.close()
     session = null
     role.value = null
@@ -205,6 +272,8 @@ export const useSessionStore = defineStore('session', () => {
     run++
     stopRetrying()
     unseat()
+    stopSync()
+    remote.value = null
     status.value = 'error'
     reason.value = why
     admission.value = null
@@ -227,12 +296,18 @@ export const useSessionStore = defineStore('session', () => {
     if (token) session?.send({ type: 'seat', entityId: token.id }, peerId)
   }
 
+  // Made after the seat, so the token just handed over is on the map it is sent.
+  const admit = (peerId: string): void => {
+    seat(peerId)
+    if (project) stateHost?.sendSnapshot(peerId, project())
+  }
+
   /** Answers a guest, and shows a refused one the door once the answer has gone. */
   const reply = (decision: room.Decision, to: string): void => {
     door.value = decision.state
     session?.send(decision.reply, to)
     if (decision.reply.type === 'refused') session?.drop(to)
-    if (decision.reply.type === 'welcome') seat(to)
+    if (decision.reply.type === 'welcome') admit(to)
   }
 
   // A name with a token on this map was let in before, if not by this room:
@@ -243,6 +318,7 @@ export const useSessionStore = defineStore('session', () => {
   }
 
   const onHostMessage = (message: SessionMessage, from: string): void => {
+    if (stateHost?.receive(message, from)) return
     if (message.type !== 'hello') return
     // A connection says hello once; another from one already in or waiting is ignored.
     const state = door.value
@@ -253,6 +329,8 @@ export const useSessionStore = defineStore('session', () => {
   }
 
   const onGuestMessage = (message: SessionMessage): void => {
+    // The map is only the business of a guest the host has let in.
+    if (admission.value === 'admitted' && stateGuest?.receive(message)) return
     switch (message.type) {
       case 'pending':
         admission.value = 'pending'
@@ -302,6 +380,7 @@ export const useSessionStore = defineStore('session', () => {
     const { state, peerId } = room.kick(door.value, name)
     door.value = state
     if (peerId === undefined) return
+    stateHost?.remove(peerId)
     session?.send({ type: 'kicked' }, peerId)
     session?.drop(peerId)
   }
@@ -312,6 +391,7 @@ export const useSessionStore = defineStore('session', () => {
    */
   const lost = (): void => {
     run++
+    stopSync()
     const closing = session
     session = null
     closing?.close()
@@ -330,6 +410,9 @@ export const useSessionStore = defineStore('session', () => {
   ): Promise<void> => {
     const mine = ++run
     status.value = 'connecting'
+    stopSync()
+    if (as === 'host') syncHost(mine)
+    else syncGuest(mine)
 
     const handlers: SessionHandlers = {
       status: (next, _detail, errorType) => {
@@ -346,7 +429,9 @@ export const useSessionStore = defineStore('session', () => {
       peer: (peerId, connected) => {
         if (mine !== run) return
         if (!connected) {
-          if (as === 'host') door.value = room.disconnect(door.value, peerId)
+          if (as !== 'host') return
+          door.value = room.disconnect(door.value, peerId)
+          stateHost?.remove(peerId)
           return
         }
         if (as === 'guest') admission.value = 'asking'
@@ -400,6 +485,7 @@ export const useSessionStore = defineStore('session', () => {
     myName,
     admission,
     reconnecting,
+    remote,
     locked,
     approval,
     players,

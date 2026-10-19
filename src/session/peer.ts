@@ -1,6 +1,7 @@
 import type { DataConnection, Peer, PeerError, PeerOptions } from 'peerjs'
 import { parseEnvelope, wrap, type SessionMessage } from './messages'
 import { makeRoomCode, normaliseRoomCode } from './roomCode'
+import { BUFFER_LOW_WATER, type StateChannel } from './stateSync'
 
 /**
  * The signalling broker: the PeerJS public cloud for now. A self-hosted
@@ -56,6 +57,8 @@ export interface Session {
   send: (message: SessionMessage, to?: string) => void
   /** Closes the connection to one peer, once what was last sent to it has had time to arrive. */
   drop: (peerId: string) => void
+  /** The open connection to one peer as the state sync paces it; undefined once it has gone. */
+  channel: (peerId: string) => StateChannel | undefined
   close: () => void
 }
 
@@ -151,6 +154,10 @@ const wire = (
       const targets = to === undefined ? [...connections.values()] : [connections.get(to)]
       for (const conn of targets) if (conn?.open) void conn.send(envelope)
     },
+    channel: (peerId) => {
+      const conn = connections.get(peerId)
+      return conn?.open && conn.dataChannel ? channelOf(conn, conn.dataChannel) : undefined
+    },
     drop: (peerId) => {
       const conn = connections.get(peerId)
       if (!conn) return
@@ -169,6 +176,35 @@ const wire = (
 
   return { session, track, setStatus }
 }
+
+/**
+ * A connection's data channel, measured where the browser queues: PeerJS only
+ * starts holding messages back in its own queue at 8 MiB, far past where the
+ * state sync stops to let the channel drain.
+ */
+const channelOf = (conn: DataConnection, channel: RTCDataChannel): StateChannel => ({
+  send: (message) => {
+    if (conn.open) void conn.send(wrap(message))
+  },
+  get bufferedAmount() {
+    return channel.bufferedAmount
+  },
+  drained: () =>
+    new Promise((resolve) => {
+      if (channel.readyState !== 'open' || channel.bufferedAmount <= BUFFER_LOW_WATER) {
+        resolve()
+        return
+      }
+      channel.bufferedAmountLowThreshold = BUFFER_LOW_WATER
+      const done = (): void => {
+        channel.removeEventListener('bufferedamountlow', done)
+        channel.removeEventListener('close', done)
+        resolve()
+      }
+      channel.addEventListener('bufferedamountlow', done)
+      channel.addEventListener('close', done)
+    }),
+})
 
 /** Settles once the broker has taken the peer's id, or with why it would not. */
 const registered = (peer: Peer): Promise<PeerError<string> | null> =>
