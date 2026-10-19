@@ -123,18 +123,20 @@ export function landAt(level: number): TerrainId {
 }
 
 /**
- * How tall a tile is drawn for its noise height. Water sits flat at one sea
- * floor height so it reads as a surface; land climbs from the shoreline with
- * the noise above sea level. The curve is what puts air between a plain and a
- * peak: without it every rise reads as the same gentle ramp.
+ * How tall a tile is drawn. Water sits flat at one sea floor height so it reads
+ * as a surface; land is drawn at its step, not its noise, so every hex on a
+ * step stands at one height and the land rises in terraces a player can count,
+ * the beach at the shoreline and each step above it. The curve is what puts air
+ * between a plain and a peak: without it every rise reads as the same ramp.
  */
-function elevationCurve(options: TerrainOptions): (height: number) => number {
+function elevationCurve(options: TerrainOptions): (height: number, level: number) => number {
   const seaFloor = options.seaFloor ?? TERRAIN_DEFAULTS.seaFloor
   const shore = options.shore ?? TERRAIN_DEFAULTS.shore
   const relief = options.relief ?? TERRAIN_DEFAULTS.relief
   const reliefCurve = options.reliefCurve ?? TERRAIN_DEFAULTS.reliefCurve
 
-  return (height) => (height < 0 ? seaFloor : shore + Math.pow(height, reliefCurve) * relief)
+  return (height, level) =>
+    height < 0 ? seaFloor : shore + Math.pow(level / MAX_LEVEL, reliefCurve) * relief
 }
 
 /**
@@ -158,7 +160,7 @@ export function createPainter(
       terrain,
       height,
       level: band.level,
-      elevation: elevationOf(height),
+      elevation: elevationOf(height, band.level),
       color: band.color,
     }
   }
@@ -207,7 +209,7 @@ export function createTerrain(
       terrain: band.id,
       height,
       level: band.level,
-      elevation: elevationOf(height),
+      elevation: elevationOf(height, band.level),
       color: band.color,
     }
   }

@@ -77,10 +77,22 @@ describe('levels', () => {
     }
   })
 
-  it('groups many rendered heights under one step', () => {
-    const tiles = sampleAll().filter((tile) => tile.level === 1)
-    expect(tiles.length).toBeGreaterThan(0)
-    expect(new Set(tiles.map((tile) => tile.elevation)).size).toBeGreaterThan(tiles.length * 0.5)
+  it('draws every land hex on one step at one height', () => {
+    const land = sampleAll().filter((tile) => tile.height >= 0)
+    for (let level = 0; level <= MAX_LEVEL; level++) {
+      const tiles = land.filter((tile) => tile.level === level)
+      expect(tiles.length, `level ${level}`).toBeGreaterThan(1)
+      expect(new Set(tiles.map((tile) => tile.elevation)).size, `level ${level}`).toBe(1)
+    }
+  })
+
+  it('puts the beach at the shoreline and the peaks a full relief above it', () => {
+    const options = { shore: 0.8, relief: 5, reliefCurve: 1.5 }
+    const land = sampleAll(options).filter((tile) => tile.height >= 0)
+    const at = (level: number): number => land.find((tile) => tile.level === level)!.elevation
+    expect(at(0)).toBeCloseTo(0.8)
+    expect(at(2)).toBeCloseTo(0.8 + Math.pow(0.5, 1.5) * 5)
+    expect(at(MAX_LEVEL)).toBeCloseTo(5.8)
   })
 
   it('reaches every step at the default settings', () => {

@@ -87,6 +87,19 @@ describe('createTerrainField', () => {
       expect(world.at({ q: radius + 1, r: 0 })).toBeUndefined()
     }
   })
+
+  it('draws settled ground at one height per step, lowered hexes included', () => {
+    const world = field(30)
+    const byLevel = new Map<number, Set<number>>()
+    for (const hex of range({ q: 0, r: 0 }, 30)) {
+      const ground = world.at(hex)!
+      if (ground.height < 0) continue
+      const seen = byLevel.get(ground.level) ?? new Set<number>()
+      byLevel.set(ground.level, seen.add(ground.elevation))
+    }
+    expect(byLevel.size).toBeGreaterThan(2)
+    for (const seen of byLevel.values()) expect(seen.size).toBe(1)
+  })
 })
 
 describe('fieldFromTiles', () => {
