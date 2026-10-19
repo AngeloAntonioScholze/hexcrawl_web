@@ -8,7 +8,7 @@ import { useHexMapStore } from '../stores/hexMap'
 import { fieldFromTiles } from '../terrain/field'
 import { defaultResourceChances } from '../terrain/resources'
 import type { TerrainTile } from '../terrain/terrain'
-import { projectForPlayers, type PlayerProjection } from './projection'
+import { createProjector, projectForPlayers, type PlayerProjection } from './projection'
 
 const tile = (hex: Axial): TerrainTile => ({
   hex,
@@ -491,5 +491,101 @@ describe('against the store', () => {
     store.dmView = true
     expect(store.known.has('-4,3')).toBe(true)
     expect(projectForPlayers(store.snapshot, store.field).explored).toEqual(view.explored)
+  })
+})
+
+describe('the reveal', () => {
+  it('is sent, so a player map knows to draw no fog at all', () => {
+    expect(project().revealed).toBe(false)
+    expect(project({ ...snapshot(), revealed: true }).revealed).toBe(true)
+  })
+})
+
+describe('a projector', () => {
+  type Store = ReturnType<typeof useHexMapStore>
+
+  const crawl = (): Store => {
+    setActivePinia(createPinia())
+    const store = useHexMapStore()
+    store.setTiles(flatTiles(9))
+    store.setEntitySight(store.selectedId, 2)
+    store.select({ q: 0, r: 0 })
+    store.select({ q: 6, r: 0 })
+    const spy = store.addEntity('the spy', 'npc', 'dm')!
+    store.selectEntity(spy.id)
+    store.select({ q: -4, r: 0 })
+    store.select({ q: -4, r: 4 })
+    store.selectEntity(store.entities[0].id)
+    return store
+  }
+
+  /** The answer the projector gives is the one worked out from scratch. */
+  const expectInStep = (store: Store, project: ReturnType<typeof createProjector>): void => {
+    expect(project(store.snapshot, store.field)).toEqual(
+      projectForPlayers(store.snapshot, store.field),
+    )
+  }
+
+  it('answers as projectForPlayers does while the crawl walks on', () => {
+    const store = crawl()
+    const project = createProjector()
+    expectInStep(store, project)
+    for (let i = 0; i < 4; i++) {
+      store.advanceTurn()
+      expectInStep(store, project)
+    }
+  })
+
+  it('answers as projectForPlayers does after a rewind and a different turn', () => {
+    const store = crawl()
+    const project = createProjector()
+    for (let i = 0; i < 3; i++) store.advanceTurn()
+    expectInStep(store, project)
+    store.rewindTurn()
+    store.rewindTurn()
+    expectInStep(store, project)
+    store.select({ q: 0, r: 5 })
+    store.advanceTurn()
+    expectInStep(store, project)
+    store.advanceTurn()
+    expectInStep(store, project)
+  })
+
+  it('answers as projectForPlayers does when what the entities see changes', () => {
+    const store = crawl()
+    const project = createProjector()
+    for (let i = 0; i < 2; i++) store.advanceTurn()
+    expectInStep(store, project)
+    store.setEntitySight(store.selectedId, 4)
+    expectInStep(store, project)
+    store.entities = store.entities.map((one) => ({ ...one, hidden: false }))
+    expectInStep(store, project)
+    store.entities = store.entities.map((one) => ({ ...one, hidden: one.owner === 'dm' }))
+    expectInStep(store, project)
+  })
+
+  it('answers as projectForPlayers does over fog edits, a reveal and new ground', () => {
+    const store = crawl()
+    const project = createProjector()
+    store.advanceTurn()
+    store.fogEdits = { revealed: new Set(['-9,0']), hidden: new Set(['1,0']) }
+    expectInStep(store, project)
+    store.setRevealed(true)
+    expectInStep(store, project)
+    expectInStep(store, project)
+    store.setRevealed(false)
+    expectInStep(store, project)
+    store.setTiles(flatTiles(7))
+    expectInStep(store, project)
+  })
+
+  it('shares nothing with the snapshot it was given', () => {
+    const store = crawl()
+    const project = createProjector()
+    store.advanceTurn()
+    const map = store.snapshot
+    const view = project(map, store.field)
+    expect(view.record.some((row) => map.record.includes(row))).toBe(false)
+    expect(view.entities.some((one) => map.entities.includes(one))).toBe(false)
   })
 })

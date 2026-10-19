@@ -1,5 +1,6 @@
 <script setup lang="ts">
 import { computed, ref } from 'vue'
+import { usePlayerView } from '../composables/usePlayerView'
 import { QUANTITY_LIMITS, totalWeight, type Item } from '../entities/inventory'
 import { useHexMapStore } from '../stores/hexMap'
 import PopupDialog from './PopupDialog.vue'
@@ -7,9 +8,18 @@ import PopupDialog from './PopupDialog.vue'
 const props = defineProps<{ ownerId: string }>()
 
 const store = useHexMapStore()
+// The players read what they see from their projection, as their map does.
+const player = usePlayerView()
+const forPlayers = computed(() => !store.dmView)
 
-const owner = computed(() => store.entities.find((one) => one.id === props.ownerId) ?? null)
-const items = computed(() => store.itemsOf(props.ownerId))
+const owner = computed(() =>
+  forPlayers.value
+    ? (player.scene.value.entityOf.get(props.ownerId) ?? null)
+    : (store.entities.find((one) => one.id === props.ownerId) ?? null),
+)
+const items = computed(() =>
+  forPlayers.value ? player.itemsOf(props.ownerId) : store.itemsOf(props.ownerId),
+)
 
 const carried = computed(() => {
   const weighed = items.value.map(totalWeight).filter((one): one is number => one !== null)
@@ -23,7 +33,10 @@ const editable = computed(() => owner.value !== null && store.may('editInventory
 const partners = computed(() => {
   const from = owner.value
   return from
-    ? store.inventoryPartners(props.ownerId).filter((to) => store.may('transferItem', { from, to }))
+    ? (forPlayers.value
+        ? player.inventoryPartners(props.ownerId)
+        : store.inventoryPartners(props.ownerId)
+      ).filter((to) => store.may('transferItem', { from, to }))
     : []
 })
 

@@ -39,6 +39,7 @@ export const PROJECTION_FIELDS: {
   }),
   worldRadius: SNAPSHOT_FIELDS.worldRadius,
   playerReachCapped: SNAPSHOT_FIELDS.playerReachCapped,
+  revealed: SNAPSHOT_FIELDS.revealed,
   explored: isHexes,
   visible: isHexes,
   tiles: listOf(

@@ -1,5 +1,6 @@
 <script setup lang="ts">
 import { computed, ref, watch } from 'vue'
+import { usePlayerView } from '../composables/usePlayerView'
 import { CARAVAN_PORTRAITS, caravanPortrait } from '../entities/portraits'
 import { useHexMapStore } from '../stores/hexMap'
 import CaravanMerchants from './CaravanMerchants.vue'
@@ -8,6 +9,9 @@ import InventoryList from './InventoryList.vue'
 import PopupDialog from './PopupDialog.vue'
 
 const store = useHexMapStore()
+// The players read what they see from their projection, as their map does.
+const player = usePlayerView()
+const forPlayers = computed(() => !store.dmView)
 
 /** Matches the other panels' breakpoint, so all open collapsed on the same windows. */
 const NARROW = 720
@@ -18,8 +22,11 @@ store.setPanelOpen('caravan', !narrow(), narrow())
 const collapsed = computed(() => !store.panelsOpen.caravan)
 const toggle = (): void => store.setPanelOpen('caravan', collapsed.value, narrow())
 
-const caravan = computed(() => store.shownCaravan)
-const riders = computed(() => (caravan.value ? store.ridersOf(caravan.value.id) : []))
+const caravan = computed(() => (forPlayers.value ? player.shownCaravan.value : store.shownCaravan))
+const riders = computed(() => {
+  if (!caravan.value) return []
+  return forPlayers.value ? player.ridersOf(caravan.value.id) : store.ridersOf(caravan.value.id)
+})
 
 const picking = ref(false)
 const mayPick = computed(() => !!caravan.value && store.may('entitySettings', caravan.value))

@@ -1,5 +1,6 @@
 <script setup lang="ts">
 import { computed, ref } from 'vue'
+import { usePlayerView } from '../composables/usePlayerView'
 import { unlockedServices } from '../entities/catalog'
 import {
   clampLevel,
@@ -15,13 +16,22 @@ import PopupDialog from './PopupDialog.vue'
 const props = defineProps<{ caravanId: string }>()
 
 const store = useHexMapStore()
+// The players read what they see from their projection, as their map does.
+const player = usePlayerView()
+const forPlayers = computed(() => !store.dmView)
 
 const crew = computed(() =>
-  store.merchantsOf(props.caravanId).map((merchant) => ({
-    merchant,
-    info: MERCHANT_INFO[merchant.type],
-    offers: unlockedServices(merchant.type, merchant.level, store.catalog),
-  })),
+  (forPlayers.value ? player.merchantsOf(props.caravanId) : store.merchantsOf(props.caravanId)).map(
+    (merchant) => ({
+      merchant,
+      info: MERCHANT_INFO[merchant.type],
+      offers: unlockedServices(
+        merchant.type,
+        merchant.level,
+        forPlayers.value ? player.catalog.value : store.catalog,
+      ),
+    }),
+  ),
 )
 
 const adding = ref(false)

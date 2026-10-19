@@ -11,12 +11,13 @@ import MapList from '../components/MapList.vue'
 import SessionBar from '../components/SessionBar.vue'
 import ViewToggle from '../components/ViewToggle.vue'
 import { useDebugMode } from '../composables/useDebugMode'
+import { usePlayerView } from '../composables/usePlayerView'
 import { MIN_MAX_ZOOM } from '../composables/useHexWindow'
 import { useStage } from '../composables/useStage'
 import { useUndoKeys } from '../composables/useUndoKeys'
 import { useViewMode } from '../composables/useViewMode'
 import { useZoomLimit } from '../composables/useZoomLimit'
-import type { EntityKind } from '../entities/entity'
+import type { Entity, EntityKind } from '../entities/entity'
 import { carriesInventory } from '../entities/inventory'
 import { MAP_FILE_EXTENSION, parseMapFile, serialiseMap } from '../persistence/mapFile'
 import {
@@ -200,10 +201,34 @@ const onAssign = (event: Event): void => {
   if (store.selectedEntity) store.assignEntity(store.selectedEntity.id, name || null)
 }
 
+// The players' view reads what it shows from their projection, as their map
+// does; their orders still go to the store, which judges them.
+const player = usePlayerView()
+const forPlayers = computed(() => !store.dmView)
+
+const shownTurn = computed(() => (forPlayers.value ? player.projection.value.turn : store.turn))
+const shownClock = computed(() => (forPlayers.value ? player.projection.value.clock : store.clock))
+const standing = computed(() => (forPlayers.value ? player.start.value : store.start))
+const headed = computed(() => (forPlayers.value ? player.goal.value : store.goal))
+const shownEntities = computed(() =>
+  forPlayers.value ? player.scene.value.entities : store.shownEntities,
+)
+
 /** Riders are listed under their caravan, not among those walking on their own. */
-const walking = computed(() => store.shownEntities.filter((one) => !store.carrierOf(one.id)))
+const walking = computed(() =>
+  forPlayers.value
+    ? player.walking.value
+    : store.shownEntities.filter((one) => !store.carrierOf(one.id)),
+)
+
+const ridersOf = (caravanId: string): readonly Entity[] =>
+  forPlayers.value ? player.ridersOf(caravanId) : store.ridersOf(caravanId)
 
 const carrierName = computed(() => {
+  if (forPlayers.value) {
+    const carrier = player.carrierOf(store.selectedId)
+    return carrier ? (player.scene.value.entityOf.get(carrier)?.name ?? null) : null
+  }
   const carrier = store.carrierOf(store.selectedId)
   return carrier ? (store.entities.find((one) => one.id === carrier)?.name ?? null) : null
 })
@@ -211,7 +236,8 @@ const carrierName = computed(() => {
 // A caravan's list sits in the caravan panel already; twice over is once too many.
 const ownInventory = computed(() => {
   const selected = store.selectedEntity
-  return selected && carriesInventory(selected.kind) && store.shownCaravan?.id !== selected.id
+  const caravan = forPlayers.value ? player.shownCaravan.value : store.shownCaravan
+  return selected && carriesInventory(selected.kind) && caravan?.id !== selected.id
     ? selected
     : null
 })
@@ -240,12 +266,21 @@ const straightLine = computed(() => (store.route ? `${store.route.steps * KM_PER
 const TURNS_SHOWN = 40
 
 // Newest first: the last turn is the one anybody is looking for.
+// The players' log stops at the turn the crawl stands at: a turn wound back
+// past is a future they have not walked, and their projection does not hold it.
+const adventureLog = computed(() =>
+  forPlayers.value ? player.adventureLog.value : store.adventureLog,
+)
+const hexesWalked = computed(() =>
+  forPlayers.value ? player.hexesWalked.value : store.hexesWalked,
+)
+
 const recentTurns = computed(() => {
-  const from = Math.max(0, store.adventureLog.length - TURNS_SHOWN)
-  return store.adventureLog.slice(from).reverse()
+  const from = Math.max(0, adventureLog.value.length - TURNS_SHOWN)
+  return adventureLog.value.slice(from).reverse()
 })
 
-const olderTurns = computed(() => Math.max(0, store.adventureLog.length - TURNS_SHOWN))
+const olderTurns = computed(() => Math.max(0, adventureLog.value.length - TURNS_SHOWN))
 </script>
 
 <template>
@@ -492,21 +527,21 @@ const olderTurns = computed(() => Math.max(0, store.adventureLog.length - TURNS_
           <dl>
             <dt>turn</dt>
             <dd>
-              {{ store.turn }}
-              <span class="dim">{{ store.clock.phase }} {{ store.clock.index + 1 }}/4</span>
+              {{ shownTurn }}
+              <span class="dim">{{ shownClock.phase }} {{ shownClock.index + 1 }}/4</span>
             </dd>
 
             <dt>standing</dt>
-            <dd>{{ store.start ?? '—' }}</dd>
+            <dd>{{ standing ?? '—' }}</dd>
 
             <dt>headed</dt>
-            <dd>{{ store.goal ?? '—' }}</dd>
+            <dd>{{ headed ?? '—' }}</dd>
           </dl>
 
           <div class="control stack">
             <div class="row">
               <span>entities</span>
-              <span class="value">{{ store.shownEntities.length }}</span>
+              <span class="value">{{ shownEntities.length }}</span>
             </div>
 
             <ul class="entities">
@@ -526,8 +561,8 @@ const olderTurns = computed(() => Math.max(0, store.adventureLog.length - TURNS_
                   <span class="dim">{{ one.kind }}</span>
                   <span class="value">{{ one.pacePerTurn }}/turn</span>
                 </button>
-                <ul v-if="store.ridersOf(one.id).length" class="riders">
-                  <li v-for="rider in store.ridersOf(one.id)" :key="rider.id">
+                <ul v-if="ridersOf(one.id).length" class="riders">
+                  <li v-for="rider in ridersOf(one.id)" :key="rider.id">
                     <button
                       type="button"
                       :class="{ here: rider.id === store.selectedId }"
@@ -714,14 +749,14 @@ const olderTurns = computed(() => Math.max(0, store.adventureLog.length - TURNS_
             <span>show all entities paths</span>
           </label>
 
-          <div v-if="store.adventureLog.length" class="control stack">
+          <div v-if="adventureLog.length" class="control stack">
             <div class="row">
               <span>adventure log</span>
-              <span class="value">{{ store.travelledKm }} km</span>
+              <span class="value">{{ hexesWalked * KM_PER_HEX }} km</span>
             </div>
             <div class="row">
               <span>hexes walked</span>
-              <span class="value">{{ store.hexesWalked }}</span>
+              <span class="value">{{ hexesWalked }}</span>
             </div>
 
             <ol class="journey">
@@ -732,7 +767,7 @@ const olderTurns = computed(() => Math.max(0, store.adventureLog.length - TURNS_
                 <button
                   v-if="entry.kind === 'turn'"
                   type="button"
-                  :class="{ here: entry.row.turn === store.turn - 1, ahead: !entry.row.spent }"
+                  :class="{ here: entry.row.turn === shownTurn - 1, ahead: !entry.row.spent }"
                   :disabled="!store.may('clock')"
                   :title="
                     store.may('clock')
@@ -753,8 +788,8 @@ const olderTurns = computed(() => Math.max(0, store.adventureLog.length - TURNS_
                   type="button"
                   class="met"
                   :class="{
-                    here: entry.encounter.turn === store.turn,
-                    ahead: entry.encounter.turn > store.turn,
+                    here: entry.encounter.turn === shownTurn,
+                    ahead: entry.encounter.turn > shownTurn,
                   }"
                   :disabled="!store.may('clock')"
                   :title="

@@ -35,7 +35,10 @@ export interface ResourceView {
 const TYPE_ORDER = new Map(RESOURCE_TYPES.map((type, index) => [type, index]))
 
 /** The DM sees every resource; a player only those on ground the crawl has laid eyes on. */
-export function resourceMarks(resources: readonly Resource[], view: ResourceView): ResourceMark[] {
+export function resourceMarks(
+  resources: readonly Pick<Resource, 'hex' | 'type'>[],
+  view: ResourceView,
+): ResourceMark[] {
   const held = new Map<HexKey, Set<ResourceType>>()
   for (const resource of resources) {
     if (!view.dmView && !view.explored.has(resource.hex)) continue

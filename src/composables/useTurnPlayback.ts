@@ -1,8 +1,39 @@
 import { onBeforeUnmount, watch, type ShallowRef } from 'vue'
+import type { ActionRecord } from '../entities/action'
+import type { TokenShape } from '../engine/partyToken'
 import type { HexScene } from '../engine/scene'
 import { parseKey, type HexKey } from '../hex/coords'
 import { hexToWorld, type Layout } from '../hex/layout'
 import { useHexMapStore } from '../stores/hexMap'
+
+/** What a turn is played back from: the store for the DM, the projection for the players. */
+export interface PlaybackSource {
+  turn(): number
+  tokens(): readonly {
+    id: string
+    hex: HexKey | null
+    color: string
+    shape: TokenShape
+    inside: string | null
+  }[]
+  /** Where everybody stood at the opening of a turn; null when that is no longer known. */
+  positionsAt(at: number): ReadonlyMap<string, { hex: HexKey | null; inside: string | null }> | null
+  /** What everybody drawn did on a turn already spent. */
+  recordsOn(at: number): readonly ActionRecord[]
+}
+
+/** The DM's view of the crawl, straight off the store. */
+export function storePlayback(store: ReturnType<typeof useHexMapStore>): PlaybackSource {
+  return {
+    turn: () => store.turn,
+    tokens: () => store.tokens,
+    positionsAt: (at) => store.positionsAt(at),
+    recordsOn: (at) => {
+      const shown = new Set(store.shownEntities.map((one) => one.id))
+      return store.recordsOn(at).filter((row) => shown.has(row.entityId))
+    },
+  }
+}
 
 /** How long a token spends in the air between two hexes. */
 const HOP_MS = 300
@@ -31,9 +62,11 @@ const BOARD_MS = 450
  * or laying out a new world all put every token where it belongs at once: a
  * rewind is not a journey, and animating one backwards would say it was.
  */
-export function useTurnPlayback(hexScene: ShallowRef<HexScene | null>, layout: Layout): void {
-  const store = useHexMapStore()
-
+export function useTurnPlayback(
+  hexScene: ShallowRef<HexScene | null>,
+  layout: Layout,
+  source: PlaybackSource = storePlayback(useHexMapStore()),
+): void {
   let run = 0
   let playing = false
   let timer: ReturnType<typeof setTimeout> | null = null
@@ -50,10 +83,10 @@ export function useTurnPlayback(hexScene: ShallowRef<HexScene | null>, layout: L
       timer = setTimeout(resolve, ms)
     })
 
-  /** Everybody where the store says they are: the end state of any turn. */
+  /** Everybody where the source says they are: the end state of any turn. */
   const snap = (): void => {
     hexScene.value?.tokens.setEntries(
-      store.tokens.map((token) => ({ ...token, hex: token.hex ? parseKey(token.hex) : null })),
+      source.tokens().map((token) => ({ ...token, hex: token.hex ? parseKey(token.hex) : null })),
     )
   }
 
@@ -72,12 +105,12 @@ export function useTurnPlayback(hexScene: ShallowRef<HexScene | null>, layout: L
     const scene = hexScene.value
     if (!scene) return snap()
 
-    const opening = store.positionsAt(spent)
-    const closing = store.positionsAt(spent + 1)
+    const opening = source.positionsAt(spent)
+    const closing = source.positionsAt(spent + 1)
+    if (!opening || !closing) return snap()
     const insideAt = (id: string): string | null => opening.get(id)?.inside ?? null
 
-    const shown = new Set(store.shownEntities.map((one) => one.id))
-    const rows = store.recordsOn(spent).filter((row) => shown.has(row.entityId))
+    const rows = source.recordsOn(spent)
 
     // A rider carried along spends nothing and is never seen; one that spent
     // something walked a route of its own, so it climbed out first.
@@ -142,7 +175,7 @@ export function useTurnPlayback(hexScene: ShallowRef<HexScene | null>, layout: L
   }
 
   watch(
-    () => store.turn,
+    () => source.turn(),
     (now, before) => {
       cancel()
       // One turn forward is a turn being played; anything else is the crawl
@@ -152,7 +185,7 @@ export function useTurnPlayback(hexScene: ShallowRef<HexScene | null>, layout: L
     },
   )
 
-  watch(() => store.tokens, settle)
+  watch(() => source.tokens(), settle)
 
   onBeforeUnmount(cancel)
 }

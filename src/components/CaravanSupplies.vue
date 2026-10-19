@@ -1,18 +1,24 @@
 <script setup lang="ts">
 import { computed } from 'vue'
+import { usePlayerView } from '../composables/usePlayerView'
 import { SUPPLY_LIMITS, type Supply } from '../entities/supplies'
 import { useHexMapStore } from '../stores/hexMap'
 
 const props = defineProps<{ caravanId: string }>()
 
 const store = useHexMapStore()
+// The players read what they see from their projection, as their map does.
+const player = usePlayerView()
+const forPlayers = computed(() => !store.dmView)
 
 const SHOWN: readonly { supply: Supply; label: string; color: string }[] = [
   { supply: 'food', label: 'food', color: '#8fbc6a' },
   { supply: 'gold', label: 'gold', color: '#e0b25a' },
 ]
 
-const held = computed(() => store.suppliesOf(props.caravanId))
+const held = computed(() =>
+  forPlayers.value ? player.suppliesOf(props.caravanId) : store.suppliesOf(props.caravanId),
+)
 
 const fill = (supply: Supply): string =>
   `${(100 * held.value[supply]) / SUPPLY_LIMITS[supply].max}%`

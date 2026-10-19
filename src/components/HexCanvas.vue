@@ -16,7 +16,8 @@ import MiniMap from './MiniMap.vue'
 import { gridCapacity, maxZoomFor, useHexWindow } from '../composables/useHexWindow'
 import { useStage, type StageDirector, type StageMark } from '../composables/useStage'
 import { useZoomLimit } from '../composables/useZoomLimit'
-import { useTurnPlayback } from '../composables/useTurnPlayback'
+import { settled, usePlayerView } from '../composables/usePlayerView'
+import { storePlayback, useTurnPlayback } from '../composables/useTurnPlayback'
 import { createFogStepper } from '../engine/fogStepper'
 import type { HexGrid } from '../engine/hexGrid'
 import type { HexScene } from '../engine/scene'
@@ -30,7 +31,7 @@ import { DM } from '../session/permissions'
 import { useHexMapStore } from '../stores/hexMap'
 import { createTerrainField, repainted } from '../terrain/field'
 import { TERRAIN_COLORS } from '../terrain/terrain'
-import { timeOfDay } from '../time/clock'
+import { clockAt, timeOfDay } from '../time/clock'
 
 const props = withDefaults(
   defineProps<{
@@ -72,6 +73,11 @@ const RenderStats = import.meta.env.DEV
 
 const canvas = ref<HTMLCanvasElement | null>(null)
 const store = useHexMapStore()
+
+// The DM's view draws the store; the players' draws the projection and nothing
+// else, so what a player here sees is what a player in the room is sent.
+const player = usePlayerView()
+const forPlayers = computed(() => !store.dmView)
 
 const layout = createLayout(props.hexSize)
 
@@ -154,7 +160,22 @@ const { repaint } = useHexWindow(
   () => store.ground,
 )
 
-useTurnPlayback(hexScene, layout)
+const fromStore = storePlayback(store)
+
+useTurnPlayback(hexScene, layout, {
+  turn: () => (forPlayers.value ? player.projection.value.turn : fromStore.turn()),
+  tokens: () => (forPlayers.value ? player.tokens.value : fromStore.tokens()),
+  positionsAt: (at) => (forPlayers.value ? player.positionsAt(at) : fromStore.positionsAt(at)),
+  recordsOn: (at) => (forPlayers.value ? player.recordsOn(at) : fromStore.recordsOn(at)),
+})
+
+const paths = computed(() => (forPlayers.value ? player.paths.value : store.paths))
+const plannedHexes = computed(() =>
+  forPlayers.value ? player.plannedHexes.value : store.plannedHexes,
+)
+const start = computed(() => (forPlayers.value ? player.start.value : store.start))
+const goal = computed(() => (forPlayers.value ? player.goal.value : store.goal))
+const stops = computed(() => (forPlayers.value ? player.stops.value : store.stops))
 
 const hoverTint = computed(() => {
   if (!store.dmView) return HOVER_TINT
@@ -173,18 +194,18 @@ const overlay = computed(() => {
 
   // Tinted in the entity's own colour, dimmed so the pawn standing on it still
   // reads as the brighter thing.
-  for (const path of store.paths) {
+  for (const path of paths.value) {
     const tint = Color3.FromHexString(path.color).scale(TRAIL_TINT)
     for (const hex of path.hexes) result.set(hexKey(hex), tint)
   }
 
   // The hex the entity will stand on at the end of the next turn is brighter,
   // so what one press of the dial buys reads at a glance.
-  const head = store.plannedHexes[0]
+  const head = plannedHexes.value[0]
   if (head) result.set(hexKey(head), HEAD_TINT)
 
-  if (store.start) result.set(store.start, START_TINT)
-  if (store.goal) result.set(store.goal, GOAL_TINT)
+  if (start.value) result.set(start.value, START_TINT)
+  if (goal.value) result.set(goal.value, GOAL_TINT)
 
   if (store.roadTail) result.set(store.roadTail, ROAD_TAIL_TINT)
 
@@ -275,14 +296,25 @@ const director: StageDirector = {
 onMounted(() => stage.direct(director))
 onBeforeUnmount(() => stage.direct(null))
 
+/**
+ * Which view the fog was last painted for. The two number their answers apart,
+ * so a switch between them is painted whole rather than as a step off the other.
+ */
+let fogPaintedForPlayers: boolean | null = null
+
 const paintFog = (grid: HexGrid): void => {
-  hexScene.value?.setRevealOrigin(store.start ? parseKey(store.start) : null)
+  hexScene.value?.setRevealOrigin(start.value ? parseKey(start.value) : null)
+  if (fogPaintedForPlayers !== forPlayers.value) {
+    fogStepper.reset()
+    fogPaintedForPlayers = forPlayers.value
+  }
+  const scene = forPlayers.value ? player.scene.value : null
   fogStepper.paint(grid, {
-    fog: store.fogShown,
-    visible: store.visibleToPlayers,
+    fog: scene ? !scene.projection.revealed : store.fogShown,
+    visible: scene ? scene.visible : store.visibleToPlayers,
     windowKeys,
     windowTick: windowTick.value,
-    explored: store.knownState,
+    explored: scene ? player.fog.value : store.knownState,
   })
 }
 
@@ -300,11 +332,13 @@ watchEffect(() => {
 
 // The disc the party can see, with the pockets the terrain hides carved out of
 // it, so a ridge shows up as the shadow it casts rather than as missing fog.
-const sightField = computed(() =>
-  store.showSight
-    ? { lit: [...store.visible].map(parseKey), shadow: [...store.blocked].map(parseKey) }
-    : { lit: [], shadow: [] },
-)
+// The players are sent only what is in sight, every visible entity's together,
+// so theirs is lit without the shadows.
+const sightField = settled(() => {
+  if (!store.showSight) return { lit: [], shadow: [] }
+  if (forPlayers.value) return { lit: [...player.scene.value.visible].map(parseKey), shadow: [] }
+  return { lit: [...store.visible].map(parseKey), shadow: [...store.blocked].map(parseKey) }
+})
 
 watch(sightField, ({ lit, shadow }) => hexScene.value?.vision.setField(lit, shadow))
 
@@ -313,33 +347,43 @@ watch(
   (shown) => hexScene.value?.vision.setShown(shown),
 )
 
-watch(
-  () => store.paths,
-  (paths) => hexScene.value?.arrows.setPaths(paths),
-)
+watch(paths, (next) => hexScene.value?.arrows.setPaths(next))
 
 // The entity being given orders is the one whose stops are worth marking.
-watch(
-  () => store.stops,
-  ({ hexes, color }) => hexScene.value?.stops.setStops(hexes, color),
-)
+watch(stops, ({ hexes, color }) => hexScene.value?.stops.setStops(hexes, color))
 
-const marks = computed(() => resourceMarks(store.resources, store.drawnView))
+const marks = settled(() =>
+  forPlayers.value
+    ? resourceMarks(player.projection.value.resources, player.scene.value.view)
+    : resourceMarks(store.resources, store.drawnView),
+)
 
 watch(marks, (next) => hexScene.value?.resources.setMarks(next))
 
-const pois = computed(() => visiblePois(store.locations, store.events, store.drawnView))
+const pois = settled(() => {
+  if (!forPlayers.value) return visiblePois(store.locations, store.events, store.drawnView)
+  const { locations, events, view } = player.scene.value
+  return visiblePois(locations, events, view)
+})
 
 watch(pois, (next) => hexScene.value?.pois.setPois(next))
 
-const spans = computed(() => roadSpans(store.roads, store.drawnView))
+const spans = settled(() =>
+  forPlayers.value
+    ? roadSpans(player.scene.value.roads, player.scene.value.view)
+    : roadSpans(store.roads, store.drawnView),
+)
 
 watch(spans, (next) => {
   hexScene.value?.roads.setSpans(next)
   hexScene.value?.bridges.setRoads(next)
 })
 
-const riverLines = computed(() => roadSpans(store.rivers, store.drawnView))
+const riverLines = settled(() =>
+  forPlayers.value
+    ? roadSpans(player.scene.value.rivers, player.scene.value.view)
+    : roadSpans(store.rivers, store.drawnView),
+)
 
 watch(riverLines, (next) => {
   hexScene.value?.rivers.setSpans(next)
@@ -348,20 +392,27 @@ watch(riverLines, (next) => {
 
 // The sky over the map follows the same clock the dial draws: each turn of the
 // day has a light of its own.
+const clock = computed(() =>
+  forPlayers.value ? clockAt(player.projection.value.turn) : store.clock,
+)
+
 watch(
-  () => store.clock,
-  (clock) => hexScene.value?.setDaylight(timeOfDay(clock)),
+  () => clock.value.turn,
+  () => hexScene.value?.setDaylight(timeOfDay(clock.value)),
 )
 
 const tokens = computed(() =>
-  store.tokens.map((token) => ({ ...token, hex: token.hex ? parseKey(token.hex) : null })),
+  (forPlayers.value ? player.tokens.value : store.tokens).map((token) => ({
+    ...token,
+    hex: token.hex ? parseKey(token.hex) : null,
+  })),
 )
 
 // Everything standing on the ground, set down again on the heights as they are now.
 const pushHeights = (created: NonNullable<typeof hexScene.value>): void => {
-  created.arrows.setPaths(store.paths)
+  created.arrows.setPaths(paths.value)
   created.tokens.setEntries(tokens.value)
-  created.stops.setStops(store.stops.hexes, store.stops.color)
+  created.stops.setStops(stops.value.hexes, stops.value.color)
   created.resources.setMarks(marks.value)
   created.pois.setPois(pois.value)
   created.roads.setSpans(spans.value)
@@ -386,7 +437,7 @@ const pushEverything = (created: NonNullable<typeof hexScene.value>): void => {
   paintFog(created.grid)
   pushHeights(created)
   created.vision.setShown(store.showSight)
-  created.setDaylight(timeOfDay(store.clock))
+  created.setDaylight(timeOfDay(clock.value))
   created.setVeiled(veiled.value)
 }
 
@@ -435,7 +486,7 @@ watch(
 <template>
   <canvas ref="canvas" touch-action="none" />
   <div class="sky-glow" :style="glowStyle" aria-hidden="true" />
-  <MiniMap v-show="!veiled" :hex-scene="hexScene" :layout="layout" />
+  <MiniMap v-if="store.dmView" v-show="!veiled" :hex-scene="hexScene" :layout="layout" />
   <component :is="RenderStats" v-if="RenderStats" :hex-scene="hexScene" />
 </template>
 

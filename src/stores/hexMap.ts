@@ -145,7 +145,7 @@ import { createHistory, slotOf } from './history'
 const NOTHING_IN_SIGHT: PartySight = { radius: 0, visible: new Set(), blocked: new Set() }
 
 /** How each kind is carved on the board: whoever walks is a pawn. */
-const TOKEN_SHAPES: Readonly<Record<EntityKind, TokenShape>> = {
+export const TOKEN_SHAPES: Readonly<Record<EntityKind, TokenShape>> = {
   party: 'pawn',
   caravan: 'wagon',
   npc: 'pawn',
