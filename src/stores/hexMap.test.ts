@@ -1124,6 +1124,99 @@ describe('players seated at the table', () => {
   })
 })
 
+describe('handing entities to players', () => {
+  it('gives a player another token besides their own', () => {
+    const store = setup()
+    const token = store.seatPlayer('Mira')!
+    const mule = store.addEntity('the mule')!
+
+    store.assignEntity(mule.id, 'mira')
+
+    expect(store.seats).toEqual([
+      { name: 'Mira', entityId: token.id },
+      { name: 'Mira', entityId: mule.id },
+    ])
+    expect(store.seatsFor('MIRA')).toEqual([token.id, mule.id])
+    expect(store.playerOf(mule.id)).toBe('Mira')
+    expect(store.seatPlayer('Mira')?.id).toBe(token.id)
+  })
+
+  it("moves a token from one player's hands to another's, or to nobody's", () => {
+    const store = setup()
+    const token = store.seatPlayer('Mira')!
+
+    store.assignEntity(token.id, 'Tobin')
+    expect(store.seatsFor('Mira')).toEqual([])
+    expect(store.playerOf(token.id)).toBe('Tobin')
+
+    store.assignEntity(token.id, null)
+    expect(store.playerOf(token.id)).toBeNull()
+    expect(store.seats).toEqual([])
+  })
+
+  it("makes a DM entity handed over the player's, there on their map", () => {
+    const store = setup()
+    const caravan = store.addEntity('the smugglers', 'caravan', 'dm')!
+    expect(caravan.hidden).toBe(true)
+
+    store.assignEntity(caravan.id, 'Mira')
+
+    expect(store.entities.find((one) => one.id === caravan.id)).toMatchObject({
+      owner: 'player',
+      hidden: false,
+    })
+  })
+
+  it('hands nothing that is not on the map', () => {
+    const store = setup()
+    store.assignEntity('nobody-here', 'Mira')
+    expect(store.seats).toEqual([])
+  })
+
+  it('cannot be undone, nor undone over by older steps', () => {
+    const store = setup()
+    const mule = store.addEntity('the mule')!
+    store.assignEntity(mule.id, 'Mira')
+
+    expect(store.undo()).toBe(false)
+    expect(store.playerOf(mule.id)).toBe('Mira')
+  })
+
+  it('keeps who plays what with the map', () => {
+    const store = setup()
+    const token = store.seatPlayer('Mira')!
+    const mule = store.addEntity('the mule')!
+    store.assignEntity(mule.id, 'Mira')
+    const saved = store.snapshot
+
+    setActivePinia(createPinia())
+    const fresh = setup()
+    fresh.restore(saved)
+
+    expect(fresh.seatsFor('Mira')).toEqual([token.id, mule.id])
+  })
+
+  it('lets a player order what they play and nothing of anybody else', () => {
+    const store = setup()
+    const mira = store.seatPlayer('Mira')!
+    const tobin = store.seatPlayer('Tobin')!
+    const mule = store.addEntity('the mule')!
+    store.assignEntity(mule.id, 'Mira')
+    store.dmView = false
+    const asMira = store.playerViewer('Mira')
+
+    store.actAs(asMira, () => store.place(mira.id, '1,0'))
+    store.actAs(asMira, () => store.place(mule.id, '2,0'))
+    store.actAs(asMira, () => store.place(tobin.id, '3,0'))
+    store.actAs(asMira, () => store.renameEntity(tobin.id, 'the fool'))
+
+    expect(store.states.get(mira.id)?.at).toBe('1,0')
+    expect(store.states.get(mule.id)?.at).toBe('2,0')
+    expect(store.states.get(tobin.id)?.at ?? null).toBeNull()
+    expect(store.entities.find((one) => one.id === tobin.id)?.name).toBe('Tobin')
+  })
+})
+
 describe("a seated player's browser", () => {
   it('selects nothing but its own token', () => {
     const store = setup()
@@ -1131,7 +1224,7 @@ describe("a seated player's browser", () => {
     const other = store.actAs(DM, () => store.addEntity('the scout'))!
     store.dmView = false
 
-    store.seatedId = token.id
+    store.seatedIds = [token.id]
     store.selectEntity(other.id)
 
     expect(store.selectedId).toBe(token.id)
@@ -1142,7 +1235,7 @@ describe("a seated player's browser", () => {
     const store = setup()
     store.dmView = false
 
-    store.seatedId = 'not-yet-here'
+    store.seatedIds = ['not-yet-here']
     const before = store.snapshot
 
     expect(store.selectedEntity).toBeNull()
@@ -1154,18 +1247,49 @@ describe("a seated player's browser", () => {
     const store = setup()
     const token = store.actAs(DM, () => store.addEntity('Mira'))!
     store.dmView = false
-    store.seatedId = token.id
+    store.seatedIds = [token.id]
 
     store.click({ q: 1, r: 0 })
 
     expect(store.start).toBe('1,0')
   })
 
+  it('switches among its own tokens, and only those', () => {
+    const store = setup()
+    const party = store.actAs(DM, () => store.addEntity('Mira'))!
+    const mule = store.actAs(DM, () => store.addEntity('the mule'))!
+    const other = store.actAs(DM, () => store.addEntity('the scout'))!
+    store.dmView = false
+    store.seatedIds = [party.id, mule.id]
+    expect(store.selectedId).toBe(party.id)
+
+    store.selectEntity(mule.id)
+    expect(store.selectedEntity?.id).toBe(mule.id)
+    store.selectEntity(other.id)
+    expect(store.selectedEntity?.id).toBe(mule.id)
+    expect(store.may('order', other)).toBe(false)
+    expect(store.may('order', mule)).toBe(true)
+  })
+
+  it('falls back to a token it still plays when the DM takes the selected one', () => {
+    const store = setup()
+    const party = store.actAs(DM, () => store.addEntity('Mira'))!
+    const mule = store.actAs(DM, () => store.addEntity('the mule'))!
+    store.dmView = false
+    store.seatedIds = [party.id, mule.id]
+    store.selectEntity(mule.id)
+
+    store.seatedIds = [party.id]
+    expect(store.selectedId).toBe(party.id)
+    store.seatedIds = []
+    expect(store.selectedEntity).toBeNull()
+  })
+
   it('frees the selection again once unseated', () => {
     const store = setup()
     const token = store.addEntity('Mira')!
-    store.seatedId = token.id
-    store.seatedId = null
+    store.seatedIds = [token.id]
+    store.seatedIds = null
 
     store.selectEntity(store.entities[0].id)
 
@@ -3292,6 +3416,14 @@ describe("the store's permissions", () => {
       ['seatPlayer', (s) => s.seatPlayer('Mira')],
     ],
     removeEntity: [['removeEntity', (s, t) => s.removeEntity(t.party)]],
+    assignEntity: [
+      ['assignEntity', (s, t) => s.assignEntity(t.caravan, 'Mira')],
+      [
+        'assignEntity to nobody',
+        (s, t) => s.assignEntity(t.party, null),
+        (s, t) => s.assignEntity(t.party, 'Mira'),
+      ],
+    ],
     entitySettings: [
       ['setPace', (s, t) => s.setPace(t.party, 2)],
       ['setEntitySight', (s, t) => s.setEntitySight(t.party, 9)],

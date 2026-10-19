@@ -1,10 +1,11 @@
 import type { Entity } from '../entities/entity'
 
 /**
- * Who is asking. A player is anyone at the table today; `playerId` is room for
- * the day entities belong to one player rather than to the players as a whole.
+ * Who is asking. A player seated at the table carries the entities they play,
+ * and owns those alone; one without (this browser peeking at the players' view)
+ * stands in for the players as a whole and owns every player entity.
  */
-export type Viewer = { role: 'dm' } | { role: 'player'; playerId?: string }
+export type Viewer = { role: 'dm' } | { role: 'player'; plays?: readonly string[] }
 
 export const DM: Viewer = { role: 'dm' }
 export const PLAYER: Viewer = { role: 'player' }
@@ -20,6 +21,7 @@ export type Action =
   | 'editCharacter'
   | 'addEntity'
   | 'removeEntity'
+  | 'assignEntity'
   | 'entitySettings'
   | 'clock'
   | 'supplies'
@@ -37,7 +39,7 @@ export type Action =
   | 'clearHistory'
   | 'undo'
 
-export type EntityRef = Pick<Entity, 'owner' | 'hidden'>
+export type EntityRef = Pick<Entity, 'id' | 'owner' | 'hidden'>
 
 /** An item changing hands: the entity giving it and the one taking it. */
 export interface Transfer {
@@ -47,10 +49,10 @@ export interface Transfer {
 
 export type Target = EntityRef | Transfer
 
-// Today every player owns every player entity; with player ids this is where
-// one player's party stops being another's.
+// Where one player's party stops being another's. A DM entity is no player's,
+// whoever is seated at it.
 const owns = (viewer: Viewer, entity: EntityRef): boolean =>
-  viewer.role === 'dm' || entity.owner === 'player'
+  viewer.role === 'dm' || (entity.owner === 'player' && (viewer.plays?.includes(entity.id) ?? true))
 
 const isTransfer = (target: Target): target is Transfer => 'from' in target
 
@@ -117,6 +119,7 @@ export const HEX_MAP_RULES = {
   // Giving a player who joins the session their token is adding an entity.
   seatPlayer: 'addEntity',
   removeEntity: 'removeEntity',
+  assignEntity: 'assignEntity',
   setPace: 'entitySettings',
   setEntitySight: 'entitySettings',
   setDarkvision: 'entitySettings',

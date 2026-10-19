@@ -139,7 +139,7 @@ import {
   type Target,
   type Viewer,
 } from '../session/permissions'
-import { seatOf, withSeat, type Seat } from '../session/seats'
+import { assignSeat, seatAt, seatOf, seatsOf, withSeat, type Seat } from '../session/seats'
 import { createHistory, slotOf } from './history'
 
 const NOTHING_IN_SIGHT: PartySight = { radius: 0, visible: new Set(), blocked: new Set() }
@@ -270,11 +270,11 @@ export const useHexMapStore = defineStore('hexMap', () => {
   const seats = shallowRef<readonly Seat[]>([])
 
   /**
-   * The one entity a joined player's browser plays; null everywhere else. While
-   * set, nothing else can be selected, even before the DM's map has brought it.
-   * Never saved: it belongs to the room, not the map.
+   * The entities a joined player's browser plays; null everywhere else. While
+   * set, nothing else can be selected, even before the DM's map has brought
+   * them. Never saved: it belongs to the room, not the map.
    */
-  const seatedId = ref<string | null>(null)
+  const seatedIds = shallowRef<readonly string[] | null>(null)
 
   /** The turn the crawl stands at; nothing moves except by one passing. */
   const turn = ref(0)
@@ -375,8 +375,14 @@ export const useHexMapStore = defineStore('hexMap', () => {
   const showAllPaths = ref(false)
   const dmView = ref(true)
 
-  /** Who this browser is acting as: the view switch decides it. */
-  const viewer = computed<Viewer>(() => (dmView.value ? DM : PLAYER))
+  /**
+   * Who this browser is acting as: the view switch decides it, and a joined
+   * player's browser is that player, owning only what it plays.
+   */
+  const viewer = computed<Viewer>(() => {
+    if (dmView.value) return DM
+    return seatedIds.value === null ? PLAYER : { role: 'player', plays: seatedIds.value }
+  })
 
   // Set only for the length of an actAs call, so an order a player sends in is
   // judged as theirs rather than as whoever is sitting at this browser.
@@ -457,13 +463,22 @@ export const useHexMapStore = defineStore('hexMap', () => {
    * Whoever the map is currently listening to, or nobody at all: a map can be
    * emptied of entities, and an empty map has no orders to give.
    */
-  const selectedEntity = computed<Entity | null>(() =>
-    seatedId.value !== null
-      ? (entities.value.find((one) => one.id === seatedId.value) ?? null)
-      : (entities.value.find((one) => one.id === selectedId.value) ??
-        entities.value.find((one) => dmView.value || !one.hidden) ??
-        null),
-  )
+  const selectedEntity = computed<Entity | null>(() => {
+    const seated = seatedIds.value
+    if (seated !== null) {
+      const own = (one: Entity): boolean => seated.includes(one.id)
+      return (
+        entities.value.find((one) => one.id === selectedId.value && own(one)) ??
+        entities.value.find(own) ??
+        null
+      )
+    }
+    return (
+      entities.value.find((one) => one.id === selectedId.value) ??
+      entities.value.find((one) => dmView.value || !one.hidden) ??
+      null
+    )
+  })
 
   const openingState = (id: string, at: number): EntityState => {
     const origin = origins.value.get(id)
@@ -556,7 +571,7 @@ export const useHexMapStore = defineStore('hexMap', () => {
 
   /** An empty id picks nobody, leaving the DM's clicks free to look the ground over. */
   const selectEntity = (id: string): void => {
-    if (seatedId.value !== null) return
+    if (seatedIds.value !== null && !seatedIds.value.includes(id)) return
     if (id === '' || entities.value.some((one) => one.id === id)) selectedId.value = id
   }
 
@@ -591,6 +606,31 @@ export const useHexMapStore = defineStore('hexMap', () => {
     seats.value = withSeat(seats.value, name, made.id)
     return made
   }
+
+  /**
+   * Hands an entity to a player, out of whoever played it before, or to nobody
+   * with null. A DM entity handed over becomes a player's, there on their map.
+   * Not undoable, and it forgets every step before it: an undo putting back an
+   * older seating or owner would quietly take the entity off its player.
+   */
+  const assignEntity = (id: string, name: string | null): void => {
+    if (!may('assignEntity')) return
+    const entity = entityOf(id)
+    if (!entity) return
+    if (name !== null && entity.owner !== 'player') patch(id, { owner: 'player', hidden: false })
+    seats.value = assignSeat(seats.value, id, name)
+    history.clear()
+  }
+
+  /** Who plays an entity, by the name they were seated under; null for nobody. */
+  const playerOf = (id: string): string | null => seatAt(seats.value, id)?.name ?? null
+
+  /** Every entity a player plays, by the name they joined under. */
+  const seatsFor = (name: string): string[] =>
+    seatsOf(seats.value, name, (id) => entityOf(id) !== undefined)
+
+  /** A player by name, as the store judges what they may do: owning what they play. */
+  const playerViewer = (name: string): Viewer => ({ role: 'player', plays: seatsFor(name) })
 
   /**
    * Takes an entity off the map for good, the last one included: a DM clearing
@@ -2051,12 +2091,12 @@ export const useHexMapStore = defineStore('hexMap', () => {
     { flush: 'sync' },
   )
 
-  // A seated player's every order is for their own token, whatever an undo or
-  // a newly arrived map would make the selection.
+  // A seated player's every order is for a token of their own, whatever an
+  // undo or a newly arrived map would make the selection.
   watch(
-    [seatedId, selectedId],
+    [seatedIds, selectedId],
     ([seated, selected]) => {
-      if (seated !== null && selected !== seated) selectedId.value = seated
+      if (seated !== null && !seated.includes(selected)) selectedId.value = seated[0] ?? ''
     },
     { flush: 'sync' },
   )
@@ -2084,8 +2124,12 @@ export const useHexMapStore = defineStore('hexMap', () => {
     selectEntity,
     addEntity: history.track(addEntity),
     seats,
-    seatedId,
+    seatedIds,
     seatPlayer: history.track(seatPlayer),
+    assignEntity,
+    playerOf,
+    seatsFor,
+    playerViewer,
     removeEntity: history.track(removeEntity),
     renameEntity: history.track(renameEntity),
     recolorEntity: history.track(recolorEntity, (id) => `color:${id}`),

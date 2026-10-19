@@ -1,7 +1,7 @@
 import { parseChunk, type Chunk } from './wireChunks'
 
 /** Bumped when a message changes shape, so an older tab is turned away rather than misread. */
-export const PROTOCOL_VERSION = 3
+export const PROTOCOL_VERSION = 4
 
 export const MAX_NAME_LENGTH = 40
 
@@ -14,8 +14,11 @@ export type SessionMessage =
   | { type: 'ping'; at: number }
   | { type: 'pong'; at: number }
   | { type: 'welcome' }
-  /** The token that is the guest's to play, sent once it is in. */
-  | { type: 'seat'; entityId: string }
+  /**
+   * The tokens that are the guest's to play, sent once it is in and again
+   * whenever the DM hands it more or takes some away.
+   */
+  | { type: 'seat'; entityIds: readonly string[] }
   | { type: 'pending' }
   | { type: 'refused'; reason: RefusalReason }
   | { type: 'kicked' }
@@ -71,9 +74,10 @@ const parseMessage = (msg: unknown): SessionMessage | null => {
     case 'resync':
       return hasExactly(msg, ['type']) ? { type: msg.type } : null
     case 'seat': {
-      const { entityId } = msg
-      if (!hasExactly(msg, ['type', 'entityId']) || typeof entityId !== 'string') return null
-      return entityId === '' ? null : { type: 'seat', entityId }
+      const { entityIds } = msg
+      if (!hasExactly(msg, ['type', 'entityIds']) || !Array.isArray(entityIds)) return null
+      if (!entityIds.every((id) => typeof id === 'string' && id !== '')) return null
+      return { type: 'seat', entityIds: [...(entityIds as string[])] }
     }
     case 'state': {
       const { seq } = msg

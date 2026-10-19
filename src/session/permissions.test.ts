@@ -10,12 +10,13 @@ import {
   PLAYER,
   type Action,
   type EntityRef,
+  type Viewer,
 } from './permissions'
 
-const playerParty: EntityRef = { owner: 'player', hidden: false }
-const hiddenPlayerParty: EntityRef = { owner: 'player', hidden: true }
-const dmCaravan: EntityRef = { owner: 'dm', hidden: false }
-const hiddenDmCaravan: EntityRef = { owner: 'dm', hidden: true }
+const playerParty: EntityRef = { id: 'party', owner: 'player', hidden: false }
+const hiddenPlayerParty: EntityRef = { id: 'scouts', owner: 'player', hidden: true }
+const dmCaravan: EntityRef = { id: 'caravan', owner: 'dm', hidden: false }
+const hiddenDmCaravan: EntityRef = { id: 'smugglers', owner: 'dm', hidden: true }
 
 const ENTITY_ACTIONS: readonly Action[] = [
   'order',
@@ -30,6 +31,7 @@ const ENTITY_ACTIONS: readonly Action[] = [
 const DM_ONLY: readonly Action[] = [
   'addEntity',
   'removeEntity',
+  'assignEntity',
   'entitySettings',
   'clock',
   'supplies',
@@ -112,12 +114,36 @@ describe('DM-only actions', () => {
     expect(allowed(PLAYER, action, playerParty)).toBe(false)
     expect(allowed(PLAYER, action, dmCaravan)).toBe(false)
   })
+})
 
-  it('a specific player is held to the same rules', () => {
-    const one = { role: 'player', playerId: 'p1' } as const
-    expect(allowed(one, 'order', playerParty)).toBe(true)
-    expect(allowed(one, 'order', dmCaravan)).toBe(false)
-    expect(allowed(one, 'clock')).toBe(false)
+describe('a seated player', () => {
+  const mira: Viewer = { role: 'player', plays: ['party', 'caravan'] }
+  const nobody: Viewer = { role: 'player', plays: [] }
+
+  it.each(ENTITY_ACTIONS)('%s: only on the player entities they play', (action) => {
+    expect(allowed(mira, action, playerParty)).toBe(true)
+    expect(allowed(mira, action, hiddenPlayerParty)).toBe(false)
+    expect(allowed(nobody, action, playerParty)).toBe(false)
+  })
+
+  it('owns no DM entity, even one seated at them', () => {
+    expect(allowed(mira, 'order', dmCaravan)).toBe(false)
+  })
+
+  it('hands items across only from or to what they play', () => {
+    const other: EntityRef = { id: 'other', owner: 'player', hidden: false }
+    expect(allowed(mira, 'transferItem', { from: playerParty, to: other })).toBe(true)
+    expect(allowed(mira, 'transferItem', { from: other, to: dmCaravan })).toBe(false)
+    expect(allowed(nobody, 'transferItem', { from: playerParty, to: other })).toBe(false)
+  })
+
+  it("never reaches into another player's hidden party", () => {
+    expect(allowed(mira, 'transferItem', { from: playerParty, to: hiddenPlayerParty })).toBe(false)
+  })
+
+  it('is held to the DM-only rules all the same', () => {
+    expect(allowed(mira, 'clock')).toBe(false)
+    expect(allowed(mira, 'assignEntity', playerParty)).toBe(false)
   })
 })
 
@@ -141,6 +167,9 @@ const HEX_MAP_FREE = new Set([
   'inventoryPartners',
   'suppliesOf',
   'abilitiesOf',
+  'playerOf',
+  'seatsFor',
+  'playerViewer',
   'resourcesOn',
   'encounterTable',
   // The check itself, and running the guarded functions as somebody else.

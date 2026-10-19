@@ -196,9 +196,21 @@ export const useSessionStore = defineStore('session', () => {
   const players = computed(() => playersOf(door.value))
   const pending = computed(() => askingOf(door.value))
 
-  // A guest's browser plays only the token the host gave it, and only while in the room.
+  // A guest's browser plays only the tokens the host gave it, and only while in the room.
   const unseat = (): void => {
-    useHexMapStore().seatedId = null
+    useHexMapStore().seatedIds = null
+  }
+
+  // What each connection was last told it plays, so a guest hears of a change
+  // to its own tokens once, and nothing of anybody else's.
+  const told = new Map<string, string>()
+
+  const tellSeats = (name: string, peerId: string): void => {
+    const entityIds = useHexMapStore().seatsFor(name)
+    const said = entityIds.join(' ')
+    if (told.get(peerId) === said) return
+    told.set(peerId, said)
+    session?.send({ type: 'seat', entityIds }, peerId)
   }
 
   const stopSync = (): void => {
@@ -264,6 +276,7 @@ export const useSessionStore = defineStore('session', () => {
     reason.value = null
     door.value = room.openRoom()
     admission.value = null
+    told.clear()
   }
 
   const fail = (why: SessionReason): void => {
@@ -292,8 +305,8 @@ export const useSessionStore = defineStore('session', () => {
     const name = key === undefined ? undefined : door.value.known.get(key)
     if (name === undefined) return
     const map = useHexMapStore()
-    const token = map.actAs(DM, () => map.seatPlayer(name))
-    if (token) session?.send({ type: 'seat', entityId: token.id }, peerId)
+    told.delete(peerId)
+    if (map.actAs(DM, () => map.seatPlayer(name))) tellSeats(name, peerId)
   }
 
   // Made after the seat, so the token just handed over is on the map it is sent.
@@ -301,6 +314,16 @@ export const useSessionStore = defineStore('session', () => {
     seat(peerId)
     if (project) stateHost?.sendSnapshot(peerId, project())
   }
+
+  // The DM handing a token to a player, or taking one back, reaches the
+  // players it touches straight away.
+  watch(
+    () => useHexMapStore().seats,
+    () => {
+      if (role.value !== 'host') return
+      for (const { name, peerId } of players.value) if (peerId !== null) tellSeats(name, peerId)
+    },
+  )
 
   /** Answers a guest, and shows a refused one the door once the answer has gone. */
   const reply = (decision: room.Decision, to: string): void => {
@@ -340,7 +363,7 @@ export const useSessionStore = defineStore('session', () => {
         stopRetrying()
         break
       case 'seat':
-        useHexMapStore().seatedId = message.entityId
+        useHexMapStore().seatedIds = message.entityIds
         break
       case 'refused':
         // Back before the host has noticed the old connection go, the name

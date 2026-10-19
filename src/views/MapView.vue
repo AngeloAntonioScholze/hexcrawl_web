@@ -183,6 +183,23 @@ const onRecolor = (event: Event): void => {
   if (one) store.recolorEntity(one.id, (event.target as HTMLInputElement).value)
 }
 
+// Whoever plays the selected entity, and the players it could be handed to:
+// everyone let in this session, and its player from before even while away.
+const playedBy = computed(() =>
+  store.selectedEntity ? store.playerOf(store.selectedEntity.id) : null,
+)
+const playerNames = computed(() => {
+  const names = session.players.map((one) => one.name)
+  return playedBy.value === null || names.includes(playedBy.value)
+    ? names
+    : [playedBy.value, ...names]
+})
+
+const onAssign = (event: Event): void => {
+  const name = (event.target as HTMLSelectElement).value
+  if (store.selectedEntity) store.assignEntity(store.selectedEntity.id, name || null)
+}
+
 /** Riders are listed under their caravan, not among those walking on their own. */
 const walking = computed(() => store.shownEntities.filter((one) => !store.carrierOf(one.id)))
 
@@ -552,6 +569,16 @@ const olderTurns = computed(() => Math.max(0, store.adventureLog.length - TURNS_
                 store.selectedEntity ? `remove ${store.selectedEntity.name}` : 'nobody on the map'
               }}
             </button>
+            <label
+              v-if="store.may('assignEntity') && store.selectedEntity && playerNames.length"
+              class="row"
+            >
+              <span>played by</span>
+              <select :value="playedBy ?? ''" @change="onAssign">
+                <option value="">nobody</option>
+                <option v-for="name in playerNames" :key="name" :value="name">{{ name }}</option>
+              </select>
+            </label>
           </div>
 
           <label v-if="store.may('entitySettings')" class="control">

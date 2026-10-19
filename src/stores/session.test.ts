@@ -1,5 +1,6 @@
 import { createPinia, getActivePinia, setActivePinia, type Pinia } from 'pinia'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
+import { nextTick } from 'vue'
 import { parseEnvelope, wrap, type SessionMessage } from '../session/messages'
 import type { Session, SessionHandlers } from '../session/peer'
 import { projectForPlayers } from '../session/projection'
@@ -190,9 +191,38 @@ describe('the session store', () => {
     expect(token).toMatchObject({ name: 'Tobin', owner: 'player', kind: 'party' })
     expect(map.states.get(token.id)?.at ?? null).toBeNull()
     expect(opened.sent.at(-1)).toEqual({
-      message: { type: 'seat', entityId: token.id },
+      message: { type: 'seat', entityIds: [token.id] },
       to: 'guest-1',
     })
+  })
+
+  it('tells a connected player at once of a token the DM hands them, and of one taken back', async () => {
+    const session = useSessionStore()
+    const map = useHexMapStore()
+    await session.host('Mara')
+    opened.handlers?.message?.({ type: 'hello', name: 'Tobin' }, 'guest-1')
+    opened.handlers?.message?.({ type: 'hello', name: 'Ilse' }, 'guest-2')
+    const token = map.entities.at(-2)!
+    const mule = map.addEntity('the mule')!
+    opened.sent = []
+
+    // The map itself goes out too; only the seat messages are of interest here.
+    const seats = () => opened.sent.filter(({ message }) => message.type === 'seat')
+
+    map.assignEntity(mule.id, 'Tobin')
+    await nextTick()
+    expect(seats()).toEqual([
+      { message: { type: 'seat', entityIds: [token.id, mule.id] }, to: 'guest-1' },
+    ])
+
+    map.assignEntity(mule.id, null)
+    await nextTick()
+    expect(seats().at(-1)).toEqual({
+      message: { type: 'seat', entityIds: [token.id] },
+      to: 'guest-1',
+    })
+    expect(session.players.map((one) => one.name)).toEqual(['Tobin', 'Ilse'])
+    expect(seats().some(({ to }) => to === 'guest-2')).toBe(false)
   })
 
   it('hands a player coming back by name the token they had', async () => {
@@ -369,12 +399,12 @@ describe('the session store', () => {
     opened.handlers?.peer?.('hexcrawl-abcdef', true)
     opened.handlers?.message?.({ type: 'welcome' }, 'hexcrawl-abcdef')
 
-    opened.handlers?.message?.({ type: 'seat', entityId: 'e-tobin' }, 'hexcrawl-abcdef')
-    expect(map.seatedId).toBe('e-tobin')
+    opened.handlers?.message?.({ type: 'seat', entityIds: ['e-tobin'] }, 'hexcrawl-abcdef')
+    expect(map.seatedIds).toEqual(['e-tobin'])
     expect(map.selectedId).toBe('e-tobin')
 
     session.leave()
-    expect(map.seatedId).toBeNull()
+    expect(map.seatedIds).toBeNull()
   })
 
   it('unseats a guest the DM removes', async () => {
@@ -382,11 +412,11 @@ describe('the session store', () => {
     const map = useHexMapStore()
     await session.join('Tobin', 'abcdef')
     opened.handlers?.peer?.('hexcrawl-abcdef', true)
-    opened.handlers?.message?.({ type: 'seat', entityId: 'e-tobin' }, 'hexcrawl-abcdef')
+    opened.handlers?.message?.({ type: 'seat', entityIds: ['e-tobin'] }, 'hexcrawl-abcdef')
 
     opened.handlers?.message?.({ type: 'kicked' }, 'hexcrawl-abcdef')
     expect(session.status).toBe('error')
-    expect(map.seatedId).toBeNull()
+    expect(map.seatedIds).toBeNull()
   })
 
   it('tells a refused guest why, not that the connection was lost', async () => {
@@ -461,7 +491,7 @@ describe('drops and resumes', () => {
     opened.handlers?.peer?.(HOST, true)
     opened.handlers?.status?.('open')
     opened.handlers?.message?.({ type: 'welcome' }, HOST)
-    opened.handlers?.message?.({ type: 'seat', entityId: 'e-tobin' }, HOST)
+    opened.handlers?.message?.({ type: 'seat', entityIds: ['e-tobin'] }, HOST)
     return session
   }
 
@@ -478,7 +508,7 @@ describe('drops and resumes', () => {
     expect(session.status).toBe('connecting')
     expect(session.error).toBeNull()
     expect(session.role).toBe('guest')
-    expect(useHexMapStore().seatedId).toBe('e-tobin')
+    expect(useHexMapStore().seatedIds).toEqual(['e-tobin'])
     expect(opened.joins).toEqual(['abcdef'])
 
     await vi.advanceTimersByTimeAsync(2999)
@@ -497,11 +527,11 @@ describe('drops and resumes', () => {
     opened.handlers?.status?.('open')
     expect(opened.sent).toEqual([{ message: { type: 'hello', name: 'Tobin' }, to: HOST }])
     opened.handlers?.message?.({ type: 'welcome' }, HOST)
-    opened.handlers?.message?.({ type: 'seat', entityId: 'e-tobin' }, HOST)
+    opened.handlers?.message?.({ type: 'seat', entityIds: ['e-tobin'] }, HOST)
 
     expect(session.reconnecting).toBe(false)
     expect(session.admission).toBe('admitted')
-    expect(useHexMapStore().seatedId).toBe('e-tobin')
+    expect(useHexMapStore().seatedIds).toEqual(['e-tobin'])
     await vi.advanceTimersByTimeAsync(30_000)
     expect(opened.joins).toHaveLength(2)
   })
@@ -518,7 +548,7 @@ describe('drops and resumes', () => {
     expect(session.reconnecting).toBe(false)
     expect(session.status).toBe('error')
     expect(session.error).toBe("the DM left and didn't come back")
-    expect(useHexMapStore().seatedId).toBeNull()
+    expect(useHexMapStore().seatedIds).toBeNull()
     // The first join, then one every three seconds for ten minutes.
     expect(opened.joins).toHaveLength(201)
   })
