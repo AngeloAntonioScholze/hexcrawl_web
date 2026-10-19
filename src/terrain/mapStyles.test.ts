@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest'
 import { distance, hexKey, neighbors, spiral, type Axial, type HexKey } from '../hex/coords'
-import { createLayout } from '../hex/layout'
+import { createLayout, hexToWorld } from '../hex/layout'
 import { createTerrainField } from './field'
 import { createShape, MAP_STYLES, type MapStyle } from './mapStyles'
 import { createTerrain } from './terrain'
@@ -52,6 +52,86 @@ function survey(style: MapStyle, seed: number): Survey {
       .length,
   }
 }
+
+interface Ranges {
+  /** Mean hexes from a mountain to the nearest ground below the mountains. */
+  depth: number
+  /** Long axis over short axis of each mountain mass, weighted by its size. */
+  elongation: number
+}
+
+/**
+ * How the mountains lie, settled slopes and all. A chain is thin, so few of its
+ * hexes stand far from its foot, and it is long, so its spread runs much
+ * further one way than the other; a blob is neither.
+ */
+function surveyRanges(style: MapStyle, seed: number): Ranges {
+  const field = createTerrainField(layout, { seed, radius: RADIUS, style })
+  const high = new Map<HexKey, Axial>()
+  for (const hex of hexes) if (field.at(hex)!.level >= 3) high.set(hexKey(hex), hex)
+
+  const depth = new Map<HexKey, number>()
+  let frontier = [...high.values()].filter((hex) =>
+    neighbors(hex).some((next) => !high.has(hexKey(next))),
+  )
+  for (const hex of frontier) depth.set(hexKey(hex), 1)
+  for (let step = 2; frontier.length > 0; step++) {
+    const next: Axial[] = []
+    for (const hex of frontier) {
+      for (const near of neighbors(hex)) {
+        const key = hexKey(near)
+        if (high.has(key) && !depth.has(key)) {
+          depth.set(key, step)
+          next.push(near)
+        }
+      }
+    }
+    frontier = next
+  }
+
+  const seen = new Set<HexKey>()
+  let stretch = 0
+  let counted = 0
+  for (const start of high.values()) {
+    if (seen.has(hexKey(start))) continue
+    seen.add(hexKey(start))
+    const mass = [start]
+    for (let i = 0; i < mass.length; i++) {
+      for (const near of neighbors(mass[i])) {
+        const key = hexKey(near)
+        if (high.has(key) && !seen.has(key)) {
+          seen.add(key)
+          mass.push(near)
+        }
+      }
+    }
+    // A few hexes have no shape worth measuring.
+    if (mass.length < 8) continue
+    const points = mass.map((hex) => hexToWorld(layout, hex))
+    const mx = points.reduce((sum, p) => sum + p.x, 0) / points.length
+    const mz = points.reduce((sum, p) => sum + p.z, 0) / points.length
+    let xx = 0
+    let zz = 0
+    let xz = 0
+    for (const p of points) {
+      xx += (p.x - mx) ** 2
+      zz += (p.z - mz) ** 2
+      xz += (p.x - mx) * (p.z - mz)
+    }
+    const half = (xx + zz) / 2
+    const spread = Math.sqrt(half * half - (xx * zz - xz * xz))
+    stretch += Math.sqrt((half + spread) / (half - spread)) * mass.length
+    counted += mass.length
+  }
+
+  return {
+    depth: [...depth.values()].reduce((sum, each) => sum + each, 0) / high.size,
+    elongation: stretch / counted,
+  }
+}
+
+const mean = (values: number[]): number =>
+  values.reduce((sum, each) => sum + each, 0) / values.length
 
 /** Landmasses holding at least a twentieth of the land: the ones a player would call one. */
 const bigMasses = (found: Survey): number => found.masses.filter((share) => share >= 0.05).length
@@ -119,5 +199,14 @@ describe('map styles', () => {
       expect(found.land).toBeGreaterThan(0.05)
       expect(found.land).toBeLessThan(0.3)
     }
+  })
+
+  // Before the ranges, continents and pangaea heaped their mountains into
+  // blobs: a mean depth of 1.99 and 2.17 hexes, and an elongation of 1.74 and
+  // 2.02, over these seeds.
+  it.each(['continents', 'pangaea'] as const)('raises the mountains of %s in chains', (style) => {
+    const found = SEEDS.map((seed) => surveyRanges(style, seed))
+    expect(mean(found.map((each) => each.depth))).toBeLessThan(1.8)
+    expect(mean(found.map((each) => each.elongation))).toBeGreaterThan(1.95)
   })
 })

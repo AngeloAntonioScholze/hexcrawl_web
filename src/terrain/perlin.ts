@@ -17,6 +17,12 @@ export const mulberry32 = (seed: number): (() => number) => {
   }
 }
 
+/** Eases from 0 at edge0 to 1 at edge1, flat at both ends. */
+export const smoothstep = (edge0: number, edge1: number, value: number): number => {
+  const t = Math.min(1, Math.max(0, (value - edge0) / (edge1 - edge0)))
+  return t * t * (3 - 2 * t)
+}
+
 const fade = (t: number): number => t * t * t * (t * (t * 6 - 15) + 10)
 
 const lerp = (a: number, b: number, t: number): number => a + (b - a) * t

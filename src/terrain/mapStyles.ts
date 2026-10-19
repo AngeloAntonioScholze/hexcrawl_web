@@ -1,4 +1,5 @@
-import { createFbm } from './perlin'
+import { createFbm, smoothstep } from './perlin'
+import { createRanges } from './ranges'
 
 export type MapStyle = 'classic' | 'continents' | 'pangaea' | 'archipelago'
 
@@ -24,22 +25,23 @@ export interface ShapeOptions {
 // land is never just the ground noise again.
 const SHAPE_SEED = 7919
 
-const smoothstep = (edge0: number, edge1: number, value: number): number => {
-  const t = Math.min(1, Math.max(0, (value - edge0) / (edge1 - edge0)))
-  return t * t * (3 - 2 * t)
-}
-
 /**
- * The mask a style lays over the ground noise. Classic hands the noise back
- * untouched, which is what keeps every map made before styles on its ground.
- * The others measure from the rim of the world, so a small world and a huge
- * one get the same few continents rather than the huge one getting more.
+ * The mask a style lays over the ground noise, with mountain ranges raised
+ * across the land it leaves. Classic hands the noise back untouched, which is
+ * what keeps every map made before styles on its ground. The others measure
+ * from the rim of the world, so a small world and a huge one get the same few
+ * continents rather than the huge one getting more.
  */
 export function createShape(style: MapStyle, options: ShapeOptions): Shape {
-  const { rim } = options
   // A world with no rim has nothing for a shape to be measured against.
-  if (style === 'classic' || !Number.isFinite(rim)) return (raw) => raw
+  if (style === 'classic' || !Number.isFinite(options.rim)) return (raw) => raw
+  const mask = createMask(style, options)
+  const ranges = createRanges(options)
+  return (raw, x, z) => ranges(mask(raw, x, z), x, z)
+}
 
+function createMask(style: Exclude<MapStyle, 'classic'>, options: ShapeOptions): Shape {
+  const { rim } = options
   const shape = createFbm(options.seed + SHAPE_SEED, { octaves: 3 })
   const rifts = createFbm(options.seed + SHAPE_SEED * 2, { octaves: 2 })
   // How far out a point stands, 0 in the middle and 1 at the rim.
