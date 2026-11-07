@@ -61,7 +61,7 @@ Use `bun run test`, not `bun test` — the latter runs Bun's own test runner ins
 
 ## Development
 
-Issue tracking uses [beads](https://github.com/gastownhall/beads), kept **local only** — no Dolt remote, `.beads/issues.jsonl` is a passive export.
+Issue tracking uses [beads](https://github.com/gastownhall/beads) in the parent projects workspace (label `repo:hexcrawl_web`), kept **local only**. Agent context lives in [`PROJECT.md`](PROJECT.md).
 
 ```bash
 bd ready       # available work
