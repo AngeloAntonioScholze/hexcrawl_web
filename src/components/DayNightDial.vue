@@ -149,14 +149,13 @@ const dome = [
 </template>
 
 <style scoped>
-/* Centred, unless that would put it over the world and entities panels: their
-   open row runs 45.75rem from the left edge (MapView), so the centre keeps
-   that plus a gap and half the dial clear of it. On a window too narrow for
-   both, it stops short of the view toggle instead and slides under the panels. */
+/* Centred, unless that would put it over the panel column: the centre keeps
+   the column's reserve (MapView), a gap and half the dial clear of it. It
+   never comes closer to the right edge than the view toggle allows. */
 .dial {
   position: absolute;
   top: 1rem;
-  left: min(max(50%, 54.6rem), 100% - 15.1rem);
+  left: min(max(50%, var(--dock-reserve) + 0.75rem + 8.1rem), 100% - 15.1rem);
   translate: -50% 0;
   pointer-events: none;
   text-align: center;
@@ -305,11 +304,11 @@ button:disabled {
   clip-path: inset(50%);
 }
 
-/* On a phone the collapsed panels stack down the left as far as the middle of
-   the screen, so the dial drops below them rather than squeezing in beside. */
+/* On a phone it sits right under the folded panel headers (MapView sets
+   --dial-top); an open panel covers it. */
 @media (max-width: 720px) {
   .dial {
-    top: 9.25rem;
+    top: var(--dial-top);
     left: 50%;
   }
 

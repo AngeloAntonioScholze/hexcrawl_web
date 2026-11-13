@@ -17,7 +17,7 @@ import { TERRAIN_DEFAULTS, type TerrainId, type TerrainTile } from '../terrain/t
 import { TURNS_PER_PHASE } from '../time/clock'
 import { DM, PLAYER } from '../session/permissions'
 import { fieldFromTiles } from '../terrain/field'
-import { BRUSH_LIMITS, MAX_SIGHT, TERRAIN_LIMITS, useHexMapStore } from './hexMap'
+import { BRUSH_LIMITS, MAX_SIGHT, TERRAIN_LIMITS, useHexMapStore, type SidePanel } from './hexMap'
 
 // The number is the mechanical level; sight and climbs read that, and the
 // rendered height only trails along behind it.
@@ -2806,56 +2806,88 @@ describe('resources', () => {
 })
 
 describe('the side panels', () => {
-  it('lets all four stay open on a wide window', () => {
-    const store = useHexMapStore()
-    store.setPanelOpen('world', true, false)
-    store.setPanelOpen('entities', true, false)
-    store.setPanelOpen('caravan', true, false)
-    store.setPanelOpen('details', true, false)
-    expect(store.panelsOpen).toEqual({ world: true, entities: true, caravan: true, details: true })
+  const only = (which: SidePanel | null): Record<SidePanel, boolean> => ({
+    world: which === 'world',
+    entities: which === 'entities',
+    caravan: which === 'caravan',
+    details: which === 'details',
   })
 
-  it('opening one on a narrow window collapses the others', () => {
+  it('opening each panel in turn leaves only that one open', () => {
     const store = useHexMapStore()
-    store.setPanelOpen('world', true, true)
-    expect(store.panelsOpen).toEqual({
-      world: true,
-      entities: false,
-      caravan: false,
-      details: false,
-    })
-    store.setPanelOpen('details', true, true)
-    expect(store.panelsOpen).toEqual({
-      world: false,
-      entities: false,
-      caravan: false,
-      details: true,
-    })
-    store.setPanelOpen('caravan', true, true)
-    expect(store.panelsOpen).toEqual({
-      world: false,
-      entities: false,
-      caravan: true,
-      details: false,
-    })
+    for (const which of ['world', 'entities', 'caravan', 'details'] as const) {
+      store.setPanelOpen(which, true)
+      expect(store.panelsOpen).toEqual(only(which))
+    }
   })
 
-  it('collapsing one on a narrow window leaves the others alone', () => {
+  it('closing the open panel leaves none open', () => {
     const store = useHexMapStore()
-    store.setPanelOpen('details', true, true)
-    store.setPanelOpen('details', false, true)
-    expect(store.panelsOpen).toEqual({
-      world: false,
-      entities: false,
-      caravan: false,
-      details: false,
-    })
+    store.setPanelOpen('details', true)
+    store.setPanelOpen('details', false)
+    expect(store.panelsOpen).toEqual(only(null))
   })
 
-  it('collapsing one on a wide window leaves the others open', () => {
+  it('closing a panel that is not open changes nothing', () => {
     const store = useHexMapStore()
-    store.setPanelOpen('entities', false, false)
-    expect(store.panelsOpen).toEqual({ world: true, entities: false, caravan: true, details: true })
+    store.setPanelOpen('entities', true)
+    store.setPanelOpen('world', false)
+    expect(store.panelsOpen).toEqual(only('entities'))
+  })
+
+  it('gives back the panel an automatic open folded away', () => {
+    const store = useHexMapStore()
+    store.setPanelOpen('world', true)
+    store.revealPanel('details')
+    expect(store.panelsOpen).toEqual(only('details'))
+    store.panelGone('details', 'entities')
+    expect(store.panelsOpen).toEqual(only('world'))
+  })
+
+  it('forgets the folded panel once the user picks one', () => {
+    const store = useHexMapStore()
+    store.setPanelOpen('world', true)
+    store.revealPanel('details')
+    store.setPanelOpen('entities', true)
+    store.setPanelOpen('details', true)
+    store.panelGone('details', 'entities')
+    expect(store.panelsOpen).toEqual(only('entities'))
+  })
+
+  it('falls back when nothing was folded away', () => {
+    const store = useHexMapStore()
+    store.setPanelOpen('details', true)
+    store.panelGone('details', 'entities')
+    expect(store.panelsOpen).toEqual(only('entities'))
+
+    store.setPanelOpen('details', true)
+    store.panelGone('details', null)
+    expect(store.panelsOpen).toEqual(only(null))
+  })
+
+  it('a panel that was not open going changes nothing', () => {
+    const store = useHexMapStore()
+    store.setPanelOpen('world', true)
+    store.panelGone('caravan', 'entities')
+    expect(store.panelsOpen).toEqual(only('world'))
+  })
+
+  it('does not reveal a panel already open, so its fold is kept', () => {
+    const store = useHexMapStore()
+    store.setPanelOpen('world', true)
+    store.revealPanel('details')
+    store.revealPanel('details')
+    store.panelGone('details', 'entities')
+    expect(store.panelsOpen).toEqual(only('world'))
+  })
+
+  it('forgets a folded panel that goes before the revealed one does', () => {
+    const store = useHexMapStore()
+    store.setPanelOpen('world', true)
+    store.revealPanel('details')
+    store.panelGone('world', 'entities')
+    store.panelGone('details', 'entities')
+    expect(store.panelsOpen).toEqual(only('entities'))
   })
 })
 

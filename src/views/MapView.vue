@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed, ref, watchEffect } from 'vue'
+import { computed, nextTick, ref, watch, watchEffect } from 'vue'
 import CaravanPanel from '../components/CaravanPanel.vue'
 import DayNightDial from '../components/DayNightDial.vue'
 import DmToolbar from '../components/DmToolbar.vue'
@@ -27,6 +27,7 @@ import {
   TERRAIN_LIMITS,
   WORLD_SIZES,
   useHexMapStore,
+  type SidePanel,
   type WorldSize,
 } from '../stores/hexMap'
 import { useMapLibraryStore } from '../stores/mapLibrary'
@@ -41,20 +42,17 @@ const library = useMapLibraryStore()
 const { veiled } = useStage()
 useUndoKeys()
 
-/** Narrower than this and a panel would be most of the window. */
-const NARROW = 720
+/** At most this wide a panel open would be the whole window: the phone layout. */
+const PHONE = 720
 
-// View state, not map state: collapsing a panel hands the map back the room
-// and the pointer, which a scroll container has to hold on to while it is open.
-// A small window opens collapsed, so a phone gets the map first.
-const narrow = (): boolean => window.innerWidth < NARROW
+const phone = (): boolean => window.innerWidth <= PHONE
 
-store.setPanelOpen('world', !narrow(), narrow())
-store.setPanelOpen('entities', !narrow(), narrow())
+// View state, not map state. A phone opens with every panel folded, so it gets
+// the map first.
+if (!phone()) store.setPanelOpen('entities', true)
 const worldCollapsed = computed(() => !store.panelsOpen.world)
 const entitiesCollapsed = computed(() => !store.panelsOpen.entities)
-const toggleWorld = (): void => store.setPanelOpen('world', worldCollapsed.value, narrow())
-const toggleEntities = (): void => store.setPanelOpen('entities', entitiesCollapsed.value, narrow())
+const toggle = (which: SidePanel): void => store.setPanelOpen(which, !store.panelsOpen[which])
 
 const onSight = (event: Event): void => {
   store.setEntitySight(store.selectedId, Number((event.target as HTMLInputElement).value))
@@ -167,6 +165,41 @@ const shapesWorld = computed(
   () => store.may('terrain') || store.may('maps') || store.may('resources'),
 )
 
+// The players' view reads what it shows from their projection, as their map
+// does; their orders still go to the store, which judges them.
+const player = usePlayerView()
+const forPlayers = computed(() => !store.dmView)
+const shownCaravan = computed(() =>
+  forPlayers.value ? player.shownCaravan.value : store.shownCaravan,
+)
+
+/** Which panels the column renders, in the column's order. */
+const rendered = computed<Record<SidePanel, boolean>>(() => ({
+  world: shapesWorld.value,
+  entities: true,
+  caravan: !!shownCaravan.value,
+  details: store.may('notes') && store.selectedHex !== null,
+}))
+const dockRows = computed(() => Object.values(rendered.value).filter(Boolean).length)
+
+// Runs before the DOM drops the panel, so focus inside it can still be seen.
+// A desktop never ends up with every panel folded just because one went.
+watch(rendered, (now, before) => {
+  for (const which of Object.keys(now) as SidePanel[]) {
+    if (!before[which] || now[which]) continue
+    const head = document.getElementById(`panel-${which}-head`)
+    const hadFocus = !!head?.closest('aside')?.contains(document.activeElement)
+    store.panelGone(which, phone() ? null : 'entities')
+    if (!hadFocus) continue
+    void nextTick(() => {
+      const open = (Object.keys(store.panelsOpen) as SidePanel[]).find(
+        (one) => store.panelsOpen[one],
+      )
+      document.getElementById(`panel-${open ?? 'entities'}-head`)?.focus()
+    })
+  }
+})
+
 /** Whether the selected entity takes orders from whoever is at this browser. */
 const orderable = computed(
   () => store.selectedEntity !== null && store.may('order', store.selectedEntity),
@@ -201,11 +234,6 @@ const onAssign = (event: Event): void => {
   if (store.selectedEntity) store.assignEntity(store.selectedEntity.id, name || null)
 }
 
-// The players' view reads what it shows from their projection, as their map
-// does; their orders still go to the store, which judges them.
-const player = usePlayerView()
-const forPlayers = computed(() => !store.dmView)
-
 const shownTurn = computed(() => (forPlayers.value ? player.projection.value.turn : store.turn))
 const shownClock = computed(() => (forPlayers.value ? player.projection.value.clock : store.clock))
 const standing = computed(() => (forPlayers.value ? player.start.value : store.start))
@@ -236,8 +264,7 @@ const carrierName = computed(() => {
 // A caravan's list sits in the caravan panel already; twice over is once too many.
 const ownInventory = computed(() => {
   const selected = store.selectedEntity
-  const caravan = forPlayers.value ? player.shownCaravan.value : store.shownCaravan
-  return selected && carriesInventory(selected.kind) && caravan?.id !== selected.id
+  return selected && carriesInventory(selected.kind) && shownCaravan.value?.id !== selected.id
     ? selected
     : null
 })
@@ -284,7 +311,7 @@ const olderTurns = computed(() => Math.max(0, adventureLog.value.length - TURNS_
 </script>
 
 <template>
-  <main>
+  <main :style="{ '--dock-rows': dockRows }">
     <HexCanvas />
     <!-- Nothing but the fogged map behind the enter screen: no tools to reach
          past it, and nothing to give the map away before anyone is in. -->
@@ -293,25 +320,33 @@ const olderTurns = computed(() => Math.max(0, adventureLog.value.length - TURNS_
       <ViewToggle v-if="debug" />
       <SessionBar v-if="session.role" :class="{ beside: debug }" />
       <DmToolbar />
-      <HexDetails />
     </template>
     <EnterScreen />
     <div v-if="!veiled" class="panels">
       <aside v-if="shapesWorld" class="panel" :class="{ collapsed: worldCollapsed }">
         <header>
-          <h1>world</h1>
-          <button
-            type="button"
-            class="toggle"
-            :aria-expanded="!worldCollapsed"
-            :aria-label="worldCollapsed ? 'open the world panel' : 'collapse the world panel'"
-            @click="toggleWorld"
-          >
-            <span aria-hidden="true">▾</span>
-          </button>
+          <h2 class="title">
+            <button
+              id="panel-world-head"
+              type="button"
+              class="head"
+              :aria-expanded="!worldCollapsed"
+              aria-controls="panel-world"
+              @click="toggle('world')"
+            >
+              <span>world</span>
+              <span class="chevron" aria-hidden="true">▾</span>
+            </button>
+          </h2>
         </header>
 
-        <div v-show="!worldCollapsed" class="body">
+        <div
+          v-show="!worldCollapsed"
+          id="panel-world"
+          class="body"
+          role="region"
+          aria-labelledby="panel-world-head"
+        >
           <dl>
             <dt>hover</dt>
             <dd>
@@ -509,21 +544,28 @@ const olderTurns = computed(() => Math.max(0, adventureLog.value.length - TURNS_
 
       <aside class="panel" :class="{ collapsed: entitiesCollapsed }">
         <header>
-          <h1>entities</h1>
-          <button
-            type="button"
-            class="toggle"
-            :aria-expanded="!entitiesCollapsed"
-            :aria-label="
-              entitiesCollapsed ? 'open the entities panel' : 'collapse the entities panel'
-            "
-            @click="toggleEntities"
-          >
-            <span aria-hidden="true">▾</span>
-          </button>
+          <h2 class="title">
+            <button
+              id="panel-entities-head"
+              type="button"
+              class="head"
+              :aria-expanded="!entitiesCollapsed"
+              aria-controls="panel-entities"
+              @click="toggle('entities')"
+            >
+              <span>entities</span>
+              <span class="chevron" aria-hidden="true">▾</span>
+            </button>
+          </h2>
         </header>
 
-        <div v-show="!entitiesCollapsed" class="body">
+        <div
+          v-show="!entitiesCollapsed"
+          id="panel-entities"
+          class="body"
+          role="region"
+          aria-labelledby="panel-entities-head"
+        >
           <dl>
             <dt>turn</dt>
             <dd>
@@ -817,6 +859,7 @@ const olderTurns = computed(() => Math.max(0, adventureLog.value.length - TURNS_
       </aside>
 
       <CaravanPanel />
+      <HexDetails />
     </div>
   </main>
 </template>
@@ -829,35 +872,41 @@ main {
   touch-action: none;
 }
 
-/* The strip the panels sit in lets the pointer through to the map; only the
-   panels themselves take it. */
+/* One drawer down the left edge. The column lets the pointer through to the
+   map; only the panels themselves take it. Its foot is only the most the open
+   panel may grow to: the column never scrolls, the open panel's body does. */
 .panels {
   position: absolute;
   top: 1rem;
   left: 1rem;
+  bottom: 1rem;
+  z-index: 2;
   display: flex;
-  align-items: flex-start;
-  gap: 0.75rem;
-  height: calc(100% - 2rem);
+  flex-direction: column;
+  align-items: stretch;
+  gap: var(--dock-gap);
+  width: min(var(--panel-width), 100vw - 2rem);
   pointer-events: none;
 }
 
-/* A panel outgrew the viewport once the terrain knobs landed. It scrolls
-   inside itself rather than taking the page with it, which costs the drag-through
-   it used to have: a scroll container has to receive the pointer. */
+/* Every panel, the caravan and hex details included (their roots take this
+   scope): full column width open or folded, so the stack reads as one drawer. */
 aside:where(.panel) {
   box-sizing: border-box;
-  max-height: 100%;
-  width: min(var(--panel-width), calc(100vw - 2rem));
-  padding: 0.75rem 1rem;
+  display: flex;
+  flex: 0 1 auto;
+  flex-direction: column;
+  min-height: 0;
+  padding: 0;
   border: 1px solid var(--line);
   border-radius: 0.5rem;
   background: color-mix(in srgb, var(--surface-raised) 88%, transparent);
-  overflow-y: auto;
-  overscroll-behavior: contain;
-  scrollbar-width: thin;
-  scrollbar-color: var(--line) transparent;
+  overflow: hidden;
   pointer-events: auto;
+}
+
+aside:where(.panel).collapsed {
+  flex: none;
 }
 
 .journey {
@@ -1025,51 +1074,73 @@ select {
 
 header {
   display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: 1.5rem;
+  flex: none;
+  min-height: var(--dock-row);
 }
 
-h1 {
+.title {
+  display: flex;
+  flex: 1;
+  min-width: 0;
   margin: 0;
   font-size: 0.9rem;
   letter-spacing: 0.08em;
   text-transform: uppercase;
 }
 
-.body {
-  margin-top: 0.5rem;
-}
-
-/* Collapsed the panel is one row: no scroller, no width to speak of, and the
-   map gets the pointer everywhere the row is not. */
-aside:where(.panel).collapsed {
-  width: auto;
-  max-height: none;
-  overflow: visible;
-}
-
-.toggle {
-  width: auto;
-  padding: 0.1rem 0.35rem;
+/* The whole header row is the toggle. */
+.head {
+  display: flex;
+  flex: 1;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.75rem;
+  min-height: var(--dock-row);
+  padding: 0 1rem;
   border: none;
+  border-radius: 0;
   background: none;
+  color: var(--ink);
+  font: inherit;
+  letter-spacing: inherit;
+  text-align: left;
+  text-transform: inherit;
+}
+
+.head:focus-visible {
+  outline: 2px solid #7aa2c8;
+  outline-offset: -2px;
+  border-radius: 0.5rem 0.5rem 0 0;
+}
+
+aside:where(.panel).collapsed .head:focus-visible {
+  border-radius: 0.5rem;
+}
+
+.chevron {
+  display: block;
   color: var(--ink-dim);
   font-size: 1.7rem;
   line-height: 1;
-}
-
-.toggle:hover {
-  color: var(--ink);
-}
-
-.toggle span {
-  display: block;
   transition: transform 150ms ease;
 }
 
-aside:where(.panel).collapsed .toggle span {
+.head:hover .chevron {
+  color: var(--ink);
+}
+
+aside:where(.panel).collapsed .chevron {
   transform: rotate(-90deg);
+}
+
+.body {
+  flex: 1 1 auto;
+  min-height: 0;
+  padding: 0 1rem 0.75rem;
+  overflow-y: auto;
+  overscroll-behavior: contain;
+  scrollbar-width: thin;
+  scrollbar-color: var(--line) transparent;
 }
 
 dl {
@@ -1203,15 +1274,25 @@ p {
   cursor: default;
 }
 
-/* Room is the scarce thing on a phone: the panels stack in the corner, only
-   one open at a time, and the dial drops below them rather than straddling them. */
+/* On a phone the column spans the window and an open panel covers the dial,
+   session bar and toolbar, so it is opaque; folding it gives them back. The dial
+   sits right under the folded header rows. */
 @media (max-width: 720px) {
+  main {
+    --dial-top: calc(
+      0.5rem + var(--dock-rows) * (var(--dock-row) + 2px) + (var(--dock-rows) - 1) *
+        var(--dock-gap) + 0.75rem
+    );
+  }
+
   .panels {
-    top: 0.5rem;
-    left: 0.5rem;
-    flex-direction: column;
-    gap: 0.5rem;
-    height: calc(100% - 7rem);
+    inset: 0.5rem;
+    z-index: 11;
+    width: calc(100vw - 1rem);
+  }
+
+  aside:where(.panel):not(.collapsed) {
+    background: var(--surface-raised);
   }
 }
 </style>

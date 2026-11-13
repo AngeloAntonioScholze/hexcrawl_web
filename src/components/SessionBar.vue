@@ -151,6 +151,23 @@ const leave = async (): Promise<void> => {
   right: 6rem;
 }
 
+/* A tablet has no room beside the dial next to the panel column: it drops
+   under the dial (1rem down, 16.2rem x 108/220 tall, a 0.5rem gap). */
+@media (min-width: 721px) and (max-width: 1023px) {
+  .session-bar {
+    top: 9.5rem;
+  }
+}
+
+/* On a phone it goes under the dial, which sits under the panel headers. */
+@media (max-width: 720px) {
+  .session-bar {
+    top: calc(var(--dial-top) + 6.65rem + 0.5rem);
+    right: 0.5rem;
+    max-width: calc(100% - 1rem);
+  }
+}
+
 .row {
   display: flex;
   align-items: center;

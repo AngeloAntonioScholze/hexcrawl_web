@@ -155,6 +155,8 @@ const HEX_MAP_FREE = new Set([
   'setHovered',
   'selectHex',
   'setPanelOpen',
+  'revealPanel',
+  'panelGone',
   'positionsAt',
   'recordsOn',
   'sightAt',

@@ -9,14 +9,11 @@ import HexResources from './HexResources.vue'
 
 const store = useHexMapStore()
 
-/** Matches the left panels' breakpoint, so all open collapsed on the same windows. */
-const NARROW = 720
+/** The phone layout: the column spans the window there. */
+const narrow = (): boolean => window.innerWidth <= 720
 
-const narrow = (): boolean => window.innerWidth < NARROW
-
-store.setPanelOpen('details', !narrow(), narrow())
 const collapsed = computed(() => !store.panelsOpen.details)
-const toggle = (): void => store.setPanelOpen('details', collapsed.value, narrow())
+const toggle = (): void => store.setPanelOpen('details', collapsed.value)
 
 const hex = computed(() => store.selectedHex)
 const tile = computed(() => (hex.value ? store.tileAt(hex.value) : undefined))
@@ -28,7 +25,7 @@ const note = computed(() => (hex.value ? (store.notes.get(hex.value) ?? '') : ''
 // A phone keeps whatever the DM last chose: popping open on every tap would
 // bury the map they are tapping on.
 watch(hex, (next) => {
-  if (next && !narrow()) store.setPanelOpen('details', true, false)
+  if (next && store.may('notes') && !narrow()) store.revealPanel('details')
 })
 
 const onNote = (event: Event): void => {
@@ -39,31 +36,38 @@ const onNote = (event: Event): void => {
 
 <template>
   <!-- The DM's notebook on a hex: whoever may not write in it has no use for it open. -->
-  <aside v-if="store.may('notes') && hex" class="details" :class="{ collapsed }">
+  <aside v-if="store.may('notes') && hex" class="panel details" :class="{ collapsed }">
     <header>
-      <h2>hex {{ hex }}</h2>
-      <div class="actions">
+      <h2 class="title">
         <button
+          id="panel-details-head"
           type="button"
-          class="toggle"
+          class="head"
           :aria-expanded="!collapsed"
-          :aria-label="collapsed ? 'open the hex details' : 'collapse the hex details'"
+          aria-controls="panel-details"
           @click="toggle"
         >
-          <span aria-hidden="true">▾</span>
+          <span>hex {{ hex }}</span>
+          <span class="chevron" aria-hidden="true">▾</span>
         </button>
-        <button
-          type="button"
-          class="close"
-          aria-label="deselect the hex"
-          @click="store.selectHex(null)"
-        >
-          <span aria-hidden="true">×</span>
-        </button>
-      </div>
+      </h2>
+      <button
+        type="button"
+        class="close"
+        aria-label="deselect the hex"
+        @click="store.selectHex(null)"
+      >
+        <span aria-hidden="true">×</span>
+      </button>
     </header>
 
-    <div v-show="!collapsed" class="body">
+    <div
+      v-show="!collapsed"
+      id="panel-details"
+      class="body"
+      role="region"
+      aria-labelledby="panel-details-head"
+    >
       <dl>
         <dt>terrain</dt>
         <dd>
@@ -94,34 +98,16 @@ const onNote = (event: Event): void => {
 </template>
 
 <style scoped>
-/* Sibling of the left panel, mirrored: same chrome, same scroll-inside rule.
-   It starts under the view toggle and runs to the foot of the map; the
-   minimap steps aside to its left while it is open. */
-aside {
-  position: absolute;
-  top: 56px;
-  right: 1rem;
-  bottom: 1rem;
-  box-sizing: border-box;
-  width: min(var(--panel-width), calc(100vw - 2rem));
-  padding: 0.75rem 1rem;
-  border: 1px solid var(--line);
-  border-radius: 0.5rem;
-  background: color-mix(in srgb, var(--surface-raised) 88%, transparent);
-  overflow-y: auto;
-  overscroll-behavior: contain;
-  scrollbar-width: thin;
-  scrollbar-color: var(--line) transparent;
-}
-
 header {
   display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: 1.5rem;
+  flex: none;
+  min-height: var(--dock-row);
 }
 
-h2 {
+.title {
+  display: flex;
+  flex: 1;
+  min-width: 0;
   margin: 0;
   font-size: 0.9rem;
   font-variant-numeric: tabular-nums;
@@ -129,52 +115,86 @@ h2 {
   text-transform: uppercase;
 }
 
-.actions {
+/* The whole header row but the close is the toggle. */
+.head {
   display: flex;
+  flex: 1;
   align-items: center;
-}
-
-.body {
-  margin-top: 0.5rem;
-}
-
-aside.collapsed {
-  width: auto;
-  bottom: auto;
-  max-height: none;
-  overflow: visible;
-}
-
-.toggle,
-.close {
-  width: auto;
-  padding: 0.1rem 0.35rem;
+  justify-content: space-between;
+  gap: 0.75rem;
+  min-height: var(--dock-row);
+  padding: 0 1rem;
   border: none;
   background: none;
-  color: var(--ink-dim);
+  color: var(--ink);
   font: inherit;
-  font-size: 1.7rem;
-  line-height: 1;
+  letter-spacing: inherit;
+  text-align: left;
+  text-transform: inherit;
   cursor: pointer;
 }
 
 .close {
+  flex: none;
+  width: var(--dock-row);
+  height: var(--dock-row);
+  padding: 0;
+  border: none;
+  background: none;
+  color: var(--ink-dim);
+  font: inherit;
   font-size: 1.3rem;
+  line-height: 1;
+  cursor: pointer;
 }
 
-.toggle:hover,
+.head:focus-visible,
+.close:focus-visible {
+  outline: 2px solid #7aa2c8;
+  outline-offset: -2px;
+}
+
+.head:focus-visible {
+  border-radius: 0.5rem 0 0;
+}
+
+.collapsed .head:focus-visible {
+  border-radius: 0.5rem 0 0 0.5rem;
+}
+
+.close:focus-visible {
+  border-radius: 0 0.5rem 0 0;
+}
+
+.collapsed .close:focus-visible {
+  border-radius: 0 0.5rem 0.5rem 0;
+}
+
+.chevron {
+  display: block;
+  color: var(--ink-dim);
+  font-size: 1.7rem;
+  line-height: 1;
+  transition: transform 150ms ease;
+}
+
+.head:hover .chevron,
 .close:hover {
   color: var(--ink);
 }
 
-.toggle span {
-  display: block;
-  transition: transform 150ms ease;
+.collapsed .chevron {
+  transform: rotate(-90deg);
 }
 
-/* Points the other way from the left panel's, towards the edge it folds into. */
-aside.collapsed .toggle span {
-  transform: rotate(90deg);
+.body {
+  flex: 1 1 auto;
+  min-height: 0;
+  padding: 0 1rem 0.75rem;
+  overflow-y: auto;
+  overscroll-behavior: contain;
+  scrollbar-width: thin;
+  scrollbar-color: var(--line) transparent;
 }
 
 dl {
@@ -233,18 +253,5 @@ textarea {
 textarea:focus {
   border-color: #7aa2c8;
   outline: none;
-}
-
-/* On a phone the left panel owns the top-left row, so this one drops a row
-   lower and stays clear of it, and sits over the left one if both are opened. */
-@media (max-width: 720px) {
-  aside {
-    top: 4.5rem;
-    right: 0.5rem;
-    z-index: 1;
-    bottom: auto;
-    max-height: calc(100% - 5rem);
-    max-width: calc(100vw - 1rem);
-  }
 }
 </style>

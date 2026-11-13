@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed, ref, watch } from 'vue'
+import { computed, ref } from 'vue'
 import { usePlayerView } from '../composables/usePlayerView'
 import { CARAVAN_PORTRAITS, caravanPortrait } from '../entities/portraits'
 import { useHexMapStore } from '../stores/hexMap'
@@ -13,14 +13,10 @@ const store = useHexMapStore()
 const player = usePlayerView()
 const forPlayers = computed(() => !store.dmView)
 
-/** Matches the other panels' breakpoint, so all open collapsed on the same windows. */
-const NARROW = 720
-
-const narrow = (): boolean => window.innerWidth < NARROW
-
-store.setPanelOpen('caravan', !narrow(), narrow())
+// Mounted again for every caravan picked, so it never opens itself: that would
+// fold away the entities list the caravan was just picked from.
 const collapsed = computed(() => !store.panelsOpen.caravan)
-const toggle = (): void => store.setPanelOpen('caravan', collapsed.value, narrow())
+const toggle = (): void => store.setPanelOpen('caravan', collapsed.value)
 
 const caravan = computed(() => (forPlayers.value ? player.shownCaravan.value : store.shownCaravan))
 const riders = computed(() => {
@@ -36,36 +32,36 @@ const pick = (id: string | null): void => {
   if (caravan.value) store.setPortrait(caravan.value.id, id)
   picking.value = false
 }
-
-// As with the hex details, a phone keeps whatever was last chosen: opening
-// here would fold away the entities list the caravan was just picked from.
-watch(
-  () => caravan.value?.id,
-  (next) => {
-    if (next && !narrow()) store.setPanelOpen('caravan', true, false)
-  },
-)
 </script>
 
 <template>
   <aside v-if="caravan" class="panel caravan" :class="{ collapsed }">
     <header>
-      <h1>
-        <span class="pip" :style="{ background: caravan.color }" />
-        <span class="name">{{ caravan.name }}</span>
-      </h1>
-      <button
-        type="button"
-        class="toggle"
-        :aria-expanded="!collapsed"
-        :aria-label="collapsed ? 'open the caravan panel' : 'collapse the caravan panel'"
-        @click="toggle"
-      >
-        <span aria-hidden="true">▾</span>
-      </button>
+      <h2 class="title">
+        <button
+          id="panel-caravan-head"
+          type="button"
+          class="head"
+          :aria-expanded="!collapsed"
+          aria-controls="panel-caravan"
+          @click="toggle"
+        >
+          <span class="label-row">
+            <span class="pip" :style="{ background: caravan.color }" />
+            <span class="name">{{ caravan.name }}</span>
+          </span>
+          <span class="chevron" aria-hidden="true">▾</span>
+        </button>
+      </h2>
     </header>
 
-    <div v-show="!collapsed" class="body">
+    <div
+      v-show="!collapsed"
+      id="panel-caravan"
+      class="body"
+      role="region"
+      aria-labelledby="panel-caravan-head"
+    >
       <div v-if="mayPick" class="row portrait-row">
         <span class="label">portrait</span>
         <button
@@ -145,20 +141,55 @@ watch(
 <style scoped>
 header {
   display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: 1.5rem;
+  flex: none;
+  min-height: var(--dock-row);
 }
 
-h1 {
+.title {
   display: flex;
-  align-items: center;
-  gap: 0.45rem;
+  flex: 1;
   min-width: 0;
   margin: 0;
   font-size: 0.9rem;
   letter-spacing: 0.08em;
   text-transform: uppercase;
+}
+
+/* The whole header row is the toggle. */
+.head {
+  display: flex;
+  flex: 1;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.75rem;
+  min-width: 0;
+  min-height: var(--dock-row);
+  padding: 0 1rem;
+  border: none;
+  background: none;
+  color: var(--ink);
+  font: inherit;
+  letter-spacing: inherit;
+  text-align: left;
+  text-transform: inherit;
+  cursor: pointer;
+}
+
+.head:focus-visible {
+  outline: 2px solid #7aa2c8;
+  outline-offset: -2px;
+  border-radius: 0.5rem 0.5rem 0 0;
+}
+
+.collapsed .head:focus-visible {
+  border-radius: 0.5rem;
+}
+
+.label-row {
+  display: flex;
+  align-items: center;
+  gap: 0.45rem;
+  min-width: 0;
 }
 
 .name {
@@ -168,31 +199,31 @@ h1 {
   white-space: nowrap;
 }
 
-.toggle {
-  padding: 0.1rem 0.35rem;
-  border: none;
-  background: none;
+.chevron {
+  display: block;
+  flex: none;
   color: var(--ink-dim);
   font-size: 1.7rem;
   line-height: 1;
-  cursor: pointer;
-}
-
-.toggle:hover {
-  color: var(--ink);
-}
-
-.toggle span {
-  display: block;
   transition: transform 150ms ease;
 }
 
-.collapsed .toggle span {
+.head:hover .chevron {
+  color: var(--ink);
+}
+
+.collapsed .chevron {
   transform: rotate(-90deg);
 }
 
 .body {
-  margin-top: 0.5rem;
+  flex: 1 1 auto;
+  min-height: 0;
+  padding: 0 1rem 0.75rem;
+  overflow-y: auto;
+  overscroll-behavior: contain;
+  scrollbar-width: thin;
+  scrollbar-color: var(--line) transparent;
 }
 
 .section {

@@ -95,11 +95,15 @@ const SWATCHES = Object.fromEntries(
 </template>
 
 <style scoped>
+/* Centred in the band between the panel column and the minimap. */
 .dm-toolbar {
   position: absolute;
   bottom: 12px;
-  left: 50%;
+  left: calc(var(--dock-reserve) + (100% - var(--dock-reserve) - var(--minimap-reserve)) / 2);
   translate: -50% 0;
+  box-sizing: border-box;
+  width: max-content;
+  max-width: calc(100% - var(--dock-reserve) - var(--minimap-reserve));
   z-index: 10;
   display: grid;
   gap: 6px;
@@ -114,6 +118,8 @@ const SWATCHES = Object.fromEntries(
 
 .tools {
   display: flex;
+  flex-wrap: wrap;
+  justify-content: center;
   gap: 4px;
 }
 
@@ -158,7 +164,7 @@ button.here {
   flex-wrap: wrap;
   gap: 4px;
   justify-content: center;
-  max-width: min(92vw, 640px);
+  max-width: 100%;
 }
 
 .swatch {
@@ -173,5 +179,23 @@ button.here {
   height: 10px;
   border: 1px solid var(--line);
   border-radius: 2px;
+}
+
+/* A tablet's band is too narrow beside the minimap: the toolbar rises above
+   it and centres between the column and the right edge. */
+@media (min-width: 721px) and (max-width: 1023px) {
+  .dm-toolbar {
+    bottom: calc(1rem + 176px + 0.5rem);
+    left: calc(var(--dock-reserve) + (100% - var(--dock-reserve) - 1rem) / 2);
+    max-width: calc(100% - var(--dock-reserve) - 1rem);
+  }
+}
+
+/* No minimap on a phone, and an open panel covers the toolbar. */
+@media (max-width: 720px) {
+  .dm-toolbar {
+    left: 50%;
+    max-width: calc(100% - 24px);
+  }
 }
 </style>

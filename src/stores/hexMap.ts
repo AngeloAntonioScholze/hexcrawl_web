@@ -780,24 +780,50 @@ export const useHexMapStore = defineStore('hexMap', () => {
     return same ? previous : next
   })
 
-  /** Which side panels are expanded; view state, never saved. */
+  /** Which side panel is expanded, at most one; view state, never saved. */
   const panelsOpen = ref<Record<SidePanel, boolean>>({
-    world: true,
-    entities: true,
-    caravan: true,
-    details: true,
+    world: false,
+    entities: false,
+    caravan: false,
+    details: false,
   })
+  /** The panel an automatic open folded away, given back when that one goes. */
+  const returnTo = ref<SidePanel | null>(null)
 
-  // On a narrow window the panels share the same strip of screen, so only one
-  // of them may be expanded at a time.
-  const setPanelOpen = (which: SidePanel, open: boolean, narrow: boolean): void => {
-    const closeOthers = open && narrow
+  const openOnly = (which: SidePanel | null): void => {
     panelsOpen.value = {
-      world: which === 'world' ? open : !closeOthers && panelsOpen.value.world,
-      entities: which === 'entities' ? open : !closeOthers && panelsOpen.value.entities,
-      caravan: which === 'caravan' ? open : !closeOthers && panelsOpen.value.caravan,
-      details: which === 'details' ? open : !closeOthers && panelsOpen.value.details,
+      world: which === 'world',
+      entities: which === 'entities',
+      caravan: which === 'caravan',
+      details: which === 'details',
     }
+  }
+
+  const openPanel = (): SidePanel | null =>
+    (Object.keys(panelsOpen.value) as SidePanel[]).find((one) => panelsOpen.value[one]) ?? null
+
+  const setPanelOpen = (which: SidePanel, open: boolean): void => {
+    returnTo.value = null
+    if (open) openOnly(which)
+    else if (panelsOpen.value[which]) openOnly(null)
+  }
+
+  const revealPanel = (which: SidePanel): void => {
+    if (panelsOpen.value[which]) return
+    returnTo.value = openPanel()
+    openOnly(which)
+  }
+
+  // A panel that stopped rendering: if it was open, the one it folded away
+  // comes back, else the fallback. A remembered panel that goes is forgotten.
+  const panelGone = (which: SidePanel, fallback: SidePanel | null): void => {
+    if (!panelsOpen.value[which]) {
+      if (returnTo.value === which) returnTo.value = null
+      return
+    }
+    const back = returnTo.value
+    returnTo.value = null
+    openOnly(back ?? fallback)
   }
 
   const setNote = (hex: HexKey, text: string): void => {
@@ -2223,6 +2249,8 @@ export const useHexMapStore = defineStore('hexMap', () => {
     setPaintTerrain,
     panelsOpen,
     setPanelOpen,
+    revealPanel,
+    panelGone,
     place: history.track(place),
     select: history.track(select),
     click: history.track(click),
