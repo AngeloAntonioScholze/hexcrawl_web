@@ -47,7 +47,7 @@ docs/reference/ art references
 - **Player view**: DM state is projected down to a player view (`session/projection.ts`) before being sent or rendered for players.
 
 ## Rules
-- **Git: the user makes all commits and pushes in this repo.** Don't run `git commit`, `git push`, `git tag` or `gh pr create` here. Report the changed files and a suggested Conventional Commits message instead. This overrides the root commit-after-gates policy.
+- **Git**: root policy applies. Agents may commit once the work is validated; ask before `git push`, tags and PRs.
 - Every new store action needs:
   - a `may()` guard
   - an entry in `HEX_MAP_RULES` (`src/session/permissions.ts`)
