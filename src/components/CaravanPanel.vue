@@ -6,6 +6,7 @@ import { useHexMapStore } from '../stores/hexMap'
 import CaravanMerchants from './CaravanMerchants.vue'
 import CaravanSupplies from './CaravanSupplies.vue'
 import InventoryList from './InventoryList.vue'
+import PanelSection from './PanelSection.vue'
 import PopupDialog from './PopupDialog.vue'
 
 const store = useHexMapStore()
@@ -77,33 +78,32 @@ const pick = (id: string | null): void => {
 
       <CaravanSupplies :caravan-id="caravan.id" />
 
-      <InventoryList :owner-id="caravan.id" />
+      <InventoryList :owner-id="caravan.id" fold-key="caravan.inventory" />
 
-      <section class="section" aria-label="riders">
-        <div class="row">
-          <span class="label">riders</span>
-          <span class="value">{{ riders.length }}</span>
+      <PanelSection fold-key="caravan.riders" title="riders">
+        <template #meta>{{ riders.length }}</template>
+        <div class="section">
+          <ul v-if="riders.length" class="list">
+            <li v-for="rider in riders" :key="rider.id">
+              <button
+                type="button"
+                :class="{ here: rider.id === store.selectedId }"
+                :title="
+                  store.may('order', rider)
+                    ? `give ${rider.name} the orders`
+                    : `look at ${rider.name}; it is not yours to order`
+                "
+                @click="store.selectEntity(rider.id)"
+              >
+                <span class="pip" :style="{ background: rider.color }" />
+                <span class="name">{{ rider.name }}</span>
+                <span class="label">{{ rider.kind }}</span>
+              </button>
+            </li>
+          </ul>
+          <p v-else class="label">nobody aboard</p>
         </div>
-        <ul v-if="riders.length" class="list">
-          <li v-for="rider in riders" :key="rider.id">
-            <button
-              type="button"
-              :class="{ here: rider.id === store.selectedId }"
-              :title="
-                store.may('order', rider)
-                  ? `give ${rider.name} the orders`
-                  : `look at ${rider.name}; it is not yours to order`
-              "
-              @click="store.selectEntity(rider.id)"
-            >
-              <span class="pip" :style="{ background: rider.color }" />
-              <span class="name">{{ rider.name }}</span>
-              <span class="label">{{ rider.kind }}</span>
-            </button>
-          </li>
-        </ul>
-        <p v-else class="label">nobody aboard</p>
-      </section>
+      </PanelSection>
 
       <CaravanMerchants :caravan-id="caravan.id" />
     </div>
@@ -230,9 +230,6 @@ header {
   display: flex;
   flex-direction: column;
   gap: 0.3rem;
-  margin-top: 0.75rem;
-  padding-top: 0.6rem;
-  border-top: 1px solid var(--line);
   font-size: 0.78rem;
 }
 
@@ -244,10 +241,6 @@ header {
 
 .label {
   color: var(--ink-dim);
-}
-
-.value {
-  font-variant-numeric: tabular-nums;
 }
 
 p {

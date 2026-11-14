@@ -33,7 +33,6 @@ const remove = (map: MapEntry): void => {
 <template>
   <section v-if="library.maps.length > 0" class="maps" aria-label="saved maps">
     <div class="row">
-      <span>maps</span>
       <button type="button" :disabled="library.busy" @click="library.create">new map</button>
     </div>
     <ul>

@@ -5,6 +5,7 @@ import type { HexKey } from '../hex'
 import { useHexMapStore } from '../stores/hexMap'
 import { TERRAIN_LABELS } from '../terrain/terrain'
 import EncounterTableEditor from './EncounterTableEditor.vue'
+import PanelSection from './PanelSection.vue'
 import PopupDialog from './PopupDialog.vue'
 
 const props = defineProps<{ hex: HexKey }>()
@@ -38,64 +39,47 @@ const accept = (): void => {
 </script>
 
 <template>
-  <section class="encounter">
-    <div class="heading">
-      <h2>encounter</h2>
-      <button v-if="terrain" type="button" class="link" @click="editing = true">edit table</button>
-    </div>
-
-    <button v-if="roll === undefined" type="button" @click="draw">roll encounter</button>
-
-    <template v-else>
-      <div v-if="roll" class="result">
-        <div class="head">
-          <span class="title">{{ roll.entry.title }}</span>
-          <span class="odds">{{ roll.entry.weight }} in {{ roll.total }}</span>
-        </div>
-        <p v-if="roll.entry.description" class="description">{{ roll.entry.description }}</p>
-      </div>
-      <p v-else class="dim">nothing on this table at {{ store.clock.phase }}</p>
-
-      <div class="buttons">
-        <button type="button" @click="draw">reroll</button>
-        <button v-if="roll" type="button" @click="accept">accept</button>
-        <button type="button" @click="dismiss">dismiss</button>
+  <PanelSection fold-key="details.encounter" title="encounter">
+    <template #actions>
+      <!-- The editor's dialog sits by its button: a folded body is never drawn. -->
+      <div v-if="terrain" class="actions">
+        <button type="button" class="link" @click="editing = true">edit table</button>
+        <PopupDialog v-model="editing" :title="`${TERRAIN_LABELS[terrain]} encounters`">
+          <EncounterTableEditor :terrain="terrain" />
+        </PopupDialog>
       </div>
     </template>
+    <div class="encounter">
+      <button v-if="roll === undefined" type="button" @click="draw">roll encounter</button>
 
-    <PopupDialog
-      v-if="terrain"
-      v-model="editing"
-      :title="`${TERRAIN_LABELS[terrain]} encounters`"
-    >
-      <EncounterTableEditor :terrain="terrain" />
-    </PopupDialog>
-  </section>
+      <template v-else>
+        <div v-if="roll" class="result">
+          <div class="head">
+            <span class="title">{{ roll.entry.title }}</span>
+            <span class="odds">{{ roll.entry.weight }} in {{ roll.total }}</span>
+          </div>
+          <p v-if="roll.entry.description" class="description">{{ roll.entry.description }}</p>
+        </div>
+        <p v-else class="dim">nothing on this table at {{ store.clock.phase }}</p>
+
+        <div class="buttons">
+          <button type="button" @click="draw">reroll</button>
+          <button v-if="roll" type="button" @click="accept">accept</button>
+          <button type="button" @click="dismiss">dismiss</button>
+        </div>
+      </template>
+    </div>
+  </PanelSection>
 </template>
 
 <style scoped>
 .encounter {
-  margin-top: 0.75rem;
-  padding-top: 0.6rem;
-  border-top: 1px solid var(--line);
   font-size: 0.78rem;
 }
 
-.heading {
-  display: flex;
-  align-items: baseline;
-  justify-content: space-between;
-  gap: 0.4rem;
-  margin-bottom: 0.4rem;
-}
-
-h2 {
-  margin: 0;
-  color: var(--ink-dim);
-  font-size: 0.72rem;
-  font-weight: normal;
-  letter-spacing: 0.08em;
-  text-transform: uppercase;
+/* The editor inherits the size it had when it sat in the section body. */
+.actions {
+  font-size: 0.78rem;
 }
 
 .result {

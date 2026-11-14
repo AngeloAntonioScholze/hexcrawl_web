@@ -9,6 +9,7 @@ import {
   TERRAIN_RESOURCES,
   type ResourceType,
 } from '../terrain/resources'
+import PanelSection from './PanelSection.vue'
 
 const props = defineProps<{ hex: HexKey }>()
 
@@ -36,59 +37,53 @@ const add = (): void => {
 </script>
 
 <template>
-  <section class="resources">
-    <h2>resources</h2>
-    <ul v-if="resources.length > 0">
-      <li v-for="resource in resources" :key="resource.id">
-        <span class="name">{{ RESOURCE_LABELS[resource.type] }}</span>
-        <span class="origin">{{ resource.origin }}</span>
-        <button
-          class="drop"
-          type="button"
-          :aria-label="`remove ${RESOURCE_LABELS[resource.type]}`"
-          title="remove"
-          @click="store.removeResource(resource.id)"
-        >
-          ×
-        </button>
-      </li>
-    </ul>
-    <p v-else class="dim">no resources here</p>
+  <PanelSection fold-key="details.resources" title="resources">
+    <template #meta>{{ resources.length }}</template>
+    <div class="resources">
+      <ul v-if="resources.length > 0">
+        <li v-for="resource in resources" :key="resource.id">
+          <span class="name">{{ RESOURCE_LABELS[resource.type] }}</span>
+          <span class="origin">{{ resource.origin }}</span>
+          <button
+            class="drop"
+            type="button"
+            :aria-label="`remove ${RESOURCE_LABELS[resource.type]}`"
+            title="remove"
+            @click="store.removeResource(resource.id)"
+          >
+            ×
+          </button>
+        </li>
+      </ul>
+      <p v-else class="dim">no resources here</p>
 
-    <form class="add" @submit.prevent="add">
-      <select v-model="type" aria-label="resource type">
-        <optgroup v-if="suited.length > 0" label="suits this terrain">
-          <option v-for="one in suited" :key="one" :value="one">{{ RESOURCE_LABELS[one] }}</option>
-        </optgroup>
-        <optgroup label="other">
-          <option v-for="one in others" :key="one" :value="one">{{ RESOURCE_LABELS[one] }}</option>
-        </optgroup>
-      </select>
-      <p v-if="crowding" class="warning" role="status">
-        {{ RESOURCE_LABELS[crowding.resource.type] }}
-        {{ describe(crowding.resource.hex, crowding.distance) }}, inside the
-        {{ store.resourceSpacing }}-hex spacing
-      </p>
-      <button type="submit">add resource</button>
-    </form>
-  </section>
+      <form class="add" @submit.prevent="add">
+        <select v-model="type" aria-label="resource type">
+          <optgroup v-if="suited.length > 0" label="suits this terrain">
+            <option v-for="one in suited" :key="one" :value="one">
+              {{ RESOURCE_LABELS[one] }}
+            </option>
+          </optgroup>
+          <optgroup label="other">
+            <option v-for="one in others" :key="one" :value="one">
+              {{ RESOURCE_LABELS[one] }}
+            </option>
+          </optgroup>
+        </select>
+        <p v-if="crowding" class="warning" role="status">
+          {{ RESOURCE_LABELS[crowding.resource.type] }}
+          {{ describe(crowding.resource.hex, crowding.distance) }}, inside the
+          {{ store.resourceSpacing }}-hex spacing
+        </p>
+        <button type="submit">add resource</button>
+      </form>
+    </div>
+  </PanelSection>
 </template>
 
 <style scoped>
 .resources {
-  margin-top: 0.75rem;
-  padding-top: 0.6rem;
-  border-top: 1px solid var(--line);
   font-size: 0.78rem;
-}
-
-h2 {
-  margin: 0 0 0.4rem;
-  color: var(--ink-dim);
-  font-size: 0.72rem;
-  font-weight: normal;
-  letter-spacing: 0.08em;
-  text-transform: uppercase;
 }
 
 ul {

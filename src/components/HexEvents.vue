@@ -3,6 +3,7 @@ import { computed, ref } from 'vue'
 import type { HexKey } from '../hex'
 import type { HexEvent } from '../hex/content'
 import { useHexMapStore } from '../stores/hexMap'
+import PanelSection from './PanelSection.vue'
 import PopupDialog from './PopupDialog.vue'
 
 const props = defineProps<{ hex: HexKey }>()
@@ -27,61 +28,50 @@ const add = (): void => {
 </script>
 
 <template>
-  <section class="events">
-    <h2>events</h2>
+  <PanelSection fold-key="details.events" title="events">
+    <template #meta>{{ events.length }}</template>
+    <div class="events">
+      <ul v-if="events.length" class="list">
+        <li
+          v-for="event in events"
+          :key="event.id"
+          :class="{ ahead: event.turn !== undefined && event.turn > store.turn }"
+        >
+          <div class="head">
+            <span class="title">
+              {{ event.title }}
+              <span v-if="event.turn !== undefined" class="met">turn {{ event.turn }}</span>
+            </span>
+            <button
+              type="button"
+              class="drop"
+              :title="`remove ${event.title}`"
+              @click="store.removeEvent(props.hex, event.id)"
+            >
+              ×
+            </button>
+          </div>
+          <p v-if="event.description" class="description">{{ event.description }}</p>
+        </li>
+      </ul>
+      <p v-else class="dim">nothing happens here yet</p>
 
-    <ul v-if="events.length" class="list">
-      <li
-        v-for="event in events"
-        :key="event.id"
-        :class="{ ahead: event.turn !== undefined && event.turn > store.turn }"
-      >
-        <div class="head">
-          <span class="title">
-            {{ event.title }}
-            <span v-if="event.turn !== undefined" class="met">turn {{ event.turn }}</span>
-          </span>
-          <button
-            type="button"
-            class="drop"
-            :title="`remove ${event.title}`"
-            @click="store.removeEvent(props.hex, event.id)"
-          >
-            ×
-          </button>
-        </div>
-        <p v-if="event.description" class="description">{{ event.description }}</p>
-      </li>
-    </ul>
-    <p v-else class="dim">nothing happens here yet</p>
+      <button type="button" class="open" @click="adding = true">add event</button>
 
-    <button type="button" class="open" @click="adding = true">add event</button>
-
-    <PopupDialog v-model="adding" :title="`new event · hex ${props.hex}`">
-      <form class="add" @submit.prevent="add">
-        <input v-model="title" type="text" placeholder="title" />
-        <textarea v-model="description" rows="3" placeholder="description"></textarea>
-        <button type="submit" :disabled="!canAdd">add event</button>
-      </form>
-    </PopupDialog>
-  </section>
+      <PopupDialog v-model="adding" :title="`new event · hex ${props.hex}`">
+        <form class="add" @submit.prevent="add">
+          <input v-model="title" type="text" placeholder="title" />
+          <textarea v-model="description" rows="3" placeholder="description"></textarea>
+          <button type="submit" :disabled="!canAdd">add event</button>
+        </form>
+      </PopupDialog>
+    </div>
+  </PanelSection>
 </template>
 
 <style scoped>
 .events {
-  margin-top: 0.75rem;
-  padding-top: 0.6rem;
-  border-top: 1px solid var(--line);
   font-size: 0.78rem;
-}
-
-h2 {
-  margin: 0 0 0.4rem;
-  color: var(--ink-dim);
-  font-size: 0.72rem;
-  font-weight: normal;
-  letter-spacing: 0.08em;
-  text-transform: uppercase;
 }
 
 .list {

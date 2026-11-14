@@ -6,6 +6,7 @@ import HexEncounter from './HexEncounter.vue'
 import HexEvents from './HexEvents.vue'
 import HexLocations from './HexLocations.vue'
 import HexResources from './HexResources.vue'
+import PanelSection from './PanelSection.vue'
 
 const store = useHexMapStore()
 
@@ -84,10 +85,17 @@ const onNote = (event: Event): void => {
         <dd v-if="position">q {{ position.q }} · r {{ position.r }}</dd>
       </dl>
 
-      <label class="control">
-        <span>notes</span>
-        <textarea :value="note" rows="4" placeholder="what the DM knows here" @input="onNote" />
-      </label>
+      <PanelSection fold-key="details.notes" title="notes">
+        <div class="control">
+          <textarea
+            :value="note"
+            rows="4"
+            placeholder="what the DM knows here"
+            aria-labelledby="sec-details-notes-head"
+            @input="onNote"
+          />
+        </div>
+      </PanelSection>
 
       <HexEncounter :hex="hex" />
       <HexEvents :hex="hex" />
@@ -223,17 +231,7 @@ dd {
   flex-direction: column;
   align-items: stretch;
   gap: 0.4rem;
-  margin-top: 0.75rem;
-  padding-top: 0.6rem;
-  border-top: 1px solid var(--line);
   font-size: 0.78rem;
-}
-
-.control > span {
-  color: var(--ink-dim);
-  font-size: 0.72rem;
-  letter-spacing: 0.08em;
-  text-transform: uppercase;
 }
 
 textarea {

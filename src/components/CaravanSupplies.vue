@@ -3,6 +3,7 @@ import { computed } from 'vue'
 import { usePlayerView } from '../composables/usePlayerView'
 import { SUPPLY_LIMITS, type Supply } from '../entities/supplies'
 import { useHexMapStore } from '../stores/hexMap'
+import PanelSection from './PanelSection.vue'
 
 const props = defineProps<{ caravanId: string }>()
 
@@ -35,34 +36,36 @@ const onInput = (supply: Supply, event: Event): void => {
 </script>
 
 <template>
-  <section class="supplies" aria-label="caravan stores">
-    <div v-for="one in SHOWN" :key="one.supply" class="supply">
-      <div class="row">
-        <span class="label">{{ one.label }}</span>
-        <input
-          v-if="store.may('supplies')"
-          type="number"
-          min="0"
-          :max="SUPPLY_LIMITS[one.supply].max"
-          step="1"
-          :value="held[one.supply]"
-          :aria-label="`${one.label} the caravan carries`"
-          @change="onInput(one.supply, $event)"
-        />
-        <span v-else class="value">{{ held[one.supply] }}</span>
-      </div>
-      <div
-        class="bar"
-        role="meter"
-        :aria-label="one.label"
-        aria-valuemin="0"
-        :aria-valuemax="SUPPLY_LIMITS[one.supply].max"
-        :aria-valuenow="held[one.supply]"
-      >
-        <span :style="{ width: fill(one.supply), background: one.color }" />
+  <PanelSection fold-key="caravan.supplies" title="supplies">
+    <div class="supplies">
+      <div v-for="one in SHOWN" :key="one.supply" class="supply">
+        <div class="row">
+          <span class="label">{{ one.label }}</span>
+          <input
+            v-if="store.may('supplies')"
+            type="number"
+            min="0"
+            :max="SUPPLY_LIMITS[one.supply].max"
+            step="1"
+            :value="held[one.supply]"
+            :aria-label="`${one.label} the caravan carries`"
+            @change="onInput(one.supply, $event)"
+          />
+          <span v-else class="value">{{ held[one.supply] }}</span>
+        </div>
+        <div
+          class="bar"
+          role="meter"
+          :aria-label="one.label"
+          aria-valuemin="0"
+          :aria-valuemax="SUPPLY_LIMITS[one.supply].max"
+          :aria-valuenow="held[one.supply]"
+        >
+          <span :style="{ width: fill(one.supply), background: one.color }" />
+        </div>
       </div>
     </div>
-  </section>
+  </PanelSection>
 </template>
 
 <style scoped>
@@ -70,9 +73,6 @@ const onInput = (supply: Supply, event: Event): void => {
   display: flex;
   flex-direction: column;
   gap: 0.4rem;
-  margin-top: 0.75rem;
-  padding-top: 0.6rem;
-  border-top: 1px solid var(--line);
   font-size: 0.78rem;
 }
 

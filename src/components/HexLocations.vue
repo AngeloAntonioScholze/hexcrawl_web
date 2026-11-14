@@ -2,6 +2,7 @@
 import { computed, ref } from 'vue'
 import type { HexKey } from '../hex'
 import { useHexMapStore } from '../stores/hexMap'
+import PanelSection from './PanelSection.vue'
 import PopupDialog from './PopupDialog.vue'
 
 const props = defineProps<{ hex: HexKey }>()
@@ -36,59 +37,49 @@ const listId = computed(() => `location-kinds-${props.hex}`)
 </script>
 
 <template>
-  <section class="locations">
-    <h2>locations</h2>
-    <ul v-if="locations.length > 0">
-      <li v-for="location in locations" :key="location.id">
-        <div class="row">
-          <span class="name">{{ location.name }}</span>
-          <span v-if="location.kind" class="kind">{{ location.kind }}</span>
-          <button
-            class="drop"
-            type="button"
-            :aria-label="`remove ${location.name}`"
-            title="remove"
-            @click="store.removeLocation(hex, location.id)"
-          >
-            ×
-          </button>
-        </div>
-        <p v-if="location.description" class="description">{{ location.description }}</p>
-      </li>
-    </ul>
-    <p v-else class="dim">no locations here</p>
+  <PanelSection fold-key="details.locations" title="locations">
+    <template #meta>{{ locations.length }}</template>
+    <div class="locations">
+      <ul v-if="locations.length > 0">
+        <li v-for="location in locations" :key="location.id">
+          <div class="row">
+            <span class="name">{{ location.name }}</span>
+            <span v-if="location.kind" class="kind">{{ location.kind }}</span>
+            <button
+              class="drop"
+              type="button"
+              :aria-label="`remove ${location.name}`"
+              title="remove"
+              @click="store.removeLocation(hex, location.id)"
+            >
+              ×
+            </button>
+          </div>
+          <p v-if="location.description" class="description">{{ location.description }}</p>
+        </li>
+      </ul>
+      <p v-else class="dim">no locations here</p>
 
-    <button type="button" class="open" @click="adding = true">add location</button>
+      <button type="button" class="open" @click="adding = true">add location</button>
 
-    <PopupDialog v-model="adding" :title="`new location · hex ${hex}`">
-      <form class="add" @submit.prevent="add">
-        <input v-model="name" type="text" placeholder="name" required />
-        <input v-model="kind" type="text" placeholder="kind" :list="listId" />
-        <datalist :id="listId">
-          <option v-for="k in KINDS" :key="k" :value="k" />
-        </datalist>
-        <textarea v-model="description" rows="3" placeholder="description" />
-        <button type="submit" :disabled="!canAdd">add location</button>
-      </form>
-    </PopupDialog>
-  </section>
+      <PopupDialog v-model="adding" :title="`new location · hex ${hex}`">
+        <form class="add" @submit.prevent="add">
+          <input v-model="name" type="text" placeholder="name" required />
+          <input v-model="kind" type="text" placeholder="kind" :list="listId" />
+          <datalist :id="listId">
+            <option v-for="k in KINDS" :key="k" :value="k" />
+          </datalist>
+          <textarea v-model="description" rows="3" placeholder="description" />
+          <button type="submit" :disabled="!canAdd">add location</button>
+        </form>
+      </PopupDialog>
+    </div>
+  </PanelSection>
 </template>
 
 <style scoped>
 .locations {
-  margin-top: 0.75rem;
-  padding-top: 0.6rem;
-  border-top: 1px solid var(--line);
   font-size: 0.78rem;
-}
-
-h2 {
-  margin: 0 0 0.4rem;
-  color: var(--ink-dim);
-  font-size: 0.72rem;
-  font-weight: normal;
-  letter-spacing: 0.08em;
-  text-transform: uppercase;
 }
 
 ul {

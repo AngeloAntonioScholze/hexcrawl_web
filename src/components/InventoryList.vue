@@ -3,9 +3,10 @@ import { computed, ref } from 'vue'
 import { usePlayerView } from '../composables/usePlayerView'
 import { QUANTITY_LIMITS, totalWeight, type Item } from '../entities/inventory'
 import { useHexMapStore } from '../stores/hexMap'
+import PanelSection from './PanelSection.vue'
 import PopupDialog from './PopupDialog.vue'
 
-const props = defineProps<{ ownerId: string }>()
+const props = defineProps<{ ownerId: string; foldKey: string }>()
 
 const store = useHexMapStore()
 // The players read what they see from their projection, as their map does.
@@ -101,91 +102,88 @@ const title = computed(() =>
 </script>
 
 <template>
-  <section class="inventory" aria-label="inventory">
-    <div class="row">
-      <span class="label">inventory</span>
-      <span class="value">
-        {{ items.length }}
-        <span v-if="carried !== null" class="label">· {{ carried }} wt</span>
-      </span>
-    </div>
+  <PanelSection :fold-key="foldKey" title="inventory">
+    <template #meta>
+      {{ items.length }}<template v-if="carried !== null"> · {{ carried }} wt</template>
+    </template>
+    <div class="inventory">
+      <ul v-if="items.length" class="list" :class="{ fixed: !editable }">
+        <li v-for="item in items" :key="item.id">
+          <span v-if="!editable" class="item" :title="item.notes || undefined">
+            <span class="name">{{ item.name }}</span>
+            <span class="value">×{{ item.quantity }}</span>
+            <span class="label">{{ item.weight === null ? '' : `${totalWeight(item)} wt` }}</span>
+          </span>
+          <button
+            v-else
+            type="button"
+            class="item"
+            :title="item.notes || `edit ${item.name}`"
+            @click="startEditing(item)"
+          >
+            <span class="name">{{ item.name }}</span>
+            <span class="value">×{{ item.quantity }}</span>
+            <span class="label">{{ item.weight === null ? '' : `${totalWeight(item)} wt` }}</span>
+          </button>
+          <button
+            v-if="editable"
+            type="button"
+            class="drop"
+            :aria-label="`remove ${item.name}`"
+            title="remove"
+            @click="store.removeItem(item.id)"
+          >
+            ×
+          </button>
+        </li>
+      </ul>
+      <p v-else class="label">carrying nothing</p>
 
-    <ul v-if="items.length" class="list" :class="{ fixed: !editable }">
-      <li v-for="item in items" :key="item.id">
-        <span v-if="!editable" class="item" :title="item.notes || undefined">
-          <span class="name">{{ item.name }}</span>
-          <span class="value">×{{ item.quantity }}</span>
-          <span class="label">{{ item.weight === null ? '' : `${totalWeight(item)} wt` }}</span>
-        </span>
-        <button
-          v-else
-          type="button"
-          class="item"
-          :title="item.notes || `edit ${item.name}`"
-          @click="startEditing(item)"
-        >
-          <span class="name">{{ item.name }}</span>
-          <span class="value">×{{ item.quantity }}</span>
-          <span class="label">{{ item.weight === null ? '' : `${totalWeight(item)} wt` }}</span>
-        </button>
-        <button
-          v-if="editable"
-          type="button"
-          class="drop"
-          :aria-label="`remove ${item.name}`"
-          title="remove"
-          @click="store.removeItem(item.id)"
-        >
-          ×
-        </button>
-      </li>
-    </ul>
-    <p v-else class="label">carrying nothing</p>
+      <button v-if="editable" type="button" class="open" @click="startAdding">add item</button>
 
-    <button v-if="editable" type="button" class="open" @click="startAdding">add item</button>
+      <PopupDialog v-model="open" :title="title">
+        <form class="form" @submit.prevent="save">
+          <input v-model="name" type="text" placeholder="name" aria-label="name" required />
+          <div class="pair">
+            <label>
+              <span class="label">quantity</span>
+              <input
+                v-model.number="quantity"
+                type="number"
+                :min="QUANTITY_LIMITS.min"
+                :max="QUANTITY_LIMITS.max"
+                step="1"
+              />
+            </label>
+            <label>
+              <span class="label">weight each</span>
+              <input v-model.number="weight" type="number" min="0" step="any" placeholder="—" />
+            </label>
+          </div>
+          <textarea v-model="notes" rows="3" placeholder="notes" aria-label="notes" />
+          <button type="submit" :disabled="!canSave">{{ editing ? 'save' : 'add item' }}</button>
+        </form>
 
-    <PopupDialog v-model="open" :title="title">
-      <form class="form" @submit.prevent="save">
-        <input v-model="name" type="text" placeholder="name" aria-label="name" required />
-        <div class="pair">
-          <label>
-            <span class="label">quantity</span>
+        <form v-if="editing && partners.length" class="form move" @submit.prevent="move">
+          <span class="label">hand over</span>
+          <div class="pair">
             <input
-              v-model.number="quantity"
+              v-model.number="moveCount"
               type="number"
               :min="QUANTITY_LIMITS.min"
-              :max="QUANTITY_LIMITS.max"
+              :max="editing.quantity"
               step="1"
+              aria-label="how many to hand over"
             />
-          </label>
-          <label>
-            <span class="label">weight each</span>
-            <input v-model.number="weight" type="number" min="0" step="any" placeholder="—" />
-          </label>
-        </div>
-        <textarea v-model="notes" rows="3" placeholder="notes" aria-label="notes" />
-        <button type="submit" :disabled="!canSave">{{ editing ? 'save' : 'add item' }}</button>
-      </form>
-
-      <form v-if="editing && partners.length" class="form move" @submit.prevent="move">
-        <span class="label">hand over</span>
-        <div class="pair">
-          <input
-            v-model.number="moveCount"
-            type="number"
-            :min="QUANTITY_LIMITS.min"
-            :max="editing.quantity"
-            step="1"
-            aria-label="how many to hand over"
-          />
-          <select v-model="moveTo" aria-label="hand over to">
-            <option v-for="one in partners" :key="one.id" :value="one.id">{{ one.name }}</option>
-          </select>
-        </div>
-        <button type="submit" :disabled="!moveTo">move</button>
-      </form>
-    </PopupDialog>
-  </section>
+            <select v-model="moveTo" aria-label="hand over to">
+              <option v-for="one in partners" :key="one.id" :value="one.id">{{ one.name }}</option>
+            </select>
+          </div>
+          <button type="submit" :disabled="!moveTo">move</button>
+        </form>
+      </PopupDialog>
+    </div>
+  </PanelSection>
 </template>
 
 <style scoped>
@@ -193,16 +191,7 @@ const title = computed(() =>
   display: flex;
   flex-direction: column;
   gap: 0.3rem;
-  margin-top: 0.75rem;
-  padding-top: 0.6rem;
-  border-top: 1px solid var(--line);
   font-size: 0.78rem;
-}
-
-.row {
-  display: flex;
-  justify-content: space-between;
-  gap: 1rem;
 }
 
 .label {

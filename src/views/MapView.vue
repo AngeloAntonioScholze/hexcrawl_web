@@ -8,6 +8,7 @@ import HexCanvas from '../components/HexCanvas.vue'
 import HexDetails from '../components/HexDetails.vue'
 import InventoryList from '../components/InventoryList.vue'
 import MapList from '../components/MapList.vue'
+import PanelSection from '../components/PanelSection.vue'
 import SessionBar from '../components/SessionBar.vue'
 import ViewToggle from '../components/ViewToggle.vue'
 import { useDebugMode } from '../composables/useDebugMode'
@@ -357,31 +358,15 @@ const olderTurns = computed(() => Math.max(0, adventureLog.value.length - TURNS_
             </dd>
           </dl>
 
-          <div class="control stack">
-            <template v-if="store.may('terrain')">
+          <PanelSection v-if="store.may('terrain')" fold-key="world.terrain" title="terrain">
+            <template #meta>seed {{ store.terrain.seed }}</template>
+            <div class="control stack">
               <div class="row">
                 <span>seed</span>
                 <span class="value">{{ store.terrain.seed }}</span>
               </div>
               <button type="button" @click="store.reseed">roll a new world</button>
-            </template>
-            <template v-if="store.may('maps')">
-              <MapList />
-              <div class="row">
-                <button type="button" @click="exportMap">export map</button>
-                <button type="button" @click="importInput?.click()">import map</button>
-              </div>
-              <input
-                ref="importInput"
-                type="file"
-                :accept="`${MAP_FILE_EXTENSION},application/json`"
-                hidden
-                @change="importMap"
-              />
-              <p v-if="importError" class="error" role="alert">{{ importError }}</p>
-            </template>
 
-            <template v-if="store.may('terrain')">
               <div class="row">
                 <span>world size</span>
                 <span class="value">{{ store.worldRadius }} hex</span>
@@ -445,9 +430,30 @@ const olderTurns = computed(() => Math.max(0, adventureLog.value.length - TURNS_
                 :step="TERRAIN_LIMITS.relief.step"
                 @input="onTerrain('relief', $event)"
               />
-            </template>
+            </div>
+          </PanelSection>
 
-            <template v-if="store.may('resources')">
+          <PanelSection v-if="store.may('maps')" fold-key="world.maps" title="maps">
+            <div class="control stack">
+              <MapList />
+              <div class="row">
+                <button type="button" @click="exportMap">export map</button>
+                <button type="button" @click="importInput?.click()">import map</button>
+              </div>
+              <input
+                ref="importInput"
+                type="file"
+                :accept="`${MAP_FILE_EXTENSION},application/json`"
+                hidden
+                @change="importMap"
+              />
+              <p v-if="importError" class="error" role="alert">{{ importError }}</p>
+            </div>
+          </PanelSection>
+
+          <PanelSection v-if="store.may('resources')" fold-key="world.resources" title="resources">
+            <template #meta>{{ store.resourceSpacing }} hex</template>
+            <div class="control stack">
               <div class="row">
                 <span>resource spacing</span>
                 <span class="value">{{ store.resourceSpacing }} hex</span>
@@ -485,60 +491,69 @@ const olderTurns = computed(() => Math.max(0, adventureLog.value.length - TURNS_
                 {{ store.resources.length }} resources: {{ resourceCounts.generated }} generated,
                 {{ resourceCounts.manual }} manual
               </p>
-            </template>
-          </div>
+            </div>
+          </PanelSection>
 
           <!-- What the fog shows is the DM's to say. The sight field goes with it:
                it is drawn from everything the parties see, hexes the DM hid included. -->
-          <template v-if="store.may('fog')">
+          <PanelSection
+            v-if="store.may('fog') || store.fog || store.showSight"
+            fold-key="world.fog"
+            title="fog and sight"
+          >
+            <template v-if="store.fog || store.showSight" #meta>{{ store.reach }} hex</template>
+            <template v-if="store.may('fog')">
+              <label class="control">
+                <input v-model="store.fog" type="checkbox" />
+                <span>fog of war</span>
+              </label>
+
+              <label v-if="store.fog" class="control indent">
+                <input v-model="store.fogSeeThrough" type="checkbox" />
+                <span>see the map through the fog</span>
+              </label>
+
+              <label class="control">
+                <input v-model="store.showSight" type="checkbox" />
+                <span>show the sight field</span>
+              </label>
+            </template>
+
+            <div v-if="store.fog || store.showSight" class="control stack">
+              <div class="row">
+                <span>seeing</span>
+                <span class="value">{{ store.reach }} hex</span>
+              </div>
+              <div v-if="store.fog" class="row">
+                <span>explored</span>
+                <span class="value">{{ store.exploredCount }}</span>
+              </div>
+            </div>
+          </PanelSection>
+
+          <PanelSection fold-key="world.view" title="view">
+            <div class="control stack">
+              <div class="row">
+                <span>zoom-out limit</span>
+                <span class="value">{{ zoomLimit.limit.value }}</span>
+              </div>
+              <input
+                :value="zoomLimit.limit.value"
+                type="range"
+                :min="MIN_MAX_ZOOM"
+                :max="zoomLimit.farthest.value"
+                step="1"
+                @input="onZoomLimit"
+              />
+            </div>
+
             <label class="control">
-              <input v-model="store.fog" type="checkbox" />
-              <span>fog of war</span>
+              <input v-model="debug" type="checkbox" />
+              <span>debug mode</span>
             </label>
 
-            <label v-if="store.fog" class="control indent">
-              <input v-model="store.fogSeeThrough" type="checkbox" />
-              <span>see the map through the fog</span>
-            </label>
-
-            <label class="control">
-              <input v-model="store.showSight" type="checkbox" />
-              <span>show the sight field</span>
-            </label>
-          </template>
-
-          <div v-if="store.fog || store.showSight" class="control stack">
-            <div class="row">
-              <span>seeing</span>
-              <span class="value">{{ store.reach }} hex</span>
-            </div>
-            <div v-if="store.fog" class="row">
-              <span>explored</span>
-              <span class="value">{{ store.exploredCount }}</span>
-            </div>
-          </div>
-
-          <div class="control stack">
-            <div class="row">
-              <span>zoom-out limit</span>
-              <span class="value">{{ zoomLimit.limit.value }}</span>
-            </div>
-            <input
-              :value="zoomLimit.limit.value"
-              type="range"
-              :min="MIN_MAX_ZOOM"
-              :max="zoomLimit.farthest.value"
-              step="1"
-              @input="onZoomLimit"
-            />
-          </div>
-
-          <label class="control">
-            <input v-model="debug" type="checkbox" />
-            <span>debug mode</span>
-          </label>
-
-          <p class="dim">drag to pan · wheel to zoom · Q / E to rotate</p>
+            <p class="dim">drag to pan · wheel to zoom · Q / E to rotate</p>
+          </PanelSection>
         </div>
       </aside>
 
@@ -580,279 +595,298 @@ const olderTurns = computed(() => Math.max(0, adventureLog.value.length - TURNS_
             <dd>{{ headed ?? '—' }}</dd>
           </dl>
 
-          <div class="control stack">
-            <div class="row">
-              <span>entities</span>
-              <span class="value">{{ shownEntities.length }}</span>
-            </div>
+          <PanelSection fold-key="entities.list" title="entities">
+            <template #meta>{{ shownEntities.length }}</template>
+            <div class="control stack">
+              <ul class="entities">
+                <li v-for="one in walking" :key="one.id">
+                  <button
+                    type="button"
+                    :class="{ here: one.id === store.selectedId }"
+                    :title="
+                      store.may('order', one)
+                        ? `give ${one.name} the orders`
+                        : `look at ${one.name}; it is not yours to order`
+                    "
+                    @click="pick(one.id)"
+                  >
+                    <span class="pip" :style="{ background: one.color }" />
+                    <span>{{ one.name }}</span>
+                    <span class="dim">{{ one.kind }}</span>
+                    <span class="value">{{ one.pacePerTurn }}/turn</span>
+                  </button>
+                  <ul v-if="ridersOf(one.id).length" class="riders">
+                    <li v-for="rider in ridersOf(one.id)" :key="rider.id">
+                      <button
+                        type="button"
+                        :class="{ here: rider.id === store.selectedId }"
+                        :title="
+                          store.atSea(rider.id)
+                            ? `${rider.name} is aboard ${one.name} at sea and cannot be ordered off`
+                            : `${rider.name} rides in ${one.name}; an order takes it out`
+                        "
+                        @click="pick(rider.id)"
+                      >
+                        <span class="pip" :style="{ background: rider.color }" />
+                        <span>{{ rider.name }}</span>
+                        <span class="dim">{{ store.atSea(rider.id) ? 'at sea' : 'riding' }}</span>
+                        <span class="value">{{ one.pacePerTurn }}/turn</span>
+                      </button>
+                    </li>
+                  </ul>
+                </li>
+              </ul>
 
-            <ul class="entities">
-              <li v-for="one in walking" :key="one.id">
-                <button
-                  type="button"
-                  :class="{ here: one.id === store.selectedId }"
-                  :title="
-                    store.may('order', one)
-                      ? `give ${one.name} the orders`
-                      : `look at ${one.name}; it is not yours to order`
-                  "
-                  @click="pick(one.id)"
-                >
-                  <span class="pip" :style="{ background: one.color }" />
-                  <span>{{ one.name }}</span>
-                  <span class="dim">{{ one.kind }}</span>
-                  <span class="value">{{ one.pacePerTurn }}/turn</span>
+              <div v-if="store.may('addEntity')" class="row">
+                <select v-model="addKind">
+                  <option value="party">party</option>
+                  <option value="caravan">caravan</option>
+                  <option value="npc">npc</option>
+                  <option value="ship">ship</option>
+                </select>
+                <button type="button" @click="store.addEntity(undefined, addKind, 'player')">
+                  add
                 </button>
-                <ul v-if="ridersOf(one.id).length" class="riders">
-                  <li v-for="rider in ridersOf(one.id)" :key="rider.id">
-                    <button
-                      type="button"
-                      :class="{ here: rider.id === store.selectedId }"
-                      :title="
-                        store.atSea(rider.id)
-                          ? `${rider.name} is aboard ${one.name} at sea and cannot be ordered off`
-                          : `${rider.name} rides in ${one.name}; an order takes it out`
-                      "
-                      @click="pick(rider.id)"
-                    >
-                      <span class="pip" :style="{ background: rider.color }" />
-                      <span>{{ rider.name }}</span>
-                      <span class="dim">{{ store.atSea(rider.id) ? 'at sea' : 'riding' }}</span>
-                      <span class="value">{{ one.pacePerTurn }}/turn</span>
-                    </button>
-                  </li>
-                </ul>
-              </li>
-            </ul>
-
-            <div v-if="store.may('addEntity')" class="row">
-              <select v-model="addKind">
-                <option value="party">party</option>
-                <option value="caravan">caravan</option>
-                <option value="npc">npc</option>
-                <option value="ship">ship</option>
-              </select>
-              <button type="button" @click="store.addEntity(undefined, addKind, 'player')">
-                add
-              </button>
-            </div>
-            <button
-              v-if="store.may('removeEntity', store.selectedEntity ?? undefined)"
-              type="button"
-              :disabled="!store.selectedEntity"
-              @click="store.removeEntity(store.selectedId)"
-            >
-              {{
-                store.selectedEntity ? `remove ${store.selectedEntity.name}` : 'nobody on the map'
-              }}
-            </button>
-            <label
-              v-if="store.may('assignEntity') && store.selectedEntity && playerNames.length"
-              class="row"
-            >
-              <span>played by</span>
-              <select :value="playedBy ?? ''" @change="onAssign">
-                <option value="">nobody</option>
-                <option v-for="name in playerNames" :key="name" :value="name">{{ name }}</option>
-              </select>
-            </label>
-          </div>
-
-          <label v-if="store.may('entitySettings')" class="control">
-            <input type="checkbox" :checked="!store.playerReachCapped" @change="onReachUncapped" />
-            <span>players may plan past one turn</span>
-          </label>
-
-          <dl v-if="store.route" class="route">
-            <dt>hexes left</dt>
-            <dd>{{ store.plannedHexes.length }}</dd>
-
-            <dt>travel</dt>
-            <dd>
-              {{ store.route.km }} km
-              <span v-if="store.routeBySea" class="dim">by sea</span>
-            </dd>
-
-            <dt>turns</dt>
-            <dd>~{{ store.routeTurns }}</dd>
-
-            <dt>flat</dt>
-            <dd class="dim">{{ straightLine }}</dd>
-          </dl>
-
-          <ol v-if="store.legs.length" class="legs">
-            <li v-for="(leg, index) in store.legs" :key="`${index}:${leg.to}`">
-              <span class="dim">{{ index + 1 }}</span>
-              <span>{{ leg.to }}</span>
-              <span class="value">
-                {{ leg.km }} km · ~{{ leg.turns }}t
-                <span v-if="leg.landfall" class="dim" title="riders can step ashore here">
-                  · puts in
-                </span>
-              </span>
+              </div>
               <button
-                v-if="orderable"
+                v-if="store.may('removeEntity', store.selectedEntity ?? undefined)"
                 type="button"
-                class="drop"
-                :title="`drop the stop at ${leg.to}`"
-                @click="store.removeWaypoint(index)"
+                :disabled="!store.selectedEntity"
+                @click="store.removeEntity(store.selectedId)"
               >
-                ×
+                {{
+                  store.selectedEntity ? `remove ${store.selectedEntity.name}` : 'nobody on the map'
+                }}
               </button>
-            </li>
-          </ol>
+              <label
+                v-if="store.may('assignEntity') && store.selectedEntity && playerNames.length"
+                class="row"
+              >
+                <span>played by</span>
+                <select :value="playedBy ?? ''" @change="onAssign">
+                  <option value="">nobody</option>
+                  <option v-for="name in playerNames" :key="name" :value="name">{{ name }}</option>
+                </select>
+              </label>
+            </div>
 
-          <div v-if="store.selectedEntity" class="control stack">
-            <label v-if="store.may('renameEntity', store.selectedEntity)" class="row naming">
-              <span>name</span>
-              <input
-                :key="store.selectedId"
-                class="name"
-                type="text"
-                maxlength="40"
-                :value="store.selectedEntity.name"
-                aria-label="the entity's name"
-                @change="onRename"
-              />
-            </label>
-            <label v-if="store.may('recolorEntity', store.selectedEntity)" class="row naming">
-              <span>colour</span>
-              <input
-                type="color"
-                :value="store.selectedEntity.color"
-                aria-label="the entity's colour"
-                @input="onRecolor"
-              />
-            </label>
-            <div class="row">
-              <span>pace</span>
-              <span class="value">{{ store.selectedEntity.pacePerTurn }} hex a turn</span>
-            </div>
-            <input
-              v-if="store.may('entitySettings', store.selectedEntity)"
-              :value="store.selectedEntity.pacePerTurn"
-              type="range"
-              :min="PACE_LIMITS.min"
-              :max="PACE_LIMITS.max"
-              :step="PACE_LIMITS.step"
-              @input="onPace"
-            />
-            <div class="row">
-              <span>sight by daylight</span>
-              <span class="value">{{ store.selectedEntity.sight }} hex</span>
-            </div>
-            <input
-              v-if="store.may('entitySettings', store.selectedEntity)"
-              :value="store.selectedEntity.sight"
-              type="range"
-              :min="MIN_SIGHT"
-              :max="MAX_SIGHT"
-              step="1"
-              @input="onSight"
-            />
-            <label v-if="store.may('entitySettings', store.selectedEntity)" class="row naming">
-              <span>darkvision</span>
+            <label v-if="store.may('entitySettings')" class="control">
               <input
                 type="checkbox"
-                :checked="store.selectedEntity.darkvision"
-                aria-label="sees as far by night as by day"
-                @change="onDarkvision"
+                :checked="!store.playerReachCapped"
+                @change="onReachUncapped"
               />
+              <span>players may plan past one turn</span>
             </label>
-            <template v-if="orderable">
-              <button
-                type="button"
-                :disabled="!store.goal || store.atSea(store.selectedId)"
-                :title="store.atSea(store.selectedId) ? 'no orders for a rider at sea' : undefined"
-                @click="store.clear"
-              >
-                call off the order
-              </button>
-              <button
-                type="button"
-                :disabled="!store.start"
-                @click="store.queueAction(store.selectedId, { kind: 'camp' })"
-              >
-                make camp this turn
-              </button>
-            </template>
-            <p v-else class="dim">not yours to order</p>
-          </div>
+          </PanelSection>
 
-          <InventoryList v-if="ownInventory" :owner-id="ownInventory.id" />
+          <PanelSection v-if="store.route" fold-key="entities.route" title="route">
+            <template #meta>{{ store.route.km }} km</template>
+            <dl class="route">
+              <dt>hexes left</dt>
+              <dd>{{ store.plannedHexes.length }}</dd>
 
-          <label class="control">
-            <input v-model="store.showHistory" type="checkbox" />
-            <span>show full path history</span>
-          </label>
+              <dt>travel</dt>
+              <dd>
+                {{ store.route.km }} km
+                <span v-if="store.routeBySea" class="dim">by sea</span>
+              </dd>
 
-          <label class="control">
-            <input v-model="store.showAllPaths" type="checkbox" />
-            <span>show all entities paths</span>
-          </label>
+              <dt>turns</dt>
+              <dd>~{{ store.routeTurns }}</dd>
 
-          <div v-if="adventureLog.length" class="control stack">
-            <div class="row">
-              <span>adventure log</span>
-              <span class="value">{{ hexesWalked * KM_PER_HEX }} km</span>
-            </div>
-            <div class="row">
-              <span>hexes walked</span>
-              <span class="value">{{ hexesWalked }}</span>
-            </div>
+              <dt>flat</dt>
+              <dd class="dim">{{ straightLine }}</dd>
+            </dl>
 
-            <ol class="journey">
-              <li
-                v-for="entry in recentTurns"
-                :key="entry.kind === 'turn' ? `turn:${entry.row.turn}` : entry.encounter.id"
-              >
+            <ol v-if="store.legs.length" class="legs">
+              <li v-for="(leg, index) in store.legs" :key="`${index}:${leg.to}`">
+                <span class="dim">{{ index + 1 }}</span>
+                <span>{{ leg.to }}</span>
+                <span class="value">
+                  {{ leg.km }} km · ~{{ leg.turns }}t
+                  <span v-if="leg.landfall" class="dim" title="riders can step ashore here">
+                    · puts in
+                  </span>
+                </span>
                 <button
-                  v-if="entry.kind === 'turn'"
+                  v-if="orderable"
                   type="button"
-                  :class="{ here: entry.row.turn === shownTurn - 1, ahead: !entry.row.spent }"
-                  :disabled="!store.may('clock')"
-                  :title="
-                    store.may('clock')
-                      ? `put the crawl back as it stood at the end of turn ${entry.row.turn}`
-                      : undefined
-                  "
-                  @click="store.goToTurn(entry.row.turn + 1)"
+                  class="drop"
+                  :title="`drop the stop at ${leg.to}`"
+                  @click="store.removeWaypoint(index)"
                 >
-                  <span class="dim">{{ entry.row.turn }}</span>
-                  <span>{{ entry.row.hex }}</span>
-                  <span class="dim">{{ entry.row.terrain }}</span>
-                  <span class="value">{{
-                    entry.row.entered === 0 ? entry.row.kind : `${entry.row.entered} hex`
-                  }}</span>
-                </button>
-                <button
-                  v-else
-                  type="button"
-                  class="met"
-                  :class="{
-                    here: entry.encounter.turn === shownTurn,
-                    ahead: entry.encounter.turn > shownTurn,
-                  }"
-                  :disabled="!store.may('clock')"
-                  :title="
-                    store.may('clock')
-                      ? `put the crawl back to turn ${entry.encounter.turn}, when this was met`
-                      : undefined
-                  "
-                  @click="store.goToTurn(entry.encounter.turn)"
-                >
-                  <span class="dim">!</span>
-                  <span class="encounter">{{ entry.encounter.title }}</span>
-                  <span class="dim">{{ entry.encounter.hex }}</span>
+                  ×
                 </button>
               </li>
             </ol>
-            <p v-if="olderTurns" class="dim">and {{ olderTurns }} earlier</p>
+          </PanelSection>
 
-            <button v-if="store.may('clearHistory')" type="button" @click="store.clearHistory">
-              clear the history
-            </button>
-          </div>
+          <PanelSection
+            v-if="store.selectedEntity"
+            fold-key="entities.selected"
+            :title="store.selectedEntity.name"
+          >
+            <template #meta>{{ store.selectedEntity.kind }}</template>
+            <div class="control stack">
+              <label v-if="store.may('renameEntity', store.selectedEntity)" class="row naming">
+                <span>name</span>
+                <input
+                  :key="store.selectedId"
+                  class="name"
+                  type="text"
+                  maxlength="40"
+                  :value="store.selectedEntity.name"
+                  aria-label="the entity's name"
+                  @change="onRename"
+                />
+              </label>
+              <label v-if="store.may('recolorEntity', store.selectedEntity)" class="row naming">
+                <span>colour</span>
+                <input
+                  type="color"
+                  :value="store.selectedEntity.color"
+                  aria-label="the entity's colour"
+                  @input="onRecolor"
+                />
+              </label>
+              <div class="row">
+                <span>pace</span>
+                <span class="value">{{ store.selectedEntity.pacePerTurn }} hex a turn</span>
+              </div>
+              <input
+                v-if="store.may('entitySettings', store.selectedEntity)"
+                :value="store.selectedEntity.pacePerTurn"
+                type="range"
+                :min="PACE_LIMITS.min"
+                :max="PACE_LIMITS.max"
+                :step="PACE_LIMITS.step"
+                @input="onPace"
+              />
+              <div class="row">
+                <span>sight by daylight</span>
+                <span class="value">{{ store.selectedEntity.sight }} hex</span>
+              </div>
+              <input
+                v-if="store.may('entitySettings', store.selectedEntity)"
+                :value="store.selectedEntity.sight"
+                type="range"
+                :min="MIN_SIGHT"
+                :max="MAX_SIGHT"
+                step="1"
+                @input="onSight"
+              />
+              <label v-if="store.may('entitySettings', store.selectedEntity)" class="row naming">
+                <span>darkvision</span>
+                <input
+                  type="checkbox"
+                  :checked="store.selectedEntity.darkvision"
+                  aria-label="sees as far by night as by day"
+                  @change="onDarkvision"
+                />
+              </label>
+              <template v-if="orderable">
+                <button
+                  type="button"
+                  :disabled="!store.goal || store.atSea(store.selectedId)"
+                  :title="
+                    store.atSea(store.selectedId) ? 'no orders for a rider at sea' : undefined
+                  "
+                  @click="store.clear"
+                >
+                  call off the order
+                </button>
+                <button
+                  type="button"
+                  :disabled="!store.start"
+                  @click="store.queueAction(store.selectedId, { kind: 'camp' })"
+                >
+                  make camp this turn
+                </button>
+              </template>
+              <p v-else class="dim">not yours to order</p>
+            </div>
+          </PanelSection>
+
+          <InventoryList
+            v-if="ownInventory"
+            :owner-id="ownInventory.id"
+            fold-key="entities.inventory"
+          />
+
+          <PanelSection fold-key="entities.paths" title="paths">
+            <label class="control">
+              <input v-model="store.showHistory" type="checkbox" />
+              <span>show full path history</span>
+            </label>
+
+            <label class="control">
+              <input v-model="store.showAllPaths" type="checkbox" />
+              <span>show all entities paths</span>
+            </label>
+          </PanelSection>
+
+          <PanelSection v-if="adventureLog.length" fold-key="entities.log" title="adventure log">
+            <template #meta>{{ hexesWalked * KM_PER_HEX }} km</template>
+            <div class="control stack">
+              <div class="row">
+                <span>hexes walked</span>
+                <span class="value">{{ hexesWalked }}</span>
+              </div>
+
+              <ol class="journey">
+                <li
+                  v-for="entry in recentTurns"
+                  :key="entry.kind === 'turn' ? `turn:${entry.row.turn}` : entry.encounter.id"
+                >
+                  <button
+                    v-if="entry.kind === 'turn'"
+                    type="button"
+                    :class="{ here: entry.row.turn === shownTurn - 1, ahead: !entry.row.spent }"
+                    :disabled="!store.may('clock')"
+                    :title="
+                      store.may('clock')
+                        ? `put the crawl back as it stood at the end of turn ${entry.row.turn}`
+                        : undefined
+                    "
+                    @click="store.goToTurn(entry.row.turn + 1)"
+                  >
+                    <span class="dim">{{ entry.row.turn }}</span>
+                    <span>{{ entry.row.hex }}</span>
+                    <span class="dim">{{ entry.row.terrain }}</span>
+                    <span class="value">{{
+                      entry.row.entered === 0 ? entry.row.kind : `${entry.row.entered} hex`
+                    }}</span>
+                  </button>
+                  <button
+                    v-else
+                    type="button"
+                    class="met"
+                    :class="{
+                      here: entry.encounter.turn === shownTurn,
+                      ahead: entry.encounter.turn > shownTurn,
+                    }"
+                    :disabled="!store.may('clock')"
+                    :title="
+                      store.may('clock')
+                        ? `put the crawl back to turn ${entry.encounter.turn}, when this was met`
+                        : undefined
+                    "
+                    @click="store.goToTurn(entry.encounter.turn)"
+                  >
+                    <span class="dim">!</span>
+                    <span class="encounter">{{ entry.encounter.title }}</span>
+                    <span class="dim">{{ entry.encounter.hex }}</span>
+                  </button>
+                </li>
+              </ol>
+              <p v-if="olderTurns" class="dim">and {{ olderTurns }} earlier</p>
+
+              <button v-if="store.may('clearHistory')" type="button" @click="store.clearHistory">
+                clear the history
+              </button>
+            </div>
+          </PanelSection>
 
           <p>{{ hint }}</p>
         </div>
@@ -1151,12 +1185,6 @@ dl {
   font-size: 0.8rem;
 }
 
-dl.route {
-  margin-top: 0.5rem;
-  padding-top: 0.5rem;
-  border-top: 1px solid var(--line);
-}
-
 dt {
   color: var(--ink-dim);
 }
@@ -1197,6 +1225,12 @@ p {
   font-size: 0.78rem;
   cursor: pointer;
   user-select: none;
+}
+
+.psec-body > .control:first-child {
+  margin-top: 0;
+  padding-top: 0;
+  border-top: none;
 }
 
 .control input {
