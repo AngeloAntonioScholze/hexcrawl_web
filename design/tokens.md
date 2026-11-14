@@ -46,7 +46,7 @@ Each section notes which bead introduced its tokens:
 | `--line-strong` on `--surface-deep` | 3.7 | 3 non-text |
 
 ## Type
-Font family: `system-ui, -apple-system, 'Segoe UI', sans-serif` (existing). No web fonts.
+Font family: `system-ui, -apple-system, 'Segoe UI', sans-serif` (existing). One self-hosted web font, for the character card name only: Inter Tight 600 (`--card-name-font`, see Card type). No other web fonts.
 
 | token | size / line-height | weight | use |
 |---|---|---|---|
@@ -140,10 +140,39 @@ Set on `.character-card` (not variant dependent):
 | `--card-metal-mid` on `--card-fill-top` | 2.9 | 3.2 | 2.7 | decorative only |
 
 ### Card type
-System stack (no display face; open question in 1a1.10).
+**[amended after a3e3baa, tdj.16]** The name uses a display face; everything else on the card uses the app's system stack.
+
+| token | value |
+|---|---|
+| `--card-name-font` | `'Inter Tight', system-ui, -apple-system, 'Segoe UI', sans-serif` |
+
+`--card-name-font` lives on `:root` in `src/style.css` (not variant dependent), next to these rules:
+```css
+@font-face {
+  font-family: 'Inter Tight';
+  font-style: normal;
+  font-weight: 600;
+  font-display: swap;
+  src: url('./assets/fonts/inter-tight/inter-tight-latin-600-normal.woff2') format('woff2');
+  unicode-range: U+0000-00FF, U+0131, U+0152-0153, U+02BB-02BC, U+02C6, U+02DA, U+02DC, U+0304, U+0308, U+0329, U+2000-206F, U+20AC, U+2122, U+2191, U+2193, U+2212, U+2215, U+FEFF, U+FFFD;
+}
+@font-face {
+  font-family: 'Inter Tight';
+  font-style: normal;
+  font-weight: 600;
+  font-display: swap;
+  src: url('./assets/fonts/inter-tight/inter-tight-latin-ext-600-normal.woff2') format('woff2');
+  unicode-range: U+0100-02BA, U+02BD-02C5, U+02C7-02CC, U+02CE-02D7, U+02DD-02FF, U+0304, U+0308, U+0329, U+1D00-1DBF, U+1E00-1E9F, U+1EF2-1EFF, U+2020, U+20A0-20AB, U+20AD-20C0, U+2113, U+2C60-2C7F, U+A720-A7FF;
+}
+```
+Only weight 600 ships. Names in other scripts fall back to the system stack per glyph. Files and licence: `src/assets/fonts/inter-tight/` (`OFL.txt`, SIL OFL 1.1).
+
 | use | size / line-height | weight | colour |
 |---|---|---|---|
-| name | `1.125rem / 1.33` | 600 | `--ink` |
+| name **[amended]** | `1.25rem / 1.2`, `var(--card-name-font)` | 600 | `--ink` |
+| merchant / rider name **[amended: new]** | `0.8125rem / 1.2` | 600 | `--ink` |
+| merchant type, rider kind **[amended: new]** | `0.6875rem / 1.2` | 400 | `--card-metal-light` |
+| level pill **[amended: new]** | `0.75rem / 1` | 600 | `--ink` on `--card-metal-dark` |
 | stat score | `1.25rem / 1` | 600 | `--ink` |
 | level, gold value | `1rem / 1` | 600 | `--ink` |
 | level, gold label | `0.75rem / 1` | 400 | `--card-metal-light` |

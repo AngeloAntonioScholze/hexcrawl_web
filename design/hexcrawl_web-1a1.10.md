@@ -1,6 +1,16 @@
 # hexcrawl_web-1a1.10: Character card frame and placeholder busts
 
-Status: spec, revised 2026-11-14 to the user's new card shape (replaces the 2026-11-10 shield spec). Final art is deferred. Everything here is designer-specified placeholder art (standalone SVG plus CSS). Real art replaces the files under the same names.
+Status: spec, revised 2026-11-14 to the user's new card shape (replaces the 2026-11-10 shield spec), amended 2026-11-14 after the user's answers (decisions hexcrawl_web-tdj.11 to tdj.16). Final art is deferred. Everything here is designer-specified placeholder art (standalone SVG plus CSS), except the name font. Real art replaces the files under the same names.
+
+## Changes since a3e3baa (decisions tdj.11–tdj.16)
+Sections marked **[amended]** below changed; everything else is as committed in a3e3baa.
+- **tdj.11**: caravan cards show **gold** in the tally row (no level). New slot body `CaravanCardBody.vue`.
+- **tdj.12**: caravan and ship cards are the **same tall rectangle** as people cards (frame 620px at 288px wide), not near-square. Caravans fill the lower area with a **merchant list** (type, level). Ships: **proposal** (pace and sight tally, "aboard" rider list), new slot body `ShipCardBody.vue`, pending the orchestrator's call.
+- **tdj.13**: the card may fill the whole panel height; the body scrolls. No fold or compact variant.
+- **tdj.14**: no kind word on the card (confirmed).
+- **tdj.15**: STR at the top, clockwise (confirmed; tdj.3 unchanged).
+- **tdj.16**: the **name** uses the display face **Inter Tight 600**, self-hosted woff2 (OFL 1.1). Everything else keeps the app font.
+- Acceptance check 9 and the slot rule changed; a "Lower area" section and the font asset were added.
 
 References:
 - Style (metals, ornament, palette): `docs/reference/character-card-frame.jpg`. Keep it.
@@ -17,11 +27,12 @@ Kept as is: bust registry and ids, bust picker behaviour, frame colour variants 
 ## Goal
 Anyone at the table (DM or player) who selects an entity sees who or what it is at a glance: a bust in an oval inside an ornate frame, with its name under it. The one action the card drives is **the DM choosing a bust**. Stats go in the card's slot (`StatHexagon`, tdj.3). Mounting is tdj.4 (DM panels) and hexcrawl_web-ped.6 (player panel).
 
-Applies to every entity kind:
-| kind | card content |
-|---|---|
-| `party`, `npc` | frame, oval, name, slot with `StatHexagon` (level, gold, hexagon) |
-| `caravan`, `ship` | frame, oval, name. No slot: they have no abilities and no character sheet (orchestrator assumption; caravan gold is an open question) |
+Applies to every entity kind **[amended]**. Every kind gets the same frame size; only the slot body differs:
+| kind | card content | slot body |
+|---|---|---|
+| `party`, `npc` | frame, oval, name, slot | `StatHexagon` (level and gold row, stat hexagon; tdj.3) |
+| `caravan` | frame, oval, name, slot | `CaravanCardBody` (gold row, merchant list; see Lower area) |
+| `ship` | frame, oval, name, slot | `ShipCardBody` (pace and sight row, aboard list; see Lower area). Proposal pending the orchestrator |
 
 ## Scope for the implementer
 Reuse from the already built (uncommitted, review-passed) work in `.worktrees/hexcrawl_web/hexcrawl_web-tdj-design`:
@@ -34,6 +45,11 @@ Reuse from the already built (uncommitted, review-passed) work in `.worktrees/he
 Replace:
 - `src/assets/frames/<variant>-top|body|bottom.svg` (9 files) → `<variant>-frame.svg`, `<variant>-crest.svg`, `<variant>-foot.svg` (9 files). Delete the old ones.
 - `src/components/CharacterCard.vue`: template and styles rebuilt to the layout below. Props and emits unchanged.
+
+New **[amended]**:
+- `src/components/CaravanCardBody.vue`, `src/components/ShipCardBody.vue` (Lower area), each with a component test next to it (`// @vitest-environment happy-dom`, as StatHexagon.test.ts).
+- `src/assets/fonts/inter-tight/inter-tight-latin-600-normal.woff2`, `inter-tight-latin-ext-600-normal.woff2`, `OFL.txt`: already in this spec worktree; copy them unchanged. The `@font-face` rules go in `src/style.css` (tokens.md, Card type).
+- Optional: the tally row (word plus value or input) is the same in StatHexagon, CaravanCardBody and ShipCardBody. The implementer may extract it as `src/components/CardTally.vue`; the visual rules stay those of tdj.3 "Tally row".
 
 ## Frame colour rule (unchanged)
 | Entity | Variant |
@@ -66,9 +82,9 @@ All card tokens live in `design/tokens.md`, section **Card**: variant colours (`
    ||   (  oval   )   ||         oval 160×200, centred
    ||    (       )    ||
    ||   Name Surname  ||         name line, centred, 24px
-   ||  level 3  gold 1250 ||     \
-   ||     <hexagon>   ||          > default slot: StatHexagon (people only)
-   ||                 ||         /
+   ||  level 3  gold 1250 ||     \   default slot, 324px for every kind [amended]:
+   ||     <hexagon>   ||          >  StatHexagon (people), CaravanCardBody,
+   ||                 ||         /   ShipCardBody
    +=====\_  ><  _/====+         foot 288×40, 16px below the frame
 ```
 Dimensions at the card's max width (288px):
@@ -81,9 +97,9 @@ Dimensions at the card's max width (288px):
 | name | full content width (256px), `margin-top: 0.75rem`, 24px line | |
 | slot wrapper | full content width (256px), `margin-top: 0.25rem` | rendered only when `$slots.default` |
 
-Heights at 288px wide:
-- Carrier (no slot): frame 28 + 200 + 12 + 24 + 28 = **292px**; card with overhangs **324px**.
-- Person (slot = StatHexagon 28 + 12 + 284 = 324px, tdj.3): frame 292 + 4 + 324 = **620px**; card **652px** (aspect about 1 : 2.26).
+Heights at 288px wide **[amended]**:
+- Every kind: slot body 28 (tally row) + 12 + 284 (lower box) = 324px. Frame 28 + 200 + 12 + 24 + 4 + 324 + 28 = **620px**; card with overhangs **652px** (aspect about 1 : 2.26). Parties, npcs, caravans and ships are the same size, so cards line up wherever two show.
+- A card mounted with no slot (allowed by the contract, used by no mount) is 292px / 324px. a3e3baa used that for carriers; tdj.12 replaced it.
 
 Fits: panel content width is 320px on tablet and desktop (22rem panel, `0 1rem` body padding) and 312px on a 360px phone (column `100vw - 1rem` = 344px, minus 32px). A thin scrollbar takes up to 8px. So the card is 288px wide at every breakpoint and never scales in the two DM mounts. Below 288px (a future narrow mount) it shrinks with `width: 100%`; the frame, oval and name still fit down to 240px; StatHexagon's own minimum is 14rem (tdj.3).
 
@@ -105,10 +121,58 @@ Three layers, all decorative (`alt=""`, `aria-hidden="true"`, `pointer-events: n
 - Strip (pickable only): `position: absolute; left: 0; right: 0; top: 62%; height: 1.5rem; display: grid; place-items: center; background: rgb(0 0 0 / 0.6)`; text per the card type table. At 62 to 74% of the height the oval is at least 147px wide, so the longest strip text ("choose a bust", about 80px) never clips.
 - Empty-state mark: a 40px pointy-top hexagon outline, 1.5px `--card-metal-mid`, 60% opacity, centred.
 
-### Name line
+### Name line **[amended: font, size]**
 - `<h3 class="name">` inside the article (it is the card's heading; mounts sit under an `h3` section title in 0zz, so the mount may pass `heading-level`; see Component contract).
-- `margin: 0.75rem 0 0; width: 100%; text-align: center`; type `1.125rem / 1.33`, 600, `--ink`; one line, `overflow: hidden; text-overflow: ellipsis; white-space: nowrap`.
-- No kind word on the card. The kind is in the article's accessible name, in the entities list, and in the 0zz section meta.
+- `margin: 0.75rem 0 0; width: 100%; text-align: center`; `font-family: var(--card-name-font)`; `font-size: 1.25rem; line-height: 1.2` (24px line, unchanged height); `font-weight: 600`; `letter-spacing: 0`; `--ink`; one line, `overflow: hidden; text-overflow: ellipsis; white-space: nowrap`.
+- Display face: **Inter Tight** 600 (tdj.16: a neo-grotesque, Helvetica-like but more modern; SIL OFL 1.1; self-hosted). Only the name uses it. Font files, `@font-face` and fallback stack: tokens.md, Card type. `font-display: swap`, so the name shows in the system face until the woff2 arrives (about 23 KB for Latin).
+- No kind word on the card (tdj.14, confirmed). The kind is in the article's accessible name, in the entities list, and in the 0zz section meta.
+
+### Lower area: caravan and ship slot bodies **[amended: new]**
+Both bodies sit in the default slot, fill its 256px width and use the same two-part layout as StatHexagon, so every card is 620px tall:
+1. **Tally row**: identical rules to tdj.3 "Tally row" (28px, centred, `gap: 1.5rem`, word in metal-light 0.75rem, value 1rem/600 `--ink`, boxed input when editable, `margin-bottom: 0.75rem`).
+2. **Lower box**: `position: relative; width: 100%; max-width: 16rem; aspect-ratio: 256 / 284` (284px at 256, the hexagon box's size), `display: grid; align-content: start; gap: 4px`.
+
+#### `CaravanCardBody.vue` (tdj.11, tdj.12)
+```ts
+props: {
+  gold: number                     // caravan gold at the current turn: store.suppliesOf(id).gold / player.suppliesOf(id).gold
+  editable: boolean                // mount passes store.may('supplies'): DM only
+  merchants: readonly Pick<Merchant, 'id' | 'name' | 'type' | 'level'>[]   // store.merchantsOf(id) / player.merchantsOf(id)
+}
+emits: {
+  gold: [value: number]            // mount -> store.setSupply(id, 'gold', value)
+}
+```
+- **Tally row**: one cell, `gold`. Caravans have no level (tdj.11). Editable input `min=0 max=1000 step=1` (`SUPPLY_LIMITS.gold.max`), width 4.5rem; read-only a span. Same draft, invalid and commit-on-change rules as tdj.3 (empty or non-numeric reverts; the store clamps). The edit is the same ledger write as the gold field in `caravan.supplies` (from this turn on); both show the same value.
+- **Merchant list** (read-only on the card; editing stays in the `caravan.merchants` section):
+  - `<ul class="crew" aria-label="merchants">`, rows in `merchantsOf` order.
+  - Row: `display: grid; grid-template-columns: 1.5rem 1fr auto; align-items: center; column-gap: 0.5rem; height: 2.5rem` (40px); `padding: 0 0.5rem 0 0.375rem`; `background: color-mix(in srgb, var(--card-window) 80%, transparent)`; `border-radius: var(--radius-control)`; `border-left: 3px solid <MERCHANT_INFO[type].color>` (decorative accent, no contrast duty).
+    - Col 1: `MERCHANT_INFO[type].icon`, 1rem, `aria-hidden="true"`.
+    - Col 2, two lines, each one line with ellipsis: the merchant's `name` in 0.8125rem/600 `--ink`; under it the type label (`MERCHANT_INFO[type].label`, as the merchants section shows it) in 0.6875rem/400 `--card-metal-light`. When `name` equals the label, show the label once (first line only), as `CaravanMerchants` does.
+    - Col 3, level pill: `lv {level}`, 0.75rem/600 `--ink`, tabular-nums; `height: 1.25rem; padding: 0 0.4rem; border-radius: 999px; background: var(--card-metal-dark); border: 1px solid var(--card-metal-light)`. The same metal treatment as the stat modifier circles.
+  - Capacity: 6 rows fill 6×40 + 5×4 = 260px of the 284px box. With **7 or more** merchants: show the first 5, then a 6th line (not a row box) `+{n} more in merchants`, 0.75rem `--card-metal-light`, centred, 24px tall.
+  - Catalog: not on the card. Services and prices need the panel's width and already live in the `caravan.merchants` section directly below; the card names who is aboard and how good they are (tdj.12: "type, level").
+  - Empty: one centred line `no merchants`, 0.8125rem `--card-metal-light`, at the box's vertical centre. The box keeps its 284px height.
+- Accessible names: each row reads "{name}, {type label}, level {n}" (`aria-label` on the `li`, inner text `aria-hidden`).
+
+#### `ShipCardBody.vue` (tdj.12: proposal, pending the orchestrator)
+Ships have no supplies, merchants, abilities or character sheet. What a ship already has (`src/entities/entity.ts`, store): `pacePerTurn`, `sight`, `darkvision`, and riders (ships are carriers: `ridersOf(id)`). Proposal:
+```ts
+props: {
+  pacePerTurn: number
+  sight: number
+  riders: readonly Pick<Entity, 'id' | 'name' | 'kind' | 'color'>[]   // store.ridersOf(id) / player.ridersOf(id)
+}
+emits: {}                          // read-only; pace and sight are edited in the entity rows
+```
+- **Tally row**: two read-only cells, `pace` `{pacePerTurn} hex` and `sight` `{sight} hex`. Values as text (1rem/600 `--ink`), never inputs: pace and sight already have their DM edit rows under the card.
+- **Aboard list**: `<ul class="crew" aria-label="aboard">`, same row box as the merchant list, 40px:
+  - Col 1: an 0.625rem circle in the rider's `color` with a 1px `--card-metal-dark` ring (the entity pip), `aria-hidden`.
+  - Col 2: rider `name`, 0.8125rem/600 `--ink`, ellipsis.
+  - Col 3: rider kind (`party` / `npc`), 0.6875rem `--card-metal-light`.
+  - Same capacity rule: 6 rows, or 5 plus `+{n} more aboard`.
+  - Empty: `nobody aboard` (the existing riders phrase), centred.
+- If the orchestrator rejects this, fallback: ship cards carry no slot (292px frame), against tdj.12. A decision is needed only if neither fits.
 
 ## Component contract (reused by tdj.4 and ped.6)
 `CharacterCard` is presentational. It never reads the store, the router, the session or which panel mounts it. Props in, events out.
@@ -124,7 +188,8 @@ emits: {
   bust: [id: string | null]  // mount calls store.setPortrait(entity.id, id)
 }
 slots: {
-  default: stats region under the name. Empty slot: no wrapper is rendered.
+  default: the 324px body under the name (StatHexagon, CaravanCardBody or ShipCardBody,
+           chosen by the mount from entity.kind). Empty slot: no wrapper is rendered.
 }
 ```
 - Root: `<article class="character-card" :data-variant="variant" :aria-label="`${entity.name}, ${entity.kind}`">`. The variant custom properties are set on the root, so slotted children inherit them.
@@ -181,6 +246,15 @@ All shapes use the variant's metal colours (tokens.md, Card) as hard-coded fills
 - Centre point: polygon `126,14 162,14 144,38`, metal gradient, a nod to the old shield point.
 - Transparent elsewhere; between x 40 and 248 above y 14 only the blades show, so the hexagon's bottom modifier circle (tdj.3) stays readable above the frame's inner edge.
 
+### Name font: `src/assets/fonts/inter-tight/` **[amended: new]**
+| file | source | licence |
+|---|---|---|
+| `inter-tight-latin-600-normal.woff2` (22,660 B) | `@fontsource/inter-tight` 5.3.0 via jsDelivr, `files/inter-tight-latin-600-normal.woff2` | SIL OFL 1.1 |
+| `inter-tight-latin-ext-600-normal.woff2` (37,904 B) | same package, `files/inter-tight-latin-ext-600-normal.woff2` | SIL OFL 1.1 |
+| `OFL.txt` | `google/fonts`, `ofl/intertight/OFL.txt` ("Copyright 2022 The Inter Project Authors") | the licence itself; ship it next to the fonts |
+
+OFL 1.1 allows commercial use, bundling and self-hosting; the font may not be sold alone and the licence must travel with it. No CDN at runtime: Vite bundles the files from `src/assets`. The font is not AGPL; `OFL.txt` stays in the folder.
+
 ### Busts: `src/assets/busts/<id>.svg` (unchanged)
 viewBox `0 0 256 192`, transparent, head top near y 24, flat 3–4 tones, rim light `#e6e8ec` at 30% on the upper-left contour, shared palette (skin `#b89a82`, shade `#7d6553`, hair `#3a3530`, metal `#9aa3ad`, one accent at ≤45% saturation). The 14 ids and labels stay: knight, ranger, rogue, wizard, cleric, bard, dwarf, elf, crone, brute, merchant, captain, wagon, ship.
 
@@ -193,6 +267,8 @@ Lowercase, as the panels.
 - Strip: "choose a bust" (empty), "change bust" (has one), "unknown bust" (unknown id; the long form moved to the button `title`: "stored bust: {id}").
 - Oval button `aria-label`: `` `choose a bust for ${name}` ``; with a bust `` `change ${name}'s bust (now ${label})` ``.
 - Picker title `` `${name}: bust` ``; first tile "no bust"; other tiles use the bust labels.
+- **[amended]** Caravan body: tally word `gold`; list `aria-label` "merchants"; `lv {n}`; overflow `+{n} more in merchants`; empty `no merchants`; gold input `aria-label` "caravan gold, in coins", invalid `title` "a whole number from 0 to 1000".
+- **[amended]** Ship body (proposal): tally words `pace`, `sight`, values `{n} hex`; list `aria-label` "aboard"; overflow `+{n} more aboard`; empty `nobody aboard`.
 - Article `aria-label`: `` `${name}, ${kind}` `` with the raw kind (`party`, `npc`, `caravan`, `ship`).
 
 ## Accessibility
@@ -215,8 +291,9 @@ Screens: caravan panel and entities panel (DM), at 360, 768 and 1280px.
 6. Not pickable: the oval is not focusable and no picker opens.
 7. Empty and unknown ids show the empty state; an unknown id survives a reload.
 8. A 40-character name ellipsizes on one line.
-9. A carrier's card has no slot wrapper: frame height 292px at 288px wide.
+9. **[amended]** Every kind's frame is 620px tall at 288px wide. Caravan: gold row (input for the DM, text for players) and the merchant list with type and level; 7+ merchants show 5 rows plus the "+n more" line; none shows "no merchants". Ship: pace and sight row and the aboard list, or per the orchestrator's call.
 10. Reduced motion: no crossfade.
+11. **[amended]** The name renders in Inter Tight 600 (devtools > Fonts shows the self-hosted file, no third-party request); other card text uses the system stack.
 
 ## Open questions
-See the report; the manager files them as decision beads. Display typeface (none until the user picks one) stays open from the 2026-11-10 spec.
+**[amended]** All six from a3e3baa are answered (tdj.11–tdj.16). Still open: the ship slot body (proposal above), for the orchestrator.
