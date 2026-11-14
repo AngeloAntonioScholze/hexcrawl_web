@@ -88,6 +88,11 @@ Grouped by area, newest first within each group. Bead IDs are in the root beads 
   - Player view rules, reveal map, recolour.
   - Permissions, player projection and a PeerJS probe.
 
+**Panel dock** (`hexcrawl_web-ped`)
+- 2026-11-14: Caravan info panel always in the player dock, read-only. It shows a summary (standing, headed, pace), supplies, inventory, riders and merchants with prices. It follows the caravan the party rides, or the one caravan it walks with. With two caravans and neither ridden it shows "not travelling with a caravan". Boarding or leaving swaps the content without folding. DM CaravanPanel unchanged (`components/CaravanPanel.vue`, `composables/usePlayerView.ts` `infoCaravan`).
+- 2026-11-14: Each panel section (supplies, inventory, riders, merchants, route, journey log, notes, ...) folds on its own, with keyboard support and `aria-expanded`. Fold state persists per browser in localStorage `hexcrawl.sectionFolds` (`components/PanelSection.vue`, `composables/useSectionFolds.ts`).
+- 2026-11-13: All panels (world, entities, caravan, hex details) stacked in one left column, one open at a time (`hexcrawl_web-tb0`).
+
 **World generation** (`hexcrawl_web-hx9`)
 - 2026-10-18: Mountain ranges from ridged noise. Terraced heights, one per level (`terrain/ranges.ts`, `field.ts`).
 - 2026-10-17: Map styles for world generation. Elevation terraces from peaks to coast (`terrain/mapStyles.ts`).
@@ -130,4 +135,6 @@ Grouped by area, newest first within each group. Bead IDs are in the root beads 
 
 ## Decisions
 - 2026-11-06: Tasks and memories moved to the root beads DB (`repo:hexcrawl_web`). This file replaces the per-repo CLAUDE.md/AGENTS.md and the local skills.
+- 2026-11-14: Player caravan panel is read-only, and its dock slot is always present. It shows player-allowed fields only. The tdj.4 caravan card repeating gold and the merchants is deliberate (tdj.11/12): the card lists merchant name, type and level, and the priced catalog stays in the section.
+- 2026-11-14: Player dock specs are in `design/hexcrawl_web-ped.5.md`, `.6.md` and `.7.md`, with the sketch at `docs/reference/player-card-sketch-2026-11-14.png`. ped.5 (no entities panel for players) ships together with ped.6 (my character panel).
 - Beads stays local-only: no Dolt remote.
