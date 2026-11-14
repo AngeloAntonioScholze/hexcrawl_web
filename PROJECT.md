@@ -64,6 +64,7 @@ docs/reference/ art references
   List these places in the bead description.
 - **Babylon render loop**: anything that throws inside `scene.onBeforeRenderObservable` kills rendering for good. Keep window/grid capacity in sync with the zoom limit (see bead `hexcrawl_web-z5s`).
 - Test files live next to their source. Match the surrounding code and comment style.
+- Component tests use `@vue/test-utils` + happy-dom (devDeps), enabled per file with `// @vitest-environment happy-dom`.
 - More gotchas are in bd memories with the `hexcrawl-web-` prefix (thin instances, Vite on Windows, scoped styles, perf tools).
 
 ## Hot spots
@@ -98,7 +99,8 @@ Grouped by area, newest first within each group. Bead IDs are in the root beads 
 - 2026-10-17: Map styles for world generation. Elevation terraces from peaks to coast (`terrain/mapStyles.ts`).
 
 **Entities, characters, caravan** (`hexcrawl_web-t3p`, `hexcrawl_web-1a1`, `hexcrawl_web-tdj`)
-- 2026-10-18: Caravan portraits (`entities/portraits.ts`).
+- 2026-11-14: Character card components, not yet mounted (mounts wait on ped.12). Rectangle card frame (9-slice steel/bronze/crimson, crest, foot) with oval bust and bust registry (`entities/busts.ts`, `components/CharacterCard.vue`, `BustPicker.vue`, `assets/frames`, `assets/busts`). `CaravanCardBody.vue` (caravan gold + merchants), `ShipCardBody.vue` (pace, sight, aboard), `cardBody.ts`. `StatHexagon.vue`: big hexagon, small hex per ability, modifier circle, level + gold row. `setPortrait` for every entity kind (DM only). Beads 1a1.10, tdj.3.
+- 2026-10-18: Caravan portraits (`entities/portraits.ts`). Superseded by busts: scenic caravan portraits removed 2026-11-14; `portraits.ts` now holds only `PROFESSION_ICONS`.
 - 2026-10-17: Purse and level for parties and NPCs. Ability scores. Darkvision (`entities/abilities.ts`).
 - 2026-10-14: Inventories, merchant UI, zoom limit (`entities/inventory.ts`, `components/CaravanMerchants.vue`, `useZoomLimit.ts`).
 - 2026-10-13/14: Caravan panel. Food and gold, set per turn. Default merchant services catalog with DM overrides. Merchant types table.
@@ -137,4 +139,5 @@ Grouped by area, newest first within each group. Bead IDs are in the root beads 
 - 2026-11-06: Tasks and memories moved to the root beads DB (`repo:hexcrawl_web`). This file replaces the per-repo CLAUDE.md/AGENTS.md and the local skills.
 - 2026-11-14: Player caravan panel is read-only, and its dock slot is always present. It shows player-allowed fields only. The tdj.4 caravan card repeating gold and the merchants is deliberate (tdj.11/12): the card lists merchant name, type and level, and the priced catalog stays in the section.
 - 2026-11-14: Player dock specs are in `design/hexcrawl_web-ped.5.md`, `.6.md` and `.7.md`, with the sketch at `docs/reference/player-card-sketch-2026-11-14.png`. ped.5 (no entities panel for players) ships together with ped.6 (my character panel).
+- 2026-11-14: Card shape comes from the user's sketch (`docs/reference/player-card-sketch-2026-11-14.png`): the same tall card for every entity kind. Card names use Inter Tight 600 (SIL OFL 1.1), self-hosted woff2 in `src/assets/fonts/inter-tight` with `OFL.txt`, `@font-face` in `style.css`, no CDN. The caravan card shows caravan gold (its own purse) and a merchant summary. Entity cards will open in sub-panel columns right of the dock (ped.12); the in-dock mount (tdj.4) is held on branch `agent/hexcrawl_web-tdj.4`.
 - Beads stays local-only: no Dolt remote.
