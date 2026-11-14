@@ -1,13 +1,13 @@
 <script setup lang="ts">
 import { computed, ref } from 'vue'
 import { orderOf, usePlayerView } from '../composables/usePlayerView'
-import { CARAVAN_PORTRAITS, caravanPortrait } from '../entities/portraits'
+import { bustOf } from '../entities/busts'
 import { useHexMapStore } from '../stores/hexMap'
+import BustPicker from './BustPicker.vue'
 import CaravanMerchants from './CaravanMerchants.vue'
 import CaravanSupplies from './CaravanSupplies.vue'
 import InventoryList from './InventoryList.vue'
 import PanelSection from './PanelSection.vue'
-import PopupDialog from './PopupDialog.vue'
 
 const store = useHexMapStore()
 // The players read what they see from their projection, as their map does.
@@ -38,11 +38,10 @@ const picking = ref(false)
 const mayPick = computed(
   () => !forPlayers.value && !!caravan.value && store.may('entitySettings', caravan.value),
 )
-const portrait = computed(() => caravanPortrait(caravan.value?.portrait))
+const bust = computed(() => bustOf(caravan.value?.portrait))
 
 const pick = (id: string | null): void => {
   if (caravan.value) store.setPortrait(caravan.value.id, id)
-  picking.value = false
 }
 </script>
 
@@ -89,16 +88,16 @@ const pick = (id: string | null): void => {
           <dd>{{ caravan.pacePerTurn }} hex a turn</dd>
         </dl>
 
-        <div v-if="mayPick" class="row portrait-row">
-          <span class="label">portrait</span>
+        <div v-if="mayPick" class="row bust-row">
+          <span class="label">bust</span>
           <button
             type="button"
-            class="portrait-choose"
-            :title="`choose a portrait for ${caravan.name}`"
+            class="bust-choose"
+            :title="`choose a bust for ${caravan.name}`"
             @click="picking = true"
           >
-            <img v-if="portrait" :src="portrait.url" alt="" class="thumb" />
-            <span>{{ portrait?.label ?? 'none' }}</span>
+            <img v-if="bust" :src="bust.url" alt="" class="thumb" />
+            <span>{{ bust?.label ?? 'none' }}</span>
           </button>
         </div>
 
@@ -142,33 +141,13 @@ const pick = (id: string | null): void => {
       </template>
     </div>
 
-    <PopupDialog v-if="caravan && mayPick" v-model="picking" :title="`${caravan.name}: portrait`">
-      <ul class="portraits">
-        <li>
-          <button
-            type="button"
-            class="none"
-            :class="{ here: !portrait }"
-            :aria-pressed="!portrait"
-            @click="pick(null)"
-          >
-            <span class="frame">none</span>
-            <span class="label">no portrait</span>
-          </button>
-        </li>
-        <li v-for="one in CARAVAN_PORTRAITS" :key="one.id">
-          <button
-            type="button"
-            :class="{ here: one.id === portrait?.id }"
-            :aria-pressed="one.id === portrait?.id"
-            @click="pick(one.id)"
-          >
-            <img :src="one.url" alt="" class="frame" />
-            <span class="label">{{ one.label }}</span>
-          </button>
-        </li>
-      </ul>
-    </PopupDialog>
+    <BustPicker
+      v-if="caravan && mayPick"
+      v-model:open="picking"
+      :name="caravan.name"
+      :current="caravan.portrait"
+      @pick="pick"
+    />
   </aside>
 </template>
 
@@ -307,12 +286,12 @@ p {
   font-size: 0.78rem;
 }
 
-.portrait-row {
+.bust-row {
   align-items: center;
   font-size: 0.78rem;
 }
 
-.portrait-choose {
+.bust-choose {
   display: flex;
   align-items: center;
   gap: 0.4rem;
@@ -325,7 +304,7 @@ p {
   cursor: pointer;
 }
 
-.portrait-choose:hover {
+.bust-choose:hover {
   background: color-mix(in srgb, var(--line) 45%, transparent);
 }
 
@@ -334,53 +313,6 @@ p {
   height: 1.5rem;
   border-radius: 0.15rem;
   object-fit: cover;
-}
-
-.portraits {
-  display: grid;
-  grid-template-columns: repeat(auto-fill, minmax(9rem, 1fr));
-  gap: 0.6rem;
-  margin: 0;
-  padding: 0;
-  list-style: none;
-}
-
-.portraits button {
-  display: flex;
-  width: 100%;
-  flex-direction: column;
-  gap: 0.3rem;
-  padding: 0.3rem;
-  border: 1px solid transparent;
-  border-radius: 0.35rem;
-  background: none;
-  color: inherit;
-  font: inherit;
-  font-size: 0.78rem;
-  cursor: pointer;
-}
-
-.portraits button:hover {
-  background: color-mix(in srgb, var(--line) 45%, transparent);
-}
-
-.portraits button.here {
-  border-color: var(--ink-dim);
-  background: color-mix(in srgb, var(--line) 70%, transparent);
-}
-
-.portraits .frame {
-  display: grid;
-  width: 100%;
-  aspect-ratio: 4 / 3;
-  place-items: center;
-  border-radius: 0.2rem;
-  object-fit: cover;
-}
-
-.portraits .none .frame {
-  border: 1px dashed var(--line);
-  color: var(--ink-dim);
 }
 
 .list {

@@ -53,7 +53,7 @@ import {
   type Merchant,
   type MerchantType,
 } from '../entities/merchant'
-import { caravanPortrait } from '../entities/portraits'
+import { bustOf } from '../entities/busts'
 import {
   carriesSupplies,
   cutSupplies,
@@ -704,11 +704,10 @@ export const useHexMapStore = defineStore('hexMap', () => {
     patch(id, { darkvision })
   }
 
-  /** Only a caravan has a picture, and only one of the bundled ones; null takes it down. */
+  /** Any entity's bust, only one of the bundled ones; null takes it down. */
   const setPortrait = (id: string, portrait: string | null): void => {
-    const one = entityOf(id)
-    if (!may('entitySettings', one) || one?.kind !== 'caravan') return
-    if (portrait !== null && !caravanPortrait(portrait)) return
+    if (!may('entitySettings', entityOf(id))) return
+    if (portrait !== null && !bustOf(portrait)) return
     patch(id, { portrait: portrait ?? undefined })
   }
 

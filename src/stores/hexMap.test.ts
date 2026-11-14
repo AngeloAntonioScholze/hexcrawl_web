@@ -1861,57 +1861,57 @@ describe('riding in a caravan', () => {
   })
 })
 
-describe("a caravan's portrait", () => {
-  const portraitOf = (store: Store, id: string): string | undefined =>
+describe("an entity's bust", () => {
+  const bustIdOf = (store: Store, id: string): string | undefined =>
     store.entities.find((one) => one.id === id)?.portrait
 
   it('starts with none, and takes one of the bundled ones', () => {
     const store = setup()
     const caravan = store.addEntity('the wagons', 'caravan')!.id
-    expect(portraitOf(store, caravan)).toBeUndefined()
+    expect(bustIdOf(store, caravan)).toBeUndefined()
 
-    store.setPortrait(caravan, 'night-camp')
-    expect(portraitOf(store, caravan)).toBe('night-camp')
+    store.setPortrait(caravan, 'wagon')
+    expect(bustIdOf(store, caravan)).toBe('wagon')
   })
 
-  it('turns away a portrait the build does not ship, and keeps the one it had', () => {
+  it.each(['party', 'npc', 'caravan', 'ship'] as const)('gives a %s a bust too', (kind) => {
     const store = setup()
-    const caravan = store.addEntity('the wagons', 'caravan')!.id
-    store.setPortrait(caravan, 'night-camp')
-
-    store.setPortrait(caravan, 'a-sketch')
-    expect(portraitOf(store, caravan)).toBe('night-camp')
+    const id = store.addEntity(`the ${kind}`, kind)!.id
+    store.setPortrait(id, 'knight')
+    expect(bustIdOf(store, id)).toBe('knight')
   })
 
-  it('gives nothing but a caravan a portrait', () => {
+  it('turns away a bust the build does not ship, and keeps the one it had', () => {
     const store = setup()
     const party = store.entities[0].id
-    store.setPortrait(party, 'night-camp')
-    expect(portraitOf(store, party)).toBeUndefined()
+    store.setPortrait(party, 'wizard')
+
+    store.setPortrait(party, 'dusk-road')
+    expect(bustIdOf(store, party)).toBe('wizard')
   })
 
-  it('takes the portrait down again, and undo puts it back', () => {
+  it('takes the bust down again, and undo puts it back', () => {
     const store = setup()
     const caravan = store.addEntity('the wagons', 'caravan')!.id
-    store.setPortrait(caravan, 'coast-road')
+    store.setPortrait(caravan, 'merchant')
 
     store.setPortrait(caravan, null)
-    expect(portraitOf(store, caravan)).toBeUndefined()
+    expect(bustIdOf(store, caravan)).toBeUndefined()
 
     store.undo()
-    expect(portraitOf(store, caravan)).toBe('coast-road')
+    expect(bustIdOf(store, caravan)).toBe('merchant')
   })
 
-  it('comes back from a snapshot with the portrait it was saved with', () => {
+  it('comes back from a snapshot with the bust it was saved with', () => {
     const store = setup()
     const caravan = store.addEntity('the wagons', 'caravan')!.id
-    store.setPortrait(caravan, 'winter-pass')
+    store.setPortrait(caravan, 'captain')
     const saved = store.snapshot
 
     setActivePinia(createPinia())
     const fresh = setup()
     fresh.restore(saved)
-    expect(portraitOf(fresh, caravan)).toBe('winter-pass')
+    expect(bustIdOf(fresh, caravan)).toBe('captain')
   })
 })
 
@@ -3460,7 +3460,8 @@ describe("the store's permissions", () => {
       ['setPace', (s, t) => s.setPace(t.party, 2)],
       ['setEntitySight', (s, t) => s.setEntitySight(t.party, 9)],
       ['setDarkvision', (s, t) => s.setDarkvision(t.party, true)],
-      ['setPortrait', (s, t) => s.setPortrait(t.wagon, 'night-camp')],
+      ['setPortrait', (s, t) => s.setPortrait(t.wagon, 'wagon')],
+      ['setPortrait', (s, t) => s.setPortrait(t.party, 'knight')],
       ['setPlayerReachCapped', (s) => s.setPlayerReachCapped(false)],
     ],
     clock: [
