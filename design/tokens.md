@@ -10,6 +10,7 @@ Each section notes which bead introduced its tokens:
 - `tb0`: one left column
 - `q55`: panel restyle
 - `17y`: smooth folding
+- `1a1.10`: character card (see Card)
 
 ## Color
 | token | value | role | bead |
@@ -98,3 +99,67 @@ The phone values apply under `@media (max-width: 720px)`.
 | `--ease-fold` | `cubic-bezier(0.2, 0, 0, 1)` | all folds |
 
 Under `prefers-reduced-motion: reduce`, both `--motion-fold` and `--motion-fold-section` are `0ms`.
+
+## Card (1a1.10, tdj.3)
+Used by `CharacterCard` and `StatHexagon` (`design/hexcrawl_web-1a1.10.md`, `design/hexcrawl_web-tdj.3.md`). Reference art: `docs/reference/character-card-frame.jpg` (style), `docs/reference/player-card-sketch-2026-11-14.png` (shape).
+
+**Exception to the `:root` rule**: the colour tokens below change per frame variant, so they are set on `.character-card[data-variant='steel' | 'bronze' | 'crimson']` in `CharacterCard.vue`, not on `:root`. Slotted children (`StatHexagon`) inherit them. Any component that reads them outside a card gives the steel value as the `var()` fallback.
+
+### Variant colours
+| token | steel | bronze | crimson | role |
+|---|---|---|---|---|
+| `--card-metal-light` | `#a9c0d8` | `#e0b27a` | `#e8927a` | metal highlight; label and modifier-ring ink; stat hex outline |
+| `--card-metal-mid` | `#5b7898` | `#9a6a36` | `#a8402e` | metal body; decorative strokes only, never text, never a control's only boundary |
+| `--card-metal-dark` | `#24344a` | `#3e2914` | `#451812` | metal shadow; inner rims; modifier circle fill |
+| `--card-fill-top` | `#22324a` | `#33241a` | `#37160f` | card interior, top of the gradient |
+| `--card-fill-bottom` | `#131b27` | `#1a120b` | `#1c0b08` | card interior, bottom of the gradient |
+| `--card-window` | `#0b1119` | `#120c07` | `#140806` | oval, stat hex and field fill (darkest surface) |
+
+Which variant an entity gets: `frameVariant()` in `src/entities/busts.ts` (rule in the 1a1.10 spec). The frame SVGs hard-code the same hex values, so they stay standalone files.
+
+### Card sizes
+Set on `.character-card` (not variant dependent):
+| token | value | use |
+|---|---|---|
+| `--card-width` | `18rem` (288px) | card max width; the card is `width: min(100%, var(--card-width))` |
+| `--card-pad` | `1rem` | content inset from the frame's outer edge |
+| `--card-overhang` | `1rem` | crest above and blades below the frame rectangle |
+| `--card-oval-w` | `10rem` (160px) | portrait oval width |
+| `--card-oval-h` | `12.5rem` (200px) | portrait oval height (4:5) |
+| `--card-field-h` | `1.75rem` (28px) | level and gold field height |
+
+### Measured contrast (WCAG 2.x)
+| pair | steel | bronze | crimson | need |
+|---|---|---|---|---|
+| `--ink` on `--card-window` | 15.5 | 15.8 | 16.1 | 4.5 text |
+| `--ink` on `--card-fill-top` (name) | 10.6 | 12.1 | 13.3 | 4.5 text |
+| `--ink` on `--card-metal-dark` (modifier) | 10.4 | 11.1 | 12.2 | 4.5 text |
+| `--card-metal-light` on `--card-window` | 10.1 | 10.0 | 8.3 | 4.5 text |
+| `--card-metal-light` on `--card-fill-top` (labels; stat hex outline) | 7.0 | 7.7 | 6.9 | 4.5 text / 3 non-text |
+| `--danger` on `--card-window` (invalid outline) | 6.4 | 6.6 | 6.7 | 3 non-text |
+| `--card-metal-mid` on `--card-fill-top` | 2.9 | 3.2 | 2.7 | decorative only |
+
+### Card type
+System stack (no display face; open question in 1a1.10).
+| use | size / line-height | weight | colour |
+|---|---|---|---|
+| name | `1.125rem / 1.33` | 600 | `--ink` |
+| stat score | `1.25rem / 1` | 600 | `--ink` |
+| level, gold value | `1rem / 1` | 600 | `--ink` |
+| level, gold label | `0.75rem / 1` | 400 | `--card-metal-light` |
+| stat abbreviation | `0.625rem / 1`, `letter-spacing: 0.06em` | 600 | `--card-metal-light` |
+| modifier | `0.75rem / 1` | 600 | `--ink` |
+| bust strip | `0.72rem / 1` | 400 | `--ink` |
+
+All numbers `font-variant-numeric: tabular-nums`.
+
+### Card motion
+| token | value | use |
+|---|---|---|
+| `--card-motion-hover` | `120ms ease-out` | stroke, border and strip colour/opacity on hover |
+| `--card-motion-swap` | `150ms ease-out` | bust crossfade |
+
+Under `prefers-reduced-motion: reduce`, `--card-motion-swap` is `0ms`. The hover change is colour only and stays.
+
+### Card error colour
+Invalid drafts use `--danger`, plus a dashed outline so the state never relies on colour alone (crimson frames are already red). This replaces the old local `#ff8a7a`.
