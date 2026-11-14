@@ -267,7 +267,7 @@ input.value {
   color: var(--ink);
   background: var(--window);
   border: 1px solid var(--metal-light);
-  border-radius: var(--radius-control, 6px);
+  border-radius: var(--radius-control, 0.25rem);
   transition: background-color var(--hover);
 }
 
@@ -289,7 +289,7 @@ input.value:focus {
 }
 
 .cell.invalid input.value {
-  border: 1px dashed var(--danger);
+  border: 1px dashed var(--danger, #e07a6a);
 }
 
 .hexagon {
@@ -359,7 +359,7 @@ svg {
 }
 
 .stat.invalid .hex {
-  stroke: var(--danger);
+  stroke: var(--danger, #e07a6a);
   stroke-width: 2;
   stroke-dasharray: 4 3;
 }
