@@ -268,9 +268,11 @@ button.oval:focus-visible .strip,
   margin: 0.75rem 0 0;
   overflow: hidden;
   color: var(--ink);
-  font-size: 1.125rem;
+  font-family: var(--card-name-font);
+  font-size: 1.25rem;
   font-weight: 600;
-  line-height: 1.33;
+  letter-spacing: 0;
+  line-height: 1.2;
   text-align: center;
   text-overflow: ellipsis;
   white-space: nowrap;
