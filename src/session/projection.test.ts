@@ -299,6 +299,33 @@ describe('what the players never get', () => {
     ])
   })
 
+  it('sends no row at all for a hidden caravan, even one with orders', () => {
+    const map = snapshot()
+    const view = project({
+      ...map,
+      queue: [
+        ...map.queue,
+        { entityId: 'smugglers', action: { kind: 'move', route: ['8,0'], waypoints: [] } },
+      ],
+    })
+    const rows = (list: readonly object[]): string[] =>
+      list.map((one) => JSON.stringify(one)).filter((text) => text.includes('"smugglers"'))
+    expect(rows(view.entities)).toEqual([])
+    expect(rows(view.states)).toEqual([])
+    expect(rows(view.queue)).toEqual([])
+    expect(rows(view.supplies)).toEqual([])
+    expect(rows(view.merchants)).toEqual([])
+    expect(rows(view.items)).toEqual([])
+  })
+
+  it("sends a caravan's supplies as they stand this turn, not as set for a later one", () => {
+    const map = snapshot()
+    const later = { entityId: 'caravan', turn: 3, food: 99, gold: 99 }
+    expect(project({ ...map, supplies: [...map.supplies, later] }).supplies).toEqual([
+      { entityId: 'caravan', food: 10, gold: 20 },
+    ])
+  })
+
   it('does not name a hidden carrier its riders are in', () => {
     const stowaway = project().states.find((one) => one.entityId === 'stowaway')
     expect(stowaway).toMatchObject({ at: '7,0', riding: null })

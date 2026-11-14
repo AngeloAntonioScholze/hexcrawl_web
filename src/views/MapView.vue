@@ -178,7 +178,8 @@ const shownCaravan = computed(() =>
 const rendered = computed<Record<SidePanel, boolean>>(() => ({
   world: shapesWorld.value,
   entities: true,
-  caravan: !!shownCaravan.value,
+  // The players' caravan panel is always there, empty when they travel with none.
+  caravan: forPlayers.value || !!shownCaravan.value,
   details: store.may('notes') && store.selectedHex !== null,
 }))
 const dockRows = computed(() => Object.values(rendered.value).filter(Boolean).length)

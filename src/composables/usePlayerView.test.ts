@@ -243,6 +243,96 @@ describe('the player view', () => {
     expect(view.merchantsOf(caravan.id)).toEqual([])
   })
 
+  describe("the caravan the players' panel tells of", () => {
+    /** The party at 2,0 and a caravan at 0,0, with the party walking aboard over two turns. */
+    const boarding = (store: Store): string => {
+      const party = store.selectedId
+      const caravan = store.addEntity('the caravan', 'caravan')!
+      store.selectEntity(caravan.id)
+      store.select({ q: 0, r: 0 })
+      store.selectEntity(party)
+      store.select({ q: 2, r: 0 })
+      store.select({ q: 0, r: 0 })
+      asDm(store, store.advanceTurn)
+      asDm(store, store.advanceTurn)
+      return caravan.id
+    }
+
+    const placed = (store: Store, name: string, at: { q: number; r: number }): string => {
+      const back = store.selectedId
+      const caravan = store.addEntity(name, 'caravan')!
+      store.selectEntity(caravan.id)
+      store.select(at)
+      store.selectEntity(back)
+      return caravan.id
+    }
+
+    it('is the subject when the subject is a caravan', () => {
+      const store = setup()
+      const caravan = placed(store, 'the caravan', { q: 0, r: 0 })
+      placed(store, 'the other', { q: 3, r: 0 })
+      store.selectEntity(caravan)
+      store.dmView = false
+      expect(usePlayerView().infoCaravan.value?.id).toBe(caravan)
+    })
+
+    it('is the one the subject rides in, whatever others there are', () => {
+      const store = setup()
+      const party = store.selectedId
+      const caravan = boarding(store)
+      placed(store, 'the other', { q: -3, r: 0 })
+      expect(store.carrierOf(party)).toBe(caravan)
+      store.dmView = false
+      expect(usePlayerView().infoCaravan.value?.id).toBe(caravan)
+    })
+
+    it('is the only caravan in sight when the subject walks', () => {
+      const store = setup()
+      const party = store.selectedId
+      store.select({ q: 0, r: 0 })
+      const caravan = placed(store, 'the caravan', { q: 3, r: 0 })
+      const hidden = store.addEntity('the smugglers', 'caravan', 'dm')!
+      store.selectEntity(hidden.id)
+      asDm(store, () => store.select({ q: -3, r: 0 }))
+      store.selectEntity(party)
+      expect(store.entities.some((one) => one.id === hidden.id)).toBe(true)
+      store.dmView = false
+      const view = usePlayerView()
+      expect(view.shownCaravan.value).toBeNull()
+      expect(view.infoCaravan.value?.id).toBe(caravan)
+    })
+
+    it('is none with two caravans in sight and the subject in neither, or none at all', () => {
+      const store = setup()
+      store.select({ q: 0, r: 0 })
+      store.dmView = false
+      const view = usePlayerView()
+      expect(view.infoCaravan.value).toBeNull()
+
+      store.dmView = true
+      placed(store, 'the caravan', { q: 3, r: 0 })
+      placed(store, 'the other', { q: -3, r: 0 })
+      store.dmView = false
+      expect(view.infoCaravan.value).toBeNull()
+    })
+
+    it('swaps to the empty state when the subject leaves the only one of two it rode in', () => {
+      const store = setup()
+      const party = store.selectedId
+      const caravan = boarding(store)
+      placed(store, 'the other', { q: -3, r: 0 })
+      store.dmView = false
+      const view = usePlayerView()
+      expect(view.infoCaravan.value?.id).toBe(caravan)
+
+      store.selectEntity(party)
+      store.select({ q: 1, r: 0 })
+      asDm(store, store.advanceTurn)
+      expect(store.carrierOf(party)).toBeNull()
+      expect(view.infoCaravan.value).toBeNull()
+    })
+  })
+
   it('holds where everybody stood when the turn just played opened', () => {
     const store = setup()
     const party = store.selectedId

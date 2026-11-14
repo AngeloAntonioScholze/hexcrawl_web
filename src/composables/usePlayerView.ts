@@ -289,6 +289,8 @@ export interface PlayerView {
   carrierOf(id: string): string | null
   /** The caravan the panel shows, as the store's shownCaravan: the selected one or the one it rides in. */
   shownCaravan: ComputedRef<Entity | null>
+  /** The caravan the players' panel tells of: the shown one, else the only one they can see. */
+  infoCaravan: ComputedRef<Entity | null>
   itemsOf(ownerId: string): readonly Item[]
   /** Who an entity may hand items to, as the store's inventoryPartners. */
   inventoryPartners(id: string): readonly Entity[]
@@ -339,6 +341,13 @@ function createPlayerView(store: ReturnType<typeof useHexMapStore>): PlayerView 
   const carrierOf = (id: string): string | null => scene.value.states.get(id)?.riding ?? null
   const ridersOf = (caravanId: string): readonly Entity[] => ridingIn.value.get(caravanId) ?? []
 
+  const shownCaravan = computed(() => {
+    const selected = scene.value.entityOf.get(selectedId())
+    if (selected?.kind === 'caravan') return selected
+    const carrier = scene.value.entityOf.get(carrierOf(selectedId()) ?? '')
+    return carrier?.kind === 'caravan' ? carrier : null
+  })
+
   return {
     projection,
     scene,
@@ -362,11 +371,11 @@ function createPlayerView(store: ReturnType<typeof useHexMapStore>): PlayerView 
     ),
     ridersOf,
     carrierOf,
-    shownCaravan: computed(() => {
-      const selected = scene.value.entityOf.get(selectedId())
-      if (selected?.kind === 'caravan') return selected
-      const carrier = scene.value.entityOf.get(carrierOf(selectedId()) ?? '')
-      return carrier?.kind === 'caravan' ? carrier : null
+    shownCaravan,
+    infoCaravan: computed(() => {
+      if (shownCaravan.value) return shownCaravan.value
+      const caravans = scene.value.entities.filter((one) => one.kind === 'caravan')
+      return caravans.length === 1 ? caravans[0] : null
     }),
     itemsOf: (ownerId) => projection.value.items.filter((one) => one.ownerId === ownerId),
     inventoryPartners: (id) => {

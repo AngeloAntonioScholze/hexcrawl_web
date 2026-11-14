@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import { computed, ref } from 'vue'
-import { usePlayerView } from '../composables/usePlayerView'
+import { orderOf, usePlayerView } from '../composables/usePlayerView'
 import { CARAVAN_PORTRAITS, caravanPortrait } from '../entities/portraits'
 import { useHexMapStore } from '../stores/hexMap'
 import CaravanMerchants from './CaravanMerchants.vue'
@@ -14,19 +14,30 @@ const store = useHexMapStore()
 const player = usePlayerView()
 const forPlayers = computed(() => !store.dmView)
 
-// Mounted again for every caravan picked, so it never opens itself: that would
-// fold away the entities list the caravan was just picked from.
+// It never opens itself: that would fold away the entities list the caravan was
+// just picked from. The players' panel is always there and swaps what it shows.
 const collapsed = computed(() => !store.panelsOpen.caravan)
 const toggle = (): void => store.setPanelOpen('caravan', collapsed.value)
 
-const caravan = computed(() => (forPlayers.value ? player.shownCaravan.value : store.shownCaravan))
+const caravan = computed(() => (forPlayers.value ? player.infoCaravan.value : store.shownCaravan))
 const riders = computed(() => {
   if (!caravan.value) return []
   return forPlayers.value ? player.ridersOf(caravan.value.id) : store.ridersOf(caravan.value.id)
 })
 
+const standing = computed(() =>
+  caravan.value ? (player.scene.value.states.get(caravan.value.id)?.at ?? null) : null,
+)
+const headed = computed(() => {
+  if (!caravan.value) return null
+  const ahead = orderOf(player.scene.value, caravan.value.id)
+  return ahead[ahead.length - 1] ?? null
+})
+
 const picking = ref(false)
-const mayPick = computed(() => !!caravan.value && store.may('entitySettings', caravan.value))
+const mayPick = computed(
+  () => !forPlayers.value && !!caravan.value && store.may('entitySettings', caravan.value),
+)
 const portrait = computed(() => caravanPortrait(caravan.value?.portrait))
 
 const pick = (id: string | null): void => {
@@ -36,7 +47,7 @@ const pick = (id: string | null): void => {
 </script>
 
 <template>
-  <aside v-if="caravan" class="panel caravan" :class="{ collapsed }">
+  <aside v-if="forPlayers || caravan" class="panel caravan" :class="{ collapsed }">
     <header>
       <h2 class="title">
         <button
@@ -47,10 +58,11 @@ const pick = (id: string | null): void => {
           aria-controls="panel-caravan"
           @click="toggle"
         >
-          <span class="label-row">
+          <span v-if="caravan" class="label-row">
             <span class="pip" :style="{ background: caravan.color }" />
             <span class="name">{{ caravan.name }}</span>
           </span>
+          <span v-else>caravan</span>
           <span class="chevron" aria-hidden="true">▾</span>
         </button>
       </h2>
@@ -63,52 +75,74 @@ const pick = (id: string | null): void => {
       role="region"
       aria-labelledby="panel-caravan-head"
     >
-      <div v-if="mayPick" class="row portrait-row">
-        <span class="label">portrait</span>
-        <button
-          type="button"
-          class="portrait-choose"
-          :title="`choose a portrait for ${caravan.name}`"
-          @click="picking = true"
-        >
-          <img v-if="portrait" :src="portrait.url" alt="" class="thumb" />
-          <span>{{ portrait?.label ?? 'none' }}</span>
-        </button>
-      </div>
+      <p v-if="!caravan" class="dim empty">not travelling with a caravan</p>
 
-      <CaravanSupplies :caravan-id="caravan.id" />
+      <template v-else>
+        <dl v-if="forPlayers" class="summary">
+          <dt>standing</dt>
+          <dd>{{ standing ?? '—' }}</dd>
 
-      <InventoryList :owner-id="caravan.id" fold-key="caravan.inventory" />
+          <dt>headed</dt>
+          <dd>{{ headed ?? '—' }}</dd>
 
-      <PanelSection fold-key="caravan.riders" title="riders">
-        <template #meta>{{ riders.length }}</template>
-        <div class="section">
-          <ul v-if="riders.length" class="list">
-            <li v-for="rider in riders" :key="rider.id">
-              <button
-                type="button"
-                :class="{ here: rider.id === store.selectedId }"
-                :title="
-                  store.may('order', rider)
-                    ? `give ${rider.name} the orders`
-                    : `look at ${rider.name}; it is not yours to order`
-                "
-                @click="store.selectEntity(rider.id)"
-              >
-                <span class="pip" :style="{ background: rider.color }" />
-                <span class="name">{{ rider.name }}</span>
-                <span class="label">{{ rider.kind }}</span>
-              </button>
-            </li>
-          </ul>
-          <p v-else class="label">nobody aboard</p>
+          <dt>pace</dt>
+          <dd>{{ caravan.pacePerTurn }} hex a turn</dd>
+        </dl>
+
+        <div v-if="mayPick" class="row portrait-row">
+          <span class="label">portrait</span>
+          <button
+            type="button"
+            class="portrait-choose"
+            :title="`choose a portrait for ${caravan.name}`"
+            @click="picking = true"
+          >
+            <img v-if="portrait" :src="portrait.url" alt="" class="thumb" />
+            <span>{{ portrait?.label ?? 'none' }}</span>
+          </button>
         </div>
-      </PanelSection>
 
-      <CaravanMerchants :caravan-id="caravan.id" />
+        <CaravanSupplies :caravan-id="caravan.id" />
+
+        <InventoryList :owner-id="caravan.id" fold-key="caravan.inventory" />
+
+        <PanelSection fold-key="caravan.riders" title="riders">
+          <template #meta>{{ riders.length }}</template>
+          <div class="section">
+            <ul v-if="riders.length" class="list">
+              <li v-for="rider in riders" :key="rider.id">
+                <div v-if="forPlayers && !store.may('order', rider)" class="rider">
+                  <span class="pip" :style="{ background: rider.color }" />
+                  <span class="name">{{ rider.name }}</span>
+                  <span class="label">{{ rider.kind }}</span>
+                </div>
+                <button
+                  v-else
+                  type="button"
+                  :class="{ here: rider.id === store.selectedId }"
+                  :aria-current="forPlayers && rider.id === store.selectedId ? 'true' : undefined"
+                  :title="
+                    store.may('order', rider)
+                      ? `give ${rider.name} the orders`
+                      : `look at ${rider.name}; it is not yours to order`
+                  "
+                  @click="store.selectEntity(rider.id)"
+                >
+                  <span class="pip" :style="{ background: rider.color }" />
+                  <span class="name">{{ rider.name }}</span>
+                  <span class="label">{{ rider.kind }}</span>
+                </button>
+              </li>
+            </ul>
+            <p v-else class="label">nobody aboard</p>
+          </div>
+        </PanelSection>
+
+        <CaravanMerchants :caravan-id="caravan.id" />
+      </template>
     </div>
 
-    <PopupDialog v-if="mayPick" v-model="picking" :title="`${caravan.name}: portrait`">
+    <PopupDialog v-if="caravan && mayPick" v-model="picking" :title="`${caravan.name}: portrait`">
       <ul class="portraits">
         <li>
           <button
@@ -247,6 +281,32 @@ p {
   margin: 0;
 }
 
+.summary {
+  display: grid;
+  grid-template-columns: auto 1fr;
+  gap: 0.15rem 0.75rem;
+  margin: 0;
+  font-size: 0.8rem;
+}
+
+.summary dt {
+  color: var(--ink-dim);
+}
+
+.summary dd {
+  margin: 0;
+  font-variant-numeric: tabular-nums;
+}
+
+.dim {
+  color: var(--ink-dim);
+}
+
+.empty {
+  padding-top: 0.75rem;
+  font-size: 0.78rem;
+}
+
 .portrait-row {
   align-items: center;
   font-size: 0.78rem;
@@ -329,7 +389,8 @@ p {
   list-style: none;
 }
 
-.list button {
+.list button,
+.list .rider {
   display: grid;
   width: 100%;
   grid-template-columns: 0.6rem 1fr auto;
@@ -351,6 +412,10 @@ p {
 
 .list button.here {
   background: color-mix(in srgb, var(--line) 70%, transparent);
+}
+
+.list .rider {
+  cursor: default;
 }
 
 .pip {
