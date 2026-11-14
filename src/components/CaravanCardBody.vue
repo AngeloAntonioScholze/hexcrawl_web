@@ -153,7 +153,6 @@ const crew = computed(() => {
   background: color-mix(in srgb, var(--card-metal-dark, #24344a) 45%, var(--card-window, #0b1119));
 }
 
-.field:focus-visible,
 .field:focus {
   outline: 2px solid var(--ink);
   outline-offset: 2px;
