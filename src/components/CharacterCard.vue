@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import { computed, ref } from 'vue'
-import { bustOf, FRAME_ART, frameVariant } from '../entities/busts'
+import { bustOf, FRAME_ART, frameVariant, type FrameBox } from '../entities/busts'
 import type { Entity } from '../entities/entity'
 import BustPicker from './BustPicker.vue'
 
@@ -8,18 +8,60 @@ import BustPicker from './BustPicker.vue'
 // projection alike, and turns a picked bust into setPortrait itself.
 const props = withDefaults(
   defineProps<{
-    entity: Pick<Entity, 'id' | 'name' | 'kind' | 'owner' | 'portrait'>
+    entity: Pick<Entity, 'id' | 'name' | 'kind' | 'owner' | 'hidden' | 'portrait'>
     pickable: boolean
     headingLevel?: 2 | 3 | 4
+    plate?: readonly string[]
   }>(),
-  { headingLevel: 3 },
+  { headingLevel: 3, plate: () => [] },
 )
 
 const emit = defineEmits<{ bust: [id: string | null] }>()
 
+const SLOTS = ['slot1', 'slot2', 'slot3'] as const
+const PLATE_LINES = 2
+const FRAME_W = 340
+const FRAME_H = 438
+
 const variant = computed(() => frameVariant(props.entity))
 const art = computed(() => FRAME_ART[variant.value])
-const frameArt = computed(() => ({ '--card-frame': `url("${art.value.frame}")` }))
+
+const place = ({ left, top, width, height }: FrameBox): Record<string, string> => ({
+  left: `${left}%`,
+  top: `${top}%`,
+  width: `${width}%`,
+  height: `${height}%`,
+})
+
+// Padding in % of the region's own width: a plain % would be of the whole frame.
+// The frame spans the card, the query container, so 1cqw is 1% of the frame.
+const pad = (box: FrameBox, start: number, end = start): Record<string, string> => ({
+  paddingInlineStart: `${(box.width * start) / 100}cqw`,
+  paddingInlineEnd: `${(box.width * end) / 100}cqw`,
+})
+
+const windowStyle = computed(() => ({
+  ...place(art.value.regions.window),
+  '--window-mask': `url("${art.value.window}")`,
+}))
+
+// One line exactly as tall as the art's banner; the wider end pad keeps the
+// text off the banner's sloped right end.
+const nameStyle = computed(() => {
+  const banner = art.value.regions.banner
+  return {
+    ...place(banner),
+    ...pad(banner, 1.8, 3.6),
+    lineHeight: `calc(100cqw * ${(banner.height * FRAME_H) / 100} / ${FRAME_W})`,
+  }
+})
+
+const slotStyle = (index: number): Record<string, string> => {
+  const slot = art.value.regions.slots[index]
+  return { ...place(slot), ...pad(slot, 4) }
+}
+
+const plateLines = computed(() => props.plate.slice(0, PLATE_LINES))
 
 const bust = computed(() => bustOf(props.entity.portrait))
 /** A bust whose picture would not load reads as no bust at all. */
@@ -33,7 +75,7 @@ const strip = computed(() => {
   if (unknown.value) return 'unknown bust'
   return shown.value ? 'change bust' : 'choose a bust'
 })
-const ovalLabel = computed(() =>
+const pickLabel = computed(() =>
   shown.value
     ? `change ${props.entity.name}'s bust (now ${shown.value.label})`
     : `choose a bust for ${props.entity.name}`,
@@ -48,23 +90,16 @@ const picking = ref(false)
     :data-variant="variant"
     :aria-label="`${entity.name}, ${entity.kind}`"
   >
-    <div class="frame" :style="frameArt">
-      <img class="crest" :src="art.crest" alt="" aria-hidden="true" />
-      <component
-        :is="pickable ? 'button' : 'div'"
-        class="oval"
-        :class="{ bare: !shown }"
-        v-bind="
-          pickable
-            ? {
-                type: 'button',
-                'aria-label': ovalLabel,
-                title: unknown ? `stored bust: ${entity.portrait}` : undefined,
-              }
-            : {}
-        "
-        @click="pickable && (picking = true)"
-      >
+    <div class="frame">
+      <img
+        class="art"
+        :src="art.frame"
+        alt=""
+        aria-hidden="true"
+        draggable="false"
+        decoding="async"
+      />
+      <div class="window" :style="windowStyle">
         <Transition name="swap">
           <img
             v-if="shown"
@@ -78,12 +113,32 @@ const picking = ref(false)
         <svg v-if="!shown" class="empty" viewBox="0 0 56 56" aria-hidden="true">
           <polygon points="28,3 50,15.5 50,40.5 28,53 6,40.5 6,15.5" />
         </svg>
-        <span v-if="pickable" class="strip" aria-hidden="true">{{ strip }}</span>
-      </component>
-      <component :is="`h${headingLevel}`" class="name">{{ entity.name }}</component>
-      <div v-if="$slots.default" class="slot"><slot /></div>
-      <img class="foot" :src="art.foot" alt="" aria-hidden="true" />
+      </div>
+      <button
+        v-if="pickable"
+        type="button"
+        class="pick"
+        :class="{ bare: !shown }"
+        :style="place(art.regions.pick)"
+        :aria-label="pickLabel"
+        :title="unknown ? `stored bust: ${entity.portrait}` : undefined"
+        @click="picking = true"
+      >
+        <span class="strip" aria-hidden="true">{{ strip }}</span>
+      </button>
+      <component :is="`h${headingLevel}`" class="name" :style="nameStyle" :title="entity.name">{{
+        entity.name
+      }}</component>
+      <template v-for="(name, index) in SLOTS" :key="name">
+        <div v-if="$slots[name]" class="slot" :style="slotStyle(index)">
+          <slot :name="name" />
+        </div>
+      </template>
+      <div v-if="plateLines.length" class="plate" :style="place(art.regions.plate)">
+        <span v-for="(line, index) in plateLines" :key="index" class="line">{{ line }}</span>
+      </div>
     </div>
+    <div v-if="$slots.default" class="body"><slot /></div>
     <BustPicker
       v-if="pickable"
       v-model:open="picking"
@@ -96,46 +151,39 @@ const picking = ref(false)
 
 <style scoped>
 .character-card {
-  --card-width: 18rem;
-  --card-pad: 1rem;
-  --card-overhang: 1rem;
-  --card-oval-w: 10rem;
-  --card-oval-h: 12.5rem;
-  --card-field-h: 1.75rem;
+  --card-width: 21.25rem;
   --card-motion-hover: 120ms ease-out;
   --card-motion-swap: 150ms ease-out;
 
-  container-type: inline-size;
+  display: grid;
   width: min(100%, var(--card-width));
   margin-inline: auto;
-  padding-block: var(--card-overhang);
+  justify-items: center;
+  container-type: inline-size;
 }
 
 .character-card[data-variant='steel'] {
-  --card-metal-light: #a9c0d8;
-  --card-metal-mid: #5b7898;
-  --card-metal-dark: #24344a;
-  --card-fill-top: #22324a;
-  --card-fill-bottom: #131b27;
-  --card-window: #0b1119;
+  --card-metal-light: #a5b2bf;
+  --card-metal-mid: #7e8c9c;
+  --card-metal-dark: #17293d;
+  --card-plate: #1a314d;
+  --card-window: #0b1014;
 }
 
 .character-card[data-variant='bronze'] {
-  --card-metal-light: #e0b27a;
-  --card-metal-mid: #9a6a36;
-  --card-metal-dark: #3e2914;
-  --card-fill-top: #33241a;
-  --card-fill-bottom: #1a120b;
-  --card-window: #120c07;
+  --card-metal-light: #b39879;
+  --card-metal-mid: #907860;
+  --card-metal-dark: #392013;
+  --card-plate: #422416;
+  --card-window: #160b03;
 }
 
 .character-card[data-variant='crimson'] {
-  --card-metal-light: #e8927a;
-  --card-metal-mid: #a8402e;
-  --card-metal-dark: #451812;
-  --card-fill-top: #37160f;
-  --card-fill-bottom: #1c0b08;
-  --card-window: #140806;
+  --card-metal-light: #c98674;
+  --card-metal-mid: #865244;
+  --card-metal-dark: #380c06;
+  --card-plate: #450e09;
+  --card-window: #150601;
 }
 
 @media (prefers-reduced-motion: reduce) {
@@ -145,82 +193,42 @@ const picking = ref(false)
 }
 
 .frame {
-  display: grid;
   position: relative;
-  justify-items: center;
-  padding: 1.75rem var(--card-pad);
-  border-radius: 4px;
-  background: linear-gradient(180deg, var(--card-fill-top), var(--card-fill-bottom));
-}
-
-/* Corners stay fixed art; the plain band between them stretches along the edge. */
-.frame::after {
-  position: absolute;
-  inset: 0;
-  border: 24px solid transparent;
-  border-image: var(--card-frame) 24 / 24px / 0 stretch;
-  content: '';
-  pointer-events: none;
-}
-
-.crest,
-.foot {
-  position: absolute;
-  z-index: 1;
-  height: auto;
-  pointer-events: none;
-}
-
-.crest {
-  top: calc(-1 * var(--card-overhang));
-  left: 50%;
-  width: 10rem;
-  translate: -50% 0;
-}
-
-.foot {
-  bottom: calc(-1 * var(--card-overhang));
-  left: 0;
   width: 100%;
+  aspect-ratio: 340 / 438;
 }
 
-.oval {
+.frame > * {
+  position: absolute;
+}
+
+.art {
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  image-rendering: auto;
+  pointer-events: none;
+  user-select: none;
+}
+
+.window {
   display: grid;
-  position: relative;
-  width: var(--card-oval-w);
-  height: var(--card-oval-h);
   place-items: center;
   overflow: hidden;
-  margin: 0;
-  padding: 0;
-  border: 3px solid var(--card-metal-mid);
-  border-radius: 50%;
-  background: var(--card-window);
-  box-shadow:
-    inset 0 0 0 1px var(--card-metal-dark),
-    inset 0 8px 20px rgb(0 0 0 / 0.6),
-    0 0 0 1px var(--card-metal-dark),
-    0 0 0 2px var(--card-metal-light);
-  color: var(--ink);
-  font: inherit;
-  transition: border-color var(--card-motion-hover);
+  mask-image: var(--window-mask);
+  mask-size: 100% 100%;
+  mask-repeat: no-repeat;
+  -webkit-mask-image: var(--window-mask);
+  -webkit-mask-size: 100% 100%;
+  -webkit-mask-repeat: no-repeat;
 }
 
-button.oval {
-  cursor: pointer;
-}
-
-button.oval:hover {
-  border-color: var(--card-metal-light);
-}
-
-button.oval:focus-visible {
-  outline: 2px solid var(--ink);
-  outline-offset: 4px;
-}
-
-button.oval:active .bust {
-  filter: brightness(0.85);
+.window::after {
+  position: absolute;
+  inset: 0;
+  background: linear-gradient(180deg, transparent 55%, rgb(0 0 0 / 0.5));
+  content: '';
+  pointer-events: none;
 }
 
 .bust {
@@ -236,51 +244,135 @@ button.oval:active .bust {
   width: 40px;
   height: 40px;
   fill: none;
-  stroke: var(--card-metal-mid);
+  stroke: var(--card-metal-light);
   stroke-width: 1.5;
-  opacity: 0.6;
+  opacity: 0.5;
+}
+
+.pick {
+  overflow: hidden;
+  margin: 0;
+  padding: 0;
+  border: 0;
+  border-radius: 8px;
+  background: transparent;
+  color: var(--ink);
+  font: inherit;
+  cursor: pointer;
+}
+
+.pick:focus-visible {
+  outline: 2px solid var(--ink);
+  outline-offset: 2px;
+}
+
+.frame:has(.pick:active) .bust {
+  filter: brightness(0.85);
 }
 
 .strip {
   display: grid;
   position: absolute;
-  top: 62%;
   right: 0;
+  bottom: 0;
   left: 0;
   height: 1.5rem;
   place-items: center;
   background: rgb(0 0 0 / 0.6);
-  color: var(--ink);
-  font-size: 0.72rem;
+  font-size: max(11px, 3.53cqw);
   line-height: 1;
   opacity: 0;
   transition: opacity var(--card-motion-hover);
 }
 
-button.oval:hover .strip,
-button.oval:focus-visible .strip,
-.oval.bare .strip {
+.pick:hover .strip,
+.pick:focus-visible .strip,
+.pick.bare .strip {
   opacity: 1;
 }
 
 .name {
-  width: 100%;
-  margin: 0.75rem 0 0;
+  display: block;
+  margin: 0;
+  padding-block: 0;
   overflow: hidden;
   color: var(--ink);
   font-family: var(--card-name-font);
-  font-size: 1.25rem;
+  font-size: max(11px, 3.53cqw);
   font-weight: 600;
   letter-spacing: 0;
-  line-height: 1.2;
-  text-align: center;
   text-overflow: ellipsis;
+  text-shadow: 0 1px 1px rgb(0 0 0 / 0.9);
   white-space: nowrap;
 }
 
 .slot {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 0.25em;
+  overflow: hidden;
+  border-radius: 3px;
+  color: var(--ink);
+  font:
+    600 max(10.5px, 3.24cqw) / 1 system-ui,
+    -apple-system,
+    'Segoe UI',
+    sans-serif;
+  font-variant-numeric: tabular-nums;
+  text-shadow: 0 1px 1px rgb(0 0 0 / 0.9);
+  white-space: nowrap;
+  transition: background var(--card-motion-hover);
+}
+
+.slot:has(input):hover {
+  background: rgb(255 255 255 / 0.06);
+}
+
+.slot:focus-within {
+  outline: 2px solid var(--ink);
+  outline-offset: 1px;
+}
+
+.slot:has([aria-invalid='true']) {
+  outline: 1px dashed var(--danger, #e07a6a);
+  outline-offset: 1px;
+}
+
+.plate {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 2px;
+  font-size: max(10.5px, 3.24cqw);
+  line-height: 1.2;
+  text-align: center;
+  text-shadow: 0 1px 1px rgb(0 0 0 / 0.9);
+}
+
+.line {
+  max-width: 100%;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.line:first-child {
+  color: var(--ink);
+  font-weight: 600;
+}
+
+.line + .line {
+  color: var(--card-metal-light);
+  font-weight: 400;
+}
+
+.body {
+  display: grid;
   width: 100%;
-  margin-top: 0.25rem;
+  margin-top: 0.5rem;
+  justify-items: center;
 }
 
 .swap-enter-active,

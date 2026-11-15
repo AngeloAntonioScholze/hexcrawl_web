@@ -11,7 +11,7 @@ const abilities = (change: Partial<Abilities> = {}): Abilities => ({
 
 const mountHexagon = (editable: boolean, change: Partial<Abilities> = {}) =>
   mount(StatHexagon, {
-    props: { abilities: abilities(change), character: { purse: 1250, level: 2 }, editable },
+    props: { abilities: abilities(change), editable },
   })
 
 const modifierOf = (wrapper: ReturnType<typeof mountHexagon>, label: string): string => {
@@ -21,13 +21,11 @@ const modifierOf = (wrapper: ReturnType<typeof mountHexagon>, label: string): st
 
 describe('StatHexagon', () => {
   describe('editable', () => {
-    it('renders level, gold and six ability inputs in DOM order', () => {
+    it('renders six ability inputs in DOM order and no level or gold', () => {
       const wrapper = mountHexagon(true)
-      expect(wrapper.findAll('input').map((input) => input.attributes('aria-label'))).toEqual([
-        'level',
-        'gold, in coins',
-        ...ABILITIES.map((ability) => `${ability} score`),
-      ])
+      expect(wrapper.findAll('input').map((input) => input.attributes('aria-label'))).toEqual(
+        ABILITIES.map((ability) => `${ability} score`),
+      )
     })
 
     it('emits the ability on change', async () => {
@@ -56,14 +54,6 @@ describe('StatHexagon', () => {
       expect(strength.attributes('aria-invalid')).toBeUndefined()
     })
 
-    it('emits the level and the purse on change', async () => {
-      const wrapper = mountHexagon(true)
-      await wrapper.find('input[aria-label="level"]').setValue('3')
-      await wrapper.find('input[aria-label="gold, in coins"]').setValue('999999')
-      expect(wrapper.emitted('level')).toEqual([[3]])
-      expect(wrapper.emitted('purse')).toEqual([[999999]])
-    })
-
     it('marks an out-of-range draft invalid until it is committed', async () => {
       const wrapper = mountHexagon(true, { strength: 12 })
       const strength = wrapper.find('input[aria-label="strength score"]')
@@ -77,30 +67,9 @@ describe('StatHexagon', () => {
       expect(strength.attributes('aria-invalid')).toBeUndefined()
     })
 
-    it('titles an invalid level draft with its limits', async () => {
-      const wrapper = mountHexagon(true)
-      const level = wrapper.find('input[aria-label="level"]')
-      ;(level.element as HTMLInputElement).value = '21'
-      await level.trigger('input')
-      expect(level.attributes('aria-invalid')).toBe('true')
-      expect(level.attributes('title')).toBe('a whole number from 1 to 20')
-    })
-
-    it('titles an invalid purse draft with its limits', async () => {
-      const wrapper = mountHexagon(true)
-      const purse = wrapper.find('input[aria-label="gold, in coins"]')
-      ;(purse.element as HTMLInputElement).value = '1000000'
-      await purse.trigger('input')
-      expect(purse.attributes('aria-invalid')).toBe('true')
-      expect(purse.attributes('title')).toBe('a whole number from 0 to 999999')
-      expect(wrapper.find('.cell.invalid').exists()).toBe(true)
-    })
-
-    it.each<[label: string, was: string]>([
-      ...ABILITIES.map((ability): [string, string] => [`${ability} score`, '10']),
-      ['gold, in coins', '1250'],
-      ['level', '2'],
-    ])('drops the draft of %s on blur when it was typed back unchanged', async (label, was) => {
+    it.each<[label: string, was: string]>(
+      ABILITIES.map((ability): [string, string] => [`${ability} score`, '10']),
+    )('drops the draft of %s on blur when it was typed back unchanged', async (label, was) => {
       const wrapper = mountHexagon(true)
       const input = wrapper.find(`input[aria-label="${label}"]`)
       const element = input.element as HTMLInputElement
@@ -119,7 +88,6 @@ describe('StatHexagon', () => {
           wisdom: 4,
           charisma: 4,
         }),
-        character: { purse: 4, level: 4 },
       })
       expect(element.value).toBe('4')
     })
@@ -156,8 +124,6 @@ describe('StatHexagon', () => {
         '10',
         '7',
       ])
-      expect(wrapper.find('.purse').text()).toBe('gold 1250')
-      expect(wrapper.find('.level').text()).toBe('level 2')
       expect(wrapper.find('.stat').attributes('role')).toBe('group')
       expect(wrapper.find('.stat').attributes('aria-label')).toBe('strength 14, modifier +2')
       expect(wrapper.find('.stat .contents').attributes('aria-hidden')).toBe('true')
@@ -182,5 +148,13 @@ describe('StatHexagon', () => {
       'modifier −5',
       'modifier 0',
     ])
+  })
+
+  // A gradient id repeated across several cards resolves to the first card's
+  // definition, so one card would draw another variant's colours.
+  it('draws with flat fills: no defs and no ids in its SVG', () => {
+    const wrapper = mountHexagon(false)
+    expect(wrapper.find('svg defs').exists()).toBe(false)
+    expect(wrapper.findAll('svg [id], svg[id]')).toHaveLength(0)
   })
 })

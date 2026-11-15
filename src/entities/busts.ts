@@ -12,18 +12,36 @@ import rogue from '../assets/busts/rogue.svg'
 import ship from '../assets/busts/ship.svg'
 import wagon from '../assets/busts/wagon.svg'
 import wizard from '../assets/busts/wizard.svg'
-import bronzeCrest from '../assets/frames/bronze-crest.svg'
-import bronzeFoot from '../assets/frames/bronze-foot.svg'
-import bronzeFrame from '../assets/frames/bronze-frame.svg'
-import crimsonCrest from '../assets/frames/crimson-crest.svg'
-import crimsonFoot from '../assets/frames/crimson-foot.svg'
-import crimsonFrame from '../assets/frames/crimson-frame.svg'
-import steelCrest from '../assets/frames/steel-crest.svg'
-import steelFoot from '../assets/frames/steel-foot.svg'
-import steelFrame from '../assets/frames/steel-frame.svg'
+import bronzeFrame from '../assets/frames/bronze-frame.webp'
+import bronzeWindow from '../assets/frames/bronze-window.png'
+import crimsonFrame from '../assets/frames/crimson-frame.webp'
+import crimsonWindow from '../assets/frames/crimson-window.png'
+import steelFrame from '../assets/frames/steel-frame.webp'
+import steelWindow from '../assets/frames/steel-window.png'
 import type { Entity } from './entity'
 
 export type FrameVariant = 'steel' | 'bronze' | 'crimson'
+
+/** A region of the frame art, in % of the frame box. */
+export interface FrameBox {
+  left: number
+  top: number
+  width: number
+  height: number
+}
+
+export interface FrameArt {
+  frame: string
+  /** White on alpha: the exact shape of the art's portrait window. */
+  window: string
+  regions: {
+    window: FrameBox
+    pick: FrameBox
+    banner: FrameBox
+    slots: readonly [FrameBox, FrameBox, FrameBox]
+    plate: FrameBox
+  }
+}
 
 export interface Bust {
   /** What an entity stores and a map file carries; never reused for other art. */
@@ -59,19 +77,70 @@ export const bustOf = (id: string | undefined): Bust | undefined =>
   BUSTS.find((one) => one.id === id)
 
 /**
- * Carriers are the company's wagons and hulls whoever drives them; everyone
- * else wears the colours of whoever gives them orders. The seat is left out on
- * purpose: it changes per session, and the frame should not.
+ * Hidden DM entities are crimson (there is no hostile flag); carriers are the
+ * company's wagons and hulls whoever drives them; everyone else wears the
+ * colours of whoever gives them orders. The seat is left out on purpose: it
+ * changes per session, and the frame should not.
  */
-export const frameVariant = (entity: Pick<Entity, 'kind' | 'owner'>): FrameVariant => {
+export const frameVariant = (entity: Pick<Entity, 'kind' | 'owner' | 'hidden'>): FrameVariant => {
+  if (entity.hidden) return 'crimson'
   if (entity.kind === 'caravan' || entity.kind === 'ship') return 'bronze'
-  return entity.owner === 'player' ? 'steel' : 'crimson'
+  return entity.owner === 'player' ? 'steel' : 'bronze'
 }
 
-export const FRAME_ART: Readonly<
-  Record<FrameVariant, { frame: string; crest: string; foot: string }>
-> = {
-  steel: { frame: steelFrame, crest: steelCrest, foot: steelFoot },
-  bronze: { frame: bronzeFrame, crest: bronzeCrest, foot: bronzeFoot },
-  crimson: { frame: crimsonFrame, crest: crimsonCrest, foot: crimsonFoot },
+const box = (left: number, top: number, width: number, height: number): FrameBox => ({
+  left,
+  top,
+  width,
+  height,
+})
+
+// Measured on the 340×438 crops by design/tools/card-frames.mjs; the three
+// drawings differ, so each variant has its own map.
+export const FRAME_ART: Readonly<Record<FrameVariant, FrameArt>> = {
+  steel: {
+    frame: steelFrame,
+    window: steelWindow,
+    regions: {
+      window: box(16.18, 16.44, 67.65, 47.95),
+      pick: box(16.18, 16.44, 67.65, 43.61),
+      banner: box(16.47, 60.96, 31.47, 3.42),
+      slots: [
+        box(19.71, 67.12, 19.12, 3.42),
+        box(40.59, 67.12, 19.12, 3.42),
+        box(61.47, 67.12, 19.12, 3.42),
+      ],
+      plate: box(24.12, 72.37, 51.47, 11.42),
+    },
+  },
+  bronze: {
+    frame: bronzeFrame,
+    window: bronzeWindow,
+    regions: {
+      window: box(18.53, 14.61, 63.24, 52.28),
+      pick: box(18.53, 14.61, 63.24, 48.17),
+      banner: box(18.82, 63.7, 29.41, 3.2),
+      slots: [
+        box(21.76, 69.41, 17.94, 3.42),
+        box(41.18, 69.41, 18.24, 3.42),
+        box(60.88, 69.41, 17.94, 3.42),
+      ],
+      plate: box(26.18, 74.43, 47.94, 10.73),
+    },
+  },
+  crimson: {
+    frame: crimsonFrame,
+    window: crimsonWindow,
+    regions: {
+      window: box(15, 14.16, 70.29, 50.23),
+      pick: box(15, 14.16, 70.29, 45.89),
+      banner: box(15, 60.96, 32.94, 3.42),
+      slots: [
+        box(18.53, 67.35, 20, 3.65),
+        box(40.29, 67.35, 20, 3.65),
+        box(62.06, 67.35, 19.71, 3.65),
+      ],
+      plate: box(23.53, 72.83, 52.94, 11.87),
+    },
+  },
 }

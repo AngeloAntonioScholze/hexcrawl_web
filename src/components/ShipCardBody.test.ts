@@ -14,20 +14,9 @@ const riders = (count: number): Rider[] =>
     color: '#336699',
   }))
 
-const mountBody = (aboard: Rider[] = []) =>
-  mount(ShipCardBody, { props: { pacePerTurn: 3, sight: 2, riders: aboard } })
+const mountBody = (aboard: Rider[] = []) => mount(ShipCardBody, { props: { riders: aboard } })
 
 describe('ShipCardBody', () => {
-  it('shows pace and sight as text, with no inputs', () => {
-    const wrapper = mountBody()
-    expect(
-      wrapper
-        .findAll('.tally')
-        .map((tally) => `${tally.find('.word').text()} ${tally.find('.value').text()}`),
-    ).toEqual(['pace 3 hex', 'sight 2 hex'])
-    expect(wrapper.find('input').exists()).toBe(false)
-  })
-
   it('shows five riders and a more-line for seven', () => {
     const wrapper = mountBody(riders(7))
     expect(wrapper.findAll('li')).toHaveLength(5)

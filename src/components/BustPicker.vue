@@ -85,9 +85,9 @@ const pick = (id: string | null): void => {
 .busts .frame {
   display: block;
   width: 100%;
-  aspect-ratio: 4 / 5;
+  aspect-ratio: 23 / 21;
   overflow: hidden;
-  border-radius: 50%;
+  border-radius: 6px;
   background: var(--surface-deep, #0f1114);
   object-fit: cover;
   object-position: center top;

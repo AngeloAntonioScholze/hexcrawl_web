@@ -3,10 +3,7 @@ import { computed } from 'vue'
 import type { Entity } from '../entities/entity'
 import { crewShown } from './cardBody'
 
-// Read-only: pace and sight keep their edit rows under the card.
 const props = defineProps<{
-  pacePerTurn: number
-  sight: number
   riders: readonly Pick<Entity, 'id' | 'name' | 'kind' | 'color'>[]
 }>()
 
@@ -14,77 +11,29 @@ const crew = computed(() => crewShown(props.riders))
 </script>
 
 <template>
-  <div class="card-body">
-    <div class="tallies">
-      <span class="tally">
-        <span class="word">pace</span>
-        <span class="value">{{ pacePerTurn }} hex</span>
-      </span>
-      <span class="tally">
-        <span class="word">sight</span>
-        <span class="value">{{ sight }} hex</span>
-      </span>
-    </div>
-
-    <div class="box" :class="{ bare: !riders.length }">
-      <ul v-if="riders.length" class="crew" aria-label="aboard">
-        <li v-for="rider in crew.shown" :key="rider.id" class="row">
-          <span class="sr-only">{{ rider.name }}, {{ rider.kind }}</span>
-          <span class="pip" :style="{ background: rider.color }" aria-hidden="true" />
-          <span class="name" aria-hidden="true">{{ rider.name }}</span>
-          <span class="sub" aria-hidden="true">{{ rider.kind }}</span>
-        </li>
-      </ul>
-      <p v-if="crew.more" class="more">+{{ crew.more }} more aboard</p>
-      <p v-if="!riders.length" class="none">nobody aboard</p>
-    </div>
+  <div class="box" :class="{ bare: !riders.length }">
+    <ul v-if="riders.length" class="crew" aria-label="aboard">
+      <li v-for="rider in crew.shown" :key="rider.id" class="row">
+        <span class="sr-only">{{ rider.name }}, {{ rider.kind }}</span>
+        <span class="pip" :style="{ background: rider.color }" aria-hidden="true" />
+        <span class="name" aria-hidden="true">{{ rider.name }}</span>
+        <span class="sub" aria-hidden="true">{{ rider.kind }}</span>
+      </li>
+    </ul>
+    <p v-if="crew.more" class="more">+{{ crew.more }} more aboard</p>
+    <p v-if="!riders.length" class="none">nobody aboard</p>
   </div>
 </template>
 
 <style scoped>
-.card-body {
-  display: grid;
-  justify-items: center;
-  width: 100%;
-}
-
-.tallies {
-  display: flex;
-  height: var(--card-field-h, 1.75rem);
-  align-items: center;
-  justify-content: center;
-  gap: 1.5rem;
-  margin-bottom: 0.75rem;
-}
-
-.tally {
-  display: inline-flex;
-  align-items: center;
-  gap: 0.375rem;
-}
-
-.word {
-  color: var(--card-metal-light, #a9c0d8);
-  font-size: 0.75rem;
-  line-height: 1;
-}
-
-.value {
-  color: var(--ink);
-  font-size: 1rem;
-  font-variant-numeric: tabular-nums;
-  font-weight: 600;
-  line-height: 1;
-}
-
 .box {
   display: grid;
   position: relative;
-  width: 100%;
-  max-width: 16rem;
-  aspect-ratio: 256 / 284;
+  width: min(100%, 16rem);
+  min-height: 284px;
   align-content: start;
   gap: 4px;
+  margin-inline: auto;
 }
 
 .box.bare {
@@ -102,14 +51,16 @@ const crew = computed(() => crewShown(props.riders))
 .row {
   display: grid;
   position: relative;
+  box-sizing: border-box;
   height: 2.5rem;
   grid-template-columns: 1.5rem 1fr auto;
   align-items: center;
   column-gap: 0.5rem;
   padding: 0 0.5rem 0 0.375rem;
-  border-left: 3px solid transparent;
+  border: 1px solid var(--card-metal-dark, #17293d);
+  border-left-width: 3px;
   border-radius: var(--radius-control, 0.25rem);
-  background: color-mix(in srgb, var(--card-window, #0b1119) 80%, transparent);
+  background: var(--card-window, #0b1014);
 }
 
 .pip {
@@ -117,7 +68,7 @@ const crew = computed(() => crewShown(props.riders))
   width: 0.625rem;
   height: 0.625rem;
   border-radius: 50%;
-  box-shadow: 0 0 0 1px var(--card-metal-dark, #24344a);
+  box-shadow: 0 0 0 1px var(--card-metal-dark, #17293d);
 }
 
 .name {
@@ -132,7 +83,7 @@ const crew = computed(() => crewShown(props.riders))
 }
 
 .sub {
-  color: var(--card-metal-light, #a9c0d8);
+  color: var(--card-metal-light, #a5b2bf);
   font-size: 0.6875rem;
   line-height: 1.2;
 }
@@ -140,7 +91,7 @@ const crew = computed(() => crewShown(props.riders))
 .more,
 .none {
   margin: 0;
-  color: var(--card-metal-light, #a9c0d8);
+  color: var(--card-metal-light, #a5b2bf);
   text-align: center;
 }
 
