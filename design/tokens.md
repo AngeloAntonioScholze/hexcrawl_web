@@ -101,43 +101,51 @@ The phone values apply under `@media (max-width: 720px)`.
 Under `prefers-reduced-motion: reduce`, both `--motion-fold` and `--motion-fold-section` are `0ms`.
 
 ## Card (1a1.10, tdj.3)
-Used by `CharacterCard` and `StatHexagon` (`design/hexcrawl_web-1a1.10.md`, `design/hexcrawl_web-tdj.3.md`). Reference art: `docs/reference/character-card-frame.jpg` (style), `docs/reference/player-card-sketch-2026-11-14.png` (shape).
+Used by `CharacterCard`, `CardTally`, `StatHexagon`, `CaravanCardBody` and `ShipCardBody` (`design/hexcrawl_web-1a1.10.md`, `design/hexcrawl_web-tdj.3.md`). Reference art: `docs/reference/character-card-frame.jpg`, the frame itself, cropped into `src/assets/frames/<variant>-frame.webp`. Shape: `docs/reference/player-card-sketch-2026-11-14.png`.
 
-**Exception to the `:root` rule**: the colour tokens below change per frame variant, so they are set on `.character-card[data-variant='steel' | 'bronze' | 'crimson']` in `CharacterCard.vue`, not on `:root`. Slotted children (`StatHexagon`) inherit them. Any component that reads them outside a card gives the steel value as the `var()` fallback.
+**[amended 2026-11-14, art frame rework]** The card's frame is now the supplied art (a bitmap), so there are no frame-drawing tokens. The colour tokens below style what is drawn **in CSS on or under the art**: slot and plate text, the stat hexagon, the list rows. Their values were sampled from the art (`design/tools/card-frames.mjs` crops; sample boxes listed under the table).
 
-### Variant colours
-| token | steel | bronze | crimson | role |
-|---|---|---|---|---|
-| `--card-metal-light` | `#a9c0d8` | `#e0b27a` | `#e8927a` | metal highlight; label and modifier-ring ink; stat hex outline |
-| `--card-metal-mid` | `#5b7898` | `#9a6a36` | `#a8402e` | metal body; decorative strokes only, never text, never a control's only boundary |
-| `--card-metal-dark` | `#24344a` | `#3e2914` | `#451812` | metal shadow; inner rims; modifier circle fill |
-| `--card-fill-top` | `#22324a` | `#33241a` | `#37160f` | card interior, top of the gradient |
-| `--card-fill-bottom` | `#131b27` | `#1a120b` | `#1c0b08` | card interior, bottom of the gradient |
-| `--card-window` | `#0b1119` | `#120c07` | `#140806` | oval, stat hex and field fill (darkest surface) |
+**Exception to the `:root` rule**: the colour tokens below change per frame variant, so they are set on `.character-card[data-variant='steel' | 'bronze' | 'crimson']` in `CharacterCard.vue`, not on `:root`. Slotted children inherit them. Any component that reads them outside a card gives the steel value as the `var()` fallback.
 
-Which variant an entity gets: `frameVariant()` in `src/entities/busts.ts` (rule in the 1a1.10 spec). The frame SVGs hard-code the same hex values, so they stay standalone files.
+### Variant colours [amended]
+| token | steel | bronze | crimson | sampled from | role |
+|---|---|---|---|---|---|
+| `--card-metal-light` | `#a5b2bf` | `#b39879` | `#c98674` | ornament highlights, 98th luminance percentile of crest pixels (crimson lifted from `#a96a59`, same hue, to reach 4.5:1 on its slots) | slot words, plate line 2, stat abbreviations, small hex outline, modifier ring, level pill border |
+| `--card-metal-mid` | `#7e8c9c` | `#907860` | `#865244` | ornament body, 90th percentile | large hexagon rim stroke, list icons; decorative only, never text |
+| `--card-metal-dark` | `#17293d` | `#392013` | `#380c06` | shield plate between window and slots | inner rims, list row borders, modifier stud shadow |
+| `--card-plate` **[new]** | `#1a314d` | `#422416` | `#450e09` | shield plate below the trapezoid (lit part) | large hexagon fill, modifier circle fill, level pill fill |
+| `--card-window` | `#0b1014` | `#160b03` | `#150601` | mean of the art's window | small hex fill, hexagon well, list row fill (darkest surface) |
 
-### Card sizes
+Removed: `--card-fill-top`, `--card-fill-bottom` (there is no CSS frame fill any more).
+
+Art surfaces that text sits on (measured means, used in the contrast table; not tokens): banner steel `#0c1116`, bronze `#1e0e05`, crimson `#180701`; brightest slot steel `#0c161f`, bronze `#200f07`, crimson `#1e0802`; plate steel `#0c1217`, bronze `#1b0d05`, crimson `#190703`.
+
+Which variant an entity gets: `frameVariant()` in `src/entities/busts.ts` (rule in the 1a1.10 spec).
+
+### Card sizes [amended]
 Set on `.character-card` (not variant dependent):
 | token | value | use |
 |---|---|---|
-| `--card-width` | `18rem` (288px) | card max width; the card is `width: min(100%, var(--card-width))` |
-| `--card-pad` | `1rem` | content inset from the frame's outer edge |
-| `--card-overhang` | `1rem` | crest above and blades below the frame rectangle |
-| `--card-oval-w` | `10rem` (160px) | portrait oval width |
-| `--card-oval-h` | `12.5rem` (200px) | portrait oval height (4:5) |
-| `--card-field-h` | `1.75rem` (28px) | level and gold field height |
+| `--card-width` | `21.25rem` (340px) | card max width = the art crop's width, so the 1× art is never shown above 1 CSS px per source px; the card is `width: min(100%, var(--card-width))` |
 
-### Measured contrast (WCAG 2.x)
+Removed with the hand-built frame: `--card-pad`, `--card-overhang`, `--card-oval-w`, `--card-oval-h`, `--card-field-h`. Region positions come from `FRAME_ART[variant].regions` (% of the frame box), not from tokens.
+
+### Measured contrast (WCAG 2.x) [amended]
 | pair | steel | bronze | crimson | need |
 |---|---|---|---|---|
-| `--ink` on `--card-window` | 15.5 | 15.8 | 16.1 | 4.5 text |
-| `--ink` on `--card-fill-top` (name) | 10.6 | 12.1 | 13.3 | 4.5 text |
-| `--ink` on `--card-metal-dark` (modifier) | 10.4 | 11.1 | 12.2 | 4.5 text |
-| `--card-metal-light` on `--card-window` | 10.1 | 10.0 | 8.3 | 4.5 text |
-| `--card-metal-light` on `--card-fill-top` (labels; stat hex outline) | 7.0 | 7.7 | 6.9 | 4.5 text / 3 non-text |
-| `--danger` on `--card-window` (invalid outline) | 6.4 | 6.6 | 6.7 | 3 non-text |
-| `--card-metal-mid` on `--card-fill-top` | 2.9 | 3.2 | 2.7 | decorative only |
+| `--ink` on banner (name) | 15.5 | 15.3 | 16.0 | 4.5 text |
+| `--ink` on brightest slot (slot value) | 14.9 | 15.1 | 15.7 | 4.5 text |
+| `--ink` on plate (plate line 1) | 15.4 | 15.5 | 16.0 | 4.5 text |
+| `--card-metal-light` on brightest slot (slot word) | 8.5 | 6.8 | 6.5 | 4.5 text |
+| `--card-metal-light` on plate (plate line 2) | 8.7 | 7.0 | 6.7 | 4.5 text |
+| `--ink` on `--card-window` (stat score, list names) | 15.6 | 15.8 | 16.2 | 4.5 text |
+| `--card-metal-light` on `--card-window` (abbreviation, list type) | 8.9 | 7.1 | 6.7 | 4.5 text |
+| `--ink` on `--card-plate` (modifier, level pill) | 10.8 | 11.5 | 13.0 | 4.5 text |
+| `--card-metal-light` on `--card-plate` (small hex outline against the plate) | 6.1 | 5.1 | 5.4 | 3 non-text |
+| `--danger` on brightest slot / `--card-window` (invalid outline) | 6.2 / 6.5 | 6.3 / 6.6 | 6.6 / 6.8 | 3 non-text |
+| `--card-metal-mid` on panel `#1d2026` | 4.8 | 3.9 | 2.6 | decorative only |
+
+Text on the art also gets `text-shadow: 0 1px 1px rgb(0 0 0 / 0.9)` against JPEG noise. It is not counted in the ratios.
 
 ### Card type
 **[amended after a3e3baa, tdj.16]** The name uses a display face; everything else on the card uses the app's system stack.
@@ -167,25 +175,31 @@ Set on `.character-card` (not variant dependent):
 ```
 Only weight 600 ships. Names in other scripts fall back to the system stack per glyph. Files and licence: `src/assets/fonts/inter-tight/` (`OFL.txt`, SIL OFL 1.1).
 
+**[amended 2026-11-14, art frame]** Text inside the frame scales with the card (container query units on `.character-card`, which is `container-type: inline-size`) and has a pixel floor. The art's banner and slots are 13 to 16px tall, so these sizes are set by the art, not by the app's type scale. Inter Tight stays: at 11 to 12px its narrow 600 fits the banner best (1a1.10, font check).
+
 | use | size / line-height | weight | colour |
 |---|---|---|---|
-| name **[amended]** | `1.25rem / 1.2`, `var(--card-name-font)` | 600 | `--ink` |
-| merchant / rider name **[amended: new]** | `0.8125rem / 1.2` | 600 | `--ink` |
-| merchant type, rider kind **[amended: new]** | `0.6875rem / 1.2` | 400 | `--card-metal-light` |
-| level pill **[amended: new]** | `0.75rem / 1` | 600 | `--ink` on `--card-metal-dark` |
+| name, in the banner **[amended]** | `max(11px, 3.53cqw)` (12px at 340) / banner height, `var(--card-name-font)` | 600 | `--ink` |
+| slot value **[new]** | `max(10.5px, 3.24cqw)` (11px at 340) / 1 | 600 | `--ink` |
+| slot word (`lv`, `gp`, `pace`, `sight`) **[new]** | same as slot value | 400 | `--card-metal-light` |
+| plate line 1 **[new]** | `max(10.5px, 3.24cqw)` / 1.2 | 600 | `--ink` |
+| plate line 2 **[new]** | same | 400 | `--card-metal-light` |
+| bust strip **[amended]** | `max(11px, 3.53cqw)` / 1 | 400 | `--ink` |
+| merchant / rider name | `0.8125rem / 1.2` | 600 | `--ink` |
+| merchant type, rider kind | `0.6875rem / 1.2` | 400 | `--card-metal-light` |
+| level pill | `0.75rem / 1` | 600 | `--ink` on `--card-plate` **[amended]** |
 | stat score | `1.25rem / 1` | 600 | `--ink` |
-| level, gold value | `1rem / 1` | 600 | `--ink` |
-| level, gold label | `0.75rem / 1` | 400 | `--card-metal-light` |
 | stat abbreviation | `0.625rem / 1`, `letter-spacing: 0.06em` | 600 | `--card-metal-light` |
-| modifier | `0.75rem / 1` | 600 | `--ink` |
-| bust strip | `0.72rem / 1` | 400 | `--ink` |
+| modifier | `0.75rem / 1` | 600 | `--ink` on `--card-plate` **[amended]** |
+
+Removed: the "level, gold value" (1rem) and "level, gold label" (0.75rem) rows; level and gold now use the slot rows.
 
 All numbers `font-variant-numeric: tabular-nums`.
 
 ### Card motion
 | token | value | use |
 |---|---|---|
-| `--card-motion-hover` | `120ms ease-out` | stroke, border and strip colour/opacity on hover |
+| `--card-motion-hover` | `120ms ease-out` | stroke, border, slot background and strip colour/opacity on hover |
 | `--card-motion-swap` | `150ms ease-out` | bust crossfade |
 
 Under `prefers-reduced-motion: reduce`, `--card-motion-swap` is `0ms`. The hover change is colour only and stays.

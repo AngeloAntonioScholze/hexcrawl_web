@@ -1,299 +1,334 @@
-# hexcrawl_web-1a1.10: Character card frame and placeholder busts
+# hexcrawl_web-1a1.10: Character card on the supplied art frame
 
-Status: spec, revised 2026-11-14 to the user's new card shape (replaces the 2026-11-10 shield spec), amended 2026-11-14 after the user's answers (decisions hexcrawl_web-tdj.11 to tdj.16). Final art is deferred. Everything here is designer-specified placeholder art (standalone SVG plus CSS), except the name font. Real art replaces the files under the same names.
+Status: spec, **art frame rework 2026-11-14** (supersedes the hand-built 9-slice frame, crest, foot and oval of the earlier 2026-11-14 revision). Written against main `d7517cf`, where `CharacterCard.vue`, `BustPicker.vue`, `CaravanCardBody.vue`, `ShipCardBody.vue`, `cardBody.ts`, `StatHexagon.vue` exist unmounted.
 
-## Changes since a3e3baa (decisions tdj.11–tdj.16)
-Sections marked **[amended]** below changed; everything else is as committed in a3e3baa.
-- **tdj.11**: caravan cards show **gold** in the tally row (no level). New slot body `CaravanCardBody.vue`.
-- **tdj.12**: caravan and ship cards are the **same tall rectangle** as people cards (frame 620px at 288px wide), not near-square. Caravans fill the lower area with a **merchant list** (type, level). Ships: **proposal** (pace and sight tally, "aboard" rider list), new slot body `ShipCardBody.vue`, pending the orchestrator's call.
-- **tdj.13**: the card may fill the whole panel height; the body scrolls. No fold or compact variant.
-- **tdj.14**: no kind word on the card (confirmed).
-- **tdj.15**: STR at the top, clockwise (confirmed; tdj.3 unchanged).
-- **tdj.16**: the **name** uses the display face **Inter Tight 600**, self-hosted woff2 (OFL 1.1). Everything else keeps the app font.
-- Acceptance check 9 and the slot rule changed; a "Lower area" section and the font asset were added.
+Why: the user validated the card's layout in the tdj.4 harness but rejected the look ("LAYOUT OK, LOOKS BAD") and asked for the supplied art instead of built shapes. Decisions fixed by the user (bead notes 2026-11-14, decision tdj.19 = a):
+- Crop the three frames from `docs/reference/character-card-frame.jpg` (1156×912 JPG on black). No better source exists.
+- The art frame is the **top** of the card, used as drawn: portrait in its window, name in its banner, numbers in its three small slots, the lower trapezoid panel as proposed here.
+- The stat hexagon sits **below** the frame, restyled to the art's colours (tdj.3).
+- Frame colour by owner, kind and hidden (rule below).
+- Caravan card keeps gold and the merchant list; ship card keeps pace, sight and the aboard list.
+- Name font stays Inter Tight 600 (checked against the art below: kept).
+- Components stay container-agnostic (mounted in the ped.12 sub-panel column).
 
-References:
-- Style (metals, ornament, palette): `docs/reference/character-card-frame.jpg`. Keep it.
-- Shape and layout (decided by the user 2026-11-14): `docs/reference/player-card-sketch-2026-11-14.png`. A tall **rectangle**, an **oval** portrait, then (for people) a large hexagon with a small hexagon on each point. The sketch sets shape only; it shows one small hex as a sample of six.
-
-What changed from the shield spec:
-- Shield outline (3-slice top/body/bottom) → rectangle frame (9-slice border) plus a crest and a foot ornament.
-- 4:3 rounded bust window → 4:5 oval.
-- Stepped name banner with the kind word → a centred name line, no kind word.
-- Stat circles, purse box: see `design/hexcrawl_web-tdj.3.md`.
-
-Kept as is: bust registry and ids, bust picker behaviour, frame colour variants and their rule, edit permissions, bust window states, a11y, copy voice.
+Mock of this spec (built from the real crops, rendered in Chromium at 340px and 296px card widths): `design/hexcrawl_web-1a1.10-mock.png`. Crop and cut-out tool: `design/tools/card-frames.mjs`.
 
 ## Goal
-Anyone at the table (DM or player) who selects an entity sees who or what it is at a glance: a bust in an oval inside an ornate frame, with its name under it. The one action the card drives is **the DM choosing a bust**. Stats go in the card's slot (`StatHexagon`, tdj.3). Mounting is tdj.4 (DM panels) and hexcrawl_web-ped.6 (player panel).
+Anyone at the table who opens an entity sees who or what it is at a glance: its bust in the frame's window, its name on the banner, three key numbers in the slots, who plays it and what it is doing on the lower plate. The one action the card drives is **the DM choosing a bust**. Numbers that the viewer may edit (level, gold) are edited in place in the slots.
 
-Applies to every entity kind **[amended]**. Every kind gets the same frame size; only the slot body differs:
-| kind | card content | slot body |
+| kind | frame | below the frame |
 |---|---|---|
-| `party`, `npc` | frame, oval, name, slot | `StatHexagon` (level and gold row, stat hexagon; tdj.3) |
-| `caravan` | frame, oval, name, slot | `CaravanCardBody` (gold row, merchant list; see Lower area) |
-| `ship` | frame, oval, name, slot | `ShipCardBody` (pace and sight row, aboard list; see Lower area). Proposal pending the orchestrator |
+| `party`, `npc` | art frame | `StatHexagon` (tdj.3) |
+| `caravan` | art frame | `CaravanCardBody` (merchant list) |
+| `ship` | art frame | `ShipCardBody` (aboard list) |
 
-## Scope for the implementer
-Reuse from the already built (uncommitted, review-passed) work in `.worktrees/hexcrawl_web/hexcrawl_web-tdj-design`:
-- `src/entities/busts.ts`: `BUSTS`, `bustOf`, `frameVariant` and their tests stay. `FRAME_ART` changes shape (Registry).
-- `src/components/BustPicker.vue`: stays; tiles become ovals (Components).
-- `src/assets/busts/*.svg`: stay, except the wagon and ship redraw check (Assets).
-- `setPortrait` widened to every entity kind in `src/stores/hexMap.ts`, still `may('entitySettings', one)` (DM only), still a bundled id or `null`, with the forbidden-for-players test. Persisted field stays `Entity.portrait`, no migration. Saved maps with an old scenic id keep it and render as "unknown bust".
-- Removal of `src/assets/portraits/caravan-*.svg`, `CARAVAN_PORTRAITS` and `caravanPortrait` (confirm with the manager; `PROFESSION_ICONS` stays, 1a1.12 owns it).
+## Frame colour rule (tdj.19 = a) [amended]
+Fields on `Entity` (`src/entities/entity.ts`): `kind`, `owner: 'player' | 'dm'`, `hidden: boolean` ("kept off the players' map"). There is **no hostile field**. New DM entities start hidden (`newEntity`: `hidden: owner === 'dm'`); `assignEntity` sets `owner: 'player', hidden: false`.
 
-Replace:
-- `src/assets/frames/<variant>-top|body|bottom.svg` (9 files) → `<variant>-frame.svg`, `<variant>-crest.svg`, `<variant>-foot.svg` (9 files). Delete the old ones.
-- `src/components/CharacterCard.vue`: template and styles rebuilt to the layout below. Props and emits unchanged.
+One function, in `src/entities/busts.ts`, checked in this order:
+```ts
+export const frameVariant = (entity: Pick<Entity, 'kind' | 'owner' | 'hidden'>): FrameVariant => {
+  if (entity.hidden) return 'crimson'                               // hidden DM entity
+  if (entity.kind === 'caravan' || entity.kind === 'ship') return 'bronze'
+  return entity.owner === 'player' ? 'steel' : 'bronze'             // visible DM party/npc = bronze
+}
+```
+| hidden | kind | owner | variant |
+|---|---|---|---|
+| true | any | any | **crimson** |
+| false | caravan, ship | any | **bronze** |
+| false | party, npc | player | **steel** (blue) |
+| false | party, npc | dm | **bronze** |
 
-New **[amended]**:
-- `src/components/CaravanCardBody.vue`, `src/components/ShipCardBody.vue` (Lower area), each with a component test next to it (`// @vitest-environment happy-dom`, as StatHexagon.test.ts).
-- `src/assets/fonts/inter-tight/inter-tight-latin-600-normal.woff2`, `inter-tight-latin-ext-600-normal.woff2`, `OFL.txt`: already in this spec worktree; copy them unchanged. The `@font-face` rules go in `src/style.css` (tokens.md, Card type).
-- Optional: the tally row (word plus value or input) is the same in StatHexagon, CaravanCardBody and ShipCardBody. The implementer may extract it as `src/components/CardTally.vue`; the visual rules stay those of tdj.3 "Tally row".
+- "Hostile" has no data, so crimson means **hidden** only (open question Q2).
+- Carriers are checked before owner. Today the add row in MapView creates every entity with `owner: 'player'`, so an owner-first rule would turn every caravan blue (open question Q3).
+- Players never see crimson: the projection drops hidden entities.
+- Unit test: all 16 combinations (2 hidden × 4 kinds × 2 owners).
+- `CharacterCard`'s `entity` prop gains `'hidden'` in its `Pick`.
 
-## Frame colour rule (unchanged)
-| Entity | Variant |
-|---|---|
-| `caravan` or `ship` (any owner) | **bronze** |
-| `party` or `npc` with `owner: 'player'` | **steel** |
-| `party` or `npc` with `owner: 'dm'` | **crimson** |
+## Art frame
+### Source and crop boxes
+Source: `docs/reference/character-card-frame.jpg`, 1156×912, background max(R,G,B) ≤ 6 (measured over y 700 to 911). Measured bounds of each frame (max channel > 12): steel x 49–377, y 119–550; bronze x 410–734, y 118–551; crimson x 767–1106, y 116–551. The three frames are **not** the same drawing at three tints: shield widths differ (steel 260, bronze 257, crimson 269px), the bronze window has an arched top, and the slot rows sit at different heights. So every variant gets its own region map (below).
 
-Bronze marks the company's wagons and hulls, steel the players' people, crimson the DM's people. The rule follows `owner`, so reassigning recolours the frame. The seat is ignored on purpose. `frameVariant(entity: Pick<Entity, 'kind' | 'owner'>)`, unit-tested for all 8 pairs.
+All three are cropped to **one size, 340×438**, each centred on its shield's outer edges (steel 83–343, bronze 444–701, crimson 803–1072) so the cards line up:
 
-## Registry (`src/entities/busts.ts`)
+| variant | crop box in source px (x, y, w, h) | source x range | source y range |
+|---|---|---|---|
+| steel | 43, 115, 340, 438 | 43–382 | 115–552 |
+| bronze | 402, 115, 340, 438 | 402–741 | 115–552 |
+| crimson | 767, 115, 340, 438 | 767–1106 | 115–552 |
+
+Every ornament (crest horns, side spears, crossed blades) is inside its crop. The card box **is** the crop box, so nothing overhangs the card and no panel scroller can clip an ornament.
+
+### Black background: cut out to alpha [decision]
+The black is keyed to alpha once, at build time; no CSS blend mode at runtime. Why:
+- `mix-blend-mode: screen` or `lighten` would also lift the art's dark window, banner, slots and plate (their max channel is only 8 to 40) toward the panel colour. That washes out the text on them, and the map would show through the 94% panel.
+- A plain luminance key would punch holes in those same panels: their darkest pixels (8) are barely above the background (≤ 6).
+- A cut-out PNG/WebP looks the same on any surface: dock, sub-panel, phone.
+
+**Method** (implemented in `design/tools/card-frames.mjs`; restated here so it can be rebuilt):
+1. Draw the crop into a canvas; m = max(R, G, B) per pixel.
+2. **Background set**: every 4-connected component of pixels with m ≤ 14 that contains at least one pixel with m ≤ 4. This catches the outer black and the enclosed pockets between ornaments. The frame's dark panels are never caught, because they are enclosed by the metal rim (m ≥ 35) and never reach m ≤ 4.
+3. For background pixels: alpha = clamp((m − 4) / (14 − 4), 0, 1). Colour is un-premultiplied against black, c = min(255, c / alpha), so the antialiased ornament fringe keeps its metal tint instead of going grey. Every other pixel stays opaque and unchanged.
+4. No blur or feather pass. The 4-to-14 ramp is the feather (1 to 2px on the ornament edges). A blur would thin the 1px spear and horn tips.
+
+Result: the keyed edges are clean over `#1d2026` at 3× zoom. A faint dark line hugs the shield's outer rim; it reads as a contact shadow and stays.
+
+### Window mask
+The portrait is drawn **over** the art's window and clipped to the window's exact shape, which differs per variant (rounded rectangle with a notch at the bottom left for the banner; bronze has an arched top). One mask per variant, made by the same tool:
+1. Region grow from a seed inside the window, accepting 4-neighbours with m ≤ limit **and** |m − m(previous)| ≤ 2. The art's rims are steps of 10 or more; the window's own gradient changes by about 1 per pixel. Seeds in source px, with limits: steel (213, 290) ≤ 44; bronze (572, 290) ≤ 44; crimson (933, 290) ≤ 42.
+2. Bronze only: the inner band around its window is as dark as the window, so the grow is clipped to x 465–680 and y ≥ 177 + 0.0034 × (x − 572.5)² + 1 (source px; the arch was fitted to edge samples at x 468, 530, 550, 572, 600, 630, 660, 675 to within 2px).
+3. Fill pinholes: pixels inside the region's bounding box that are not connected to the box edge outside the region.
+4. Erode 1px (so the bust never touches the rim), then a 3×3 box blur. Write it as a white RGBA PNG at the window's bounding-box size; alpha = mask.
+
+Measured window boxes match the edge profiles: steel window x 98–327, y 187–396 in source px, which is crop (55, 72) 230×210.
+
+### Files, sizes, HiDPI
+| file | size | format | ships |
+|---|---|---|---|
+| `src/assets/frames/steel-frame.webp`, `bronze-frame.webp`, `crimson-frame.webp` | 340×438 | WebP, lossy q 0.92 with alpha (Chromium canvas encoder), about 15 KB each | yes |
+| `src/assets/frames/steel-window.png`, `bronze-window.png`, `crimson-window.png` | window box (230×210, 215×229, 239×220) | PNG RGBA, white + alpha, about 2 KB each | yes |
+| `<v>-frame.png`, `slots.json` | — | lossless copy and measured regions, for checking | no (tool output only) |
+
+Run from the hexcrawl_web root: `node design/tools/card-frames.mjs docs/reference/character-card-frame.jpg src/assets/frames`, then delete the `*-frame.png` and `slots.json` it also writes. `--preview` writes keyed previews with a region overlay.
+
+HiDPI: the source is 1×, so the card **never displays the art above 1 CSS px per source px**. `--card-width` is 340px, the crop width. In the 21rem sub-panel (296 to 304px content) the art shows at 0.87 to 0.89. On DPR 2 screens it is upsampled and looks soft; that is accepted (bead note: "1x resolution, soft on HiDPI"). Use `image-rendering: auto` (smooth), never `pixelated` or `crisp-edges`: the art is painterly. No `srcset` today. If a 2× source arrives, re-run the tool with every crop number doubled, add `<v>-frame@2x.webp` and `srcset="… 2x"`, and keep the % region map unchanged.
+
+### Region map (crop px; % of the 340×438 crop)
+Measured by region grow (same rule as the window), normalised to one height per variant's slot row. Positions in CSS are `left / top / width / height` in % of the frame box, so they scale with the card.
+
+**Steel** (crop 43, 115)
+| region | x, y, w × h | left / top / width / height % | holds |
+|---|---|---|---|
+| window | 55, 72, 230 × 210 | 16.18 / 16.44 / 67.65 / 47.95 | bust (masked) |
+| pick | 55, 72, 230 × 191 | 16.18 / 16.44 / 67.65 / 43.61 | DM bust button (window down to 4px above the banner) |
+| banner | 56, 267, 107 × 15 | 16.47 / 60.96 / 31.47 / 3.42 | name |
+| slot 1 | 67, 294, 65 × 15 | 19.71 / 67.12 / 19.12 / 3.42 | see Slot content |
+| slot 2 | 138, 294, 65 × 15 | 40.59 / 67.12 / 19.12 / 3.42 | |
+| slot 3 | 209, 294, 65 × 15 | 61.47 / 67.12 / 19.12 / 3.42 | |
+| plate (trapezoid) | 68, 317, 205 × 50; top edge x 70–270, bottom edge x 82–257 | 20.00 / 72.37 / 60.29 / 11.42 | — |
+| plate text box | 82, 317, 175 × 50 | 24.12 / 72.37 / 51.47 / 11.42 | two plate lines |
+
+**Bronze** (crop 402, 115)
+| region | x, y, w × h | left / top / width / height % |
+|---|---|---|
+| window (arched top) | 63, 64, 215 × 229 | 18.53 / 14.61 / 63.24 / 52.28 |
+| pick | 63, 64, 215 × 211 | 18.53 / 14.61 / 63.24 / 48.17 |
+| banner | 64, 279, 100 × 14 | 18.82 / 63.70 / 29.41 / 3.20 |
+| slot 1 | 74, 304, 61 × 15 | 21.76 / 69.41 / 17.94 / 3.42 |
+| slot 2 | 140, 304, 62 × 15 | 41.18 / 69.41 / 18.24 / 3.42 |
+| slot 3 | 207, 304, 61 × 15 | 60.88 / 69.41 / 17.94 / 3.42 |
+| plate | 75, 326, 193 × 47; top x 76–265, bottom x 89–252 | 22.06 / 74.43 / 56.76 / 10.73 |
+| plate text box | 89, 326, 163 × 47 | 26.18 / 74.43 / 47.94 / 10.73 |
+
+**Crimson** (crop 767, 115)
+| region | x, y, w × h | left / top / width / height % |
+|---|---|---|
+| window | 51, 62, 239 × 220 | 15.00 / 14.16 / 70.29 / 50.23 |
+| pick | 51, 62, 239 × 201 | 15.00 / 14.16 / 70.29 / 45.89 |
+| banner | 51, 267, 112 × 15 | 15.00 / 60.96 / 32.94 / 3.42 |
+| slot 1 | 63, 295, 68 × 16 | 18.53 / 67.35 / 20.00 / 3.65 |
+| slot 2 | 137, 295, 68 × 16 | 40.29 / 67.35 / 20.00 / 3.65 |
+| slot 3 | 211, 295, 67 × 16 | 62.06 / 67.35 / 19.71 / 3.65 |
+| plate | 63, 319, 215 × 52; top x 65–275, bottom x 80–260 | 18.53 / 72.83 / 63.24 / 11.87 |
+| plate text box | 80, 319, 180 × 52 | 23.53 / 72.83 / 52.94 / 11.87 |
+
+In source px add the crop origin (for example the steel banner is source x 99–205, y 382–396).
+
+At the 296px card width (scale 0.871) a slot is about 57×13px, the banner 93×13px, the plate text box 152×44px.
+
+## Registry (`src/entities/busts.ts`) [amended]
 ```ts
 export type FrameVariant = 'steel' | 'bronze' | 'crimson'
-export interface Bust { id: string; label: string; url: string }
-export const BUSTS: readonly Bust[]
-export const bustOf: (id: string | undefined) => Bust | undefined
-export const frameVariant: (entity: Pick<Entity, 'kind' | 'owner'>) => FrameVariant
-export const FRAME_ART: Readonly<Record<FrameVariant, { frame: string; crest: string; foot: string }>>
+export interface FrameBox { left: number; top: number; width: number; height: number }   // % of the frame box
+export interface FrameArt {
+  frame: string            // url of <v>-frame.webp
+  window: string           // url of <v>-window.png
+  regions: { window: FrameBox; pick: FrameBox; banner: FrameBox; slots: readonly [FrameBox, FrameBox, FrameBox]; plate: FrameBox }
+}
+export const FRAME_ART: Readonly<Record<FrameVariant, FrameArt>>   // values: the % columns above (plate = plate text box)
+export const frameVariant: (entity: Pick<Entity, 'kind' | 'owner' | 'hidden'>) => FrameVariant
 ```
-Ids never change, because maps store them. If real art arrives as PNG or WebP, only import extensions change.
+`BUSTS` and `bustOf` stay as they are. A unit test asserts that every region box lies inside 0 to 100 and that the three slots of a variant do not overlap.
 
-## Tokens
-All card tokens live in `design/tokens.md`, section **Card**: variant colours (`--card-metal-light|mid|dark`, `--card-fill-top|bottom`, `--card-window`), sizes (`--card-width`, `--card-pad`, `--card-overhang`, `--card-oval-w`, `--card-oval-h`, `--card-field-h`), card type scale, `--card-motion-hover`, `--card-motion-swap`, and the measured contrast. The variant colours are set on `.character-card[data-variant=…]`, the sizes on `.character-card`. Base tokens (`--ink`, `--danger`, `--surface-deep`, `--line`, `--radius-control`) come from `:root`.
-
-## Layout: `CharacterCard`
+## Layout: `CharacterCard` [amended]
 ```
-           /\ /\                 crest 160×40, centred, 16px above the frame
-   +======/=====\======+         frame: 8px metal band, ornate 24px corners
-   ||    (       )    ||
-   ||   (  oval   )   ||         oval 160×200, centred
-   ||    (       )    ||
-   ||   Name Surname  ||         name line, centred, 24px
-   ||  level 3  gold 1250 ||     \   default slot, 324px for every kind [amended]:
-   ||     <hexagon>   ||          >  StatHexagon (people), CaravanCardBody,
-   ||                 ||         /   ShipCardBody
-   +=====\_  ><  _/====+         foot 288×40, 16px below the frame
+ article.character-card            width min(100%, 340px), container-type inline-size
+ ┌ .frame (aspect-ratio 340/438) ─────────────┐
+ │ img.art            the variant's webp, inset 0               │
+ │ .window            bust, masked to the art's window          │
+ │ button.pick        DM only, over the window                  │
+ │ h3.name            in the banner                             │
+ │ .slot ×3           named slots slot1 / slot2 / slot3         │
+ │ .plate             plate lines                               │
+ └──────────────────────────────────────────────┘
+ default slot          StatHexagon / CaravanCardBody / ShipCardBody, margin-top 0.5rem
 ```
-Dimensions at the card's max width (288px):
+- Root `<article class="character-card">`: `width: min(100%, var(--card-width)); margin-inline: auto; display: grid; justify-items: center; container-type: inline-size`. No outer margin, no padding, no background (the art carries its own).
+- `.frame`: `position: relative; width: 100%; aspect-ratio: 340 / 438`. Every child below is `position: absolute` with `left/top/width/height` from `FRAME_ART[variant].regions` as inline style.
+- `img.art`: `inset: 0; width: 100%; height: 100%; image-rendering: auto; user-select: none; pointer-events: none`, `alt=""`, `aria-hidden="true"`, `draggable="false"`, `decoding="async"`.
+- Heights: frame = 438 × width / 340 (438px at 340, 381px at 296). With StatHexagon below: 438 + 8 + 284 = **730px at 340**, 673px at 296. tdj.13 still holds: the card may fill the panel height and the panel body scrolls.
+- Fits: sub-panel content is 304px (296px with a scrollbar), the dock 320px, the phone column 312px. So the card is 296 to 320px in every mount and 340px only in a wider one. It works down to 240px (slot text hits its 10.5px floor and clips with ellipsis); below that is unsupported.
 
-| part | size | notes |
-|---|---|---|
-| card root `<article class="character-card">` | `width: min(100%, var(--card-width))` = 288px; `padding-block: var(--card-overhang)` (16px); `margin-inline: auto`; `container-type: inline-size` | no outer margin; the mount sets spacing |
-| frame `<div class="frame">` | 288px wide; `position: relative; display: grid; justify-items: center; padding: 1.75rem var(--card-pad)` (28px top and bottom, 16px sides); `border-radius: 4px` | fill: `linear-gradient(180deg, var(--card-fill-top), var(--card-fill-bottom))` |
-| oval | `var(--card-oval-w)` × `var(--card-oval-h)` = 160×200 (4:5) | first grid row |
-| name | full content width (256px), `margin-top: 0.75rem`, 24px line | |
-| slot wrapper | full content width (256px), `margin-top: 0.25rem` | rendered only when `$slots.default` |
+### Window (bust)
+- `.window`: region `window`; `mask-image: url(<v>-window.png); mask-size: 100% 100%; mask-repeat: no-repeat` (plus the `-webkit-` forms); `overflow: hidden`.
+- Bust `<img>`: `width: 100%; height: 100%; object-fit: cover; object-position: center top`. The bust SVGs are transparent, so the art's own dark window shows behind them; there is no fill colour.
+- Shade: `.window::after { content: ''; position: absolute; inset: 0; background: linear-gradient(180deg, transparent 55%, rgb(0 0 0 / 0.5)); pointer-events: none }`. It is masked with the window, gives the bust depth and darkens the zone above the banner.
+- Empty state mark: the existing 40px hexagon outline, 1.5px `--card-metal-light` at 50% opacity, centred in the window.
+- Bust swap: crossfade `opacity` over `var(--card-motion-swap)`; instant under reduced motion.
 
-Heights at 288px wide **[amended]**:
-- Every kind: slot body 28 (tally row) + 12 + 284 (lower box) = 324px. Frame 28 + 200 + 12 + 24 + 4 + 324 + 28 = **620px**; card with overhangs **652px** (aspect about 1 : 2.26). Parties, npcs, caravans and ships are the same size, so cards line up wherever two show.
-- A card mounted with no slot (allowed by the contract, used by no mount) is 292px / 324px. a3e3baa used that for carriers; tdj.12 replaced it.
+### Bust picker trigger (DM only) [amended]
+The trigger stays on the portrait. The **window** is the button:
+- When `pickable`: `<button type="button" class="pick">` in region `pick` (the window down to 4px above the banner, so a click on the name never opens it). Transparent background, no border, `border-radius: 8px` (the window's corner radius, about 8 crop px).
+- Strip: `position: absolute; left: 0; right: 0; bottom: 0; height: 1.5rem; display: grid; place-items: center; background: rgb(0 0 0 / 0.6)`; text per the card type table. Hidden (`opacity: 0`) on a known bust; shown on hover and focus-visible; always shown when empty or unknown.
+- When not pickable: no button, no strip; the bust `<img>` carries `alt` = bust label.
 
-Fits: panel content width is 320px on tablet and desktop (22rem panel, `0 1rem` body padding) and 312px on a 360px phone (column `100vw - 1rem` = 344px, minus 32px). A thin scrollbar takes up to 8px. So the card is 288px wide at every breakpoint and never scales in the two DM mounts. Below 288px (a future narrow mount) it shrinks with `width: 100%`; the frame, oval and name still fit down to 240px; StatHexagon's own minimum is 14rem (tdj.3).
+| state | shows |
+|---|---|
+| default, read-only | bust; `alt` = label |
+| default, pickable | bust `alt=""` (the button is named); strip hidden |
+| hover | strip visible; `var(--card-motion-hover)` |
+| focus-visible | `outline: 2px solid var(--ink); outline-offset: 2px`, plus the strip |
+| active | bust `filter: brightness(0.85)` |
+| empty (no `portrait`) | hexagon mark; pickable: strip "choose a bust" always visible |
+| unknown id | as empty; pickable: strip "unknown bust", `title` "stored bust: {id}"; never cleared automatically |
+| loading | art window only, no spinner |
+| error (`@error`) | falls back to empty |
 
-### Frame construction (fixed art vs stretched)
-Three layers, all decorative (`alt=""`, `aria-hidden="true"`, `pointer-events: none`):
+### Name in the banner
+- `<h3 class="name">` (level from `headingLevel`, default 3) in region `banner`. `margin: 0; padding: 0 3.6% 0 1.8%` (% of the banner, keeps the text off the sloped right end); `display: block; line-height` = the banner height (`calc(100cqw * 15 / 340)`, 14 for bronze); one line, `white-space: nowrap; overflow: hidden; text-overflow: ellipsis`.
+- `font: 600 max(11px, 3.53cqw) / inherit var(--card-name-font)`: 12px at 340, 11px at 312 and below. `color: var(--ink); text-shadow: 0 1px 1px rgb(0 0 0 / 0.9)` (lifts the text off JPEG noise).
+- Capacity: about 15 characters at 296px, 17 at 340px. Longer names truncate. The full name is in `title`, in the article's `aria-label`, and in the ped.12 sub-panel header right above the card, so truncation loses nothing (open question Q4 has an alternative).
+- **Font check (Inter Tight vs the art)**: kept. At 11 to 12px inside a 13 to 15px banner, a high-contrast or blackletter display face would break up at 1× and soften on HiDPI. Inter Tight's narrow 600 fits the most characters and reads as cleanly as the art's flat inset panels. No decision bead needed.
 
-1. **Fill**: CSS on `.frame` (the gradient above). Stretches freely.
-2. **Rails and corners**: `.frame::after { content: ''; position: absolute; inset: 0; border: 24px solid transparent; border-image: var(--card-frame) 24 / 24px / 0 stretch; pointer-events: none; }`. `--card-frame` is set inline from `FRAME_ART[variant].frame` as `url("…")`, as the built card does with `--card-rails`. The four 24×24 corners are **fixed art**; the four edge segments are **stretched** along their length only, which is safe because the band is uniform along the edge. The centre is not drawn (no `fill` keyword).
-3. **Crest and foot**: two `<img>` children of `.frame`, `position: absolute`, **fixed art, never stretched**:
-   - crest: `width: 10rem; height: auto` (160×40), `left: 50%; translate: -50% 0; top: calc(-1 * var(--card-overhang))`. It covers frame y 0 to 24, which the 28px top padding clears.
-   - foot: `width: 100%; height: auto` (288×40 at max width; scales with the card), `left: 0; bottom: calc(-1 * var(--card-overhang))`. It covers frame y H−24 to H.
-   - The article's `padding-block` holds the 16px overhangs, so nothing overflows the card box and no panel scroller clips it.
-
-### Oval (bust window)
-- `width: var(--card-oval-w); height: var(--card-oval-h); border-radius: 50%; overflow: hidden; position: relative; display: grid; place-items: center`.
-- `background: var(--card-window); border: 3px solid var(--card-metal-mid)`.
-- `box-shadow: inset 0 0 0 1px var(--card-metal-dark), inset 0 8px 20px rgb(0 0 0 / 0.6), 0 0 0 1px var(--card-metal-dark), 0 0 0 2px var(--card-metal-light)`. The last two draw a 2px outer bezel line around the metal ring.
-- Image: `position: absolute; inset: 0; width: 100%; height: 100%; object-fit: cover; object-position: center top`. The 4:3 bust art is cropped at the sides to the central 62.5% (x 48 to 208 of 256). Head-and-shoulder busts lose only shoulder width.
-- Strip (pickable only): `position: absolute; left: 0; right: 0; top: 62%; height: 1.5rem; display: grid; place-items: center; background: rgb(0 0 0 / 0.6)`; text per the card type table. At 62 to 74% of the height the oval is at least 147px wide, so the longest strip text ("choose a bust", about 80px) never clips.
-- Empty-state mark: a 40px pointy-top hexagon outline, 1.5px `--card-metal-mid`, 60% opacity, centred.
-
-### Name line **[amended: font, size]**
-- `<h3 class="name">` inside the article (it is the card's heading; mounts sit under an `h3` section title in 0zz, so the mount may pass `heading-level`; see Component contract).
-- `margin: 0.75rem 0 0; width: 100%; text-align: center`; `font-family: var(--card-name-font)`; `font-size: 1.25rem; line-height: 1.2` (24px line, unchanged height); `font-weight: 600`; `letter-spacing: 0`; `--ink`; one line, `overflow: hidden; text-overflow: ellipsis; white-space: nowrap`.
-- Display face: **Inter Tight** 600 (tdj.16: a neo-grotesque, Helvetica-like but more modern; SIL OFL 1.1; self-hosted). Only the name uses it. Font files, `@font-face` and fallback stack: tokens.md, Card type. `font-display: swap`, so the name shows in the system face until the woff2 arrives (about 23 KB for Latin).
-- No kind word on the card (tdj.14, confirmed). The kind is in the article's accessible name, in the entities list, and in the 0zz section meta.
-
-### Lower area: caravan and ship slot bodies **[amended: new]**
-Both bodies sit in the default slot, fill its 256px width and use the same two-part layout as StatHexagon, so every card is 620px tall:
-1. **Tally row**: identical rules to tdj.3 "Tally row" (28px, centred, `gap: 1.5rem`, word in metal-light 0.75rem, value 1rem/600 `--ink`, boxed input when editable, `margin-bottom: 0.75rem`).
-2. **Lower box**: `position: relative; width: 100%; max-width: 16rem; aspect-ratio: 256 / 284` (284px at 256, the hexagon box's size), `display: grid; align-content: start; gap: 4px`.
-
-#### `CaravanCardBody.vue` (tdj.11, tdj.12)
+### Slots
+- Each `.slot`: region `slots[i]`; `display: flex; align-items: center; justify-content: center; gap: 0.25em; padding-inline: 4%; white-space: nowrap; overflow: hidden`; `font: 600 max(10.5px, 3.24cqw) / 1 system-ui stack` (11px at 340); `font-variant-numeric: tabular-nums; text-shadow: 0 1px 1px rgb(0 0 0 / 0.9)`.
+- Content comes from named slots `slot1`, `slot2`, `slot3`. An empty named slot renders nothing in the wrapper, and the art's empty slot shows.
+- The content is `CardTally` (new, `src/components/CardTally.vue`; this extraction was optional before and is now required):
 ```ts
 props: {
-  gold: number                     // caravan gold at the current turn: store.suppliesOf(id).gold / player.suppliesOf(id).gold
-  editable: boolean                // mount passes store.may('supplies'): DM only
-  merchants: readonly Pick<Merchant, 'id' | 'name' | 'type' | 'level'>[]   // store.merchantsOf(id) / player.merchantsOf(id)
+  word: string                    // 'lv', 'gp', 'pace', 'sight'
+  value: number
+  editable: boolean
+  min: number; max: number; step: number
+  label: string                   // input aria-label, e.g. "level", "gold, in coins"
+  invalidTitle: string            // "a whole number from 1 to 20"
+  format?: 'int' | 'compact' | 'decimal'   // default 'int'
 }
-emits: {
-  gold: [value: number]            // mount -> store.setSupply(id, 'gold', value)
-}
+emits: { commit: [value: number] }
 ```
-- **Tally row**: one cell, `gold`. Caravans have no level (tdj.11). Editable input `min=0 max=1000 step=1` (`SUPPLY_LIMITS.gold.max`), width 4.5rem; read-only a span. Same draft, invalid and commit-on-change rules as tdj.3 (empty or non-numeric reverts; the store clamps). The edit is the same ledger write as the gold field in `caravan.supplies` (from this turn on); both show the same value.
-- **Merchant list** (read-only on the card; editing stays in the `caravan.merchants` section):
-  - `<ul class="crew" aria-label="merchants">`, rows in `merchantsOf` order.
-  - Row: `display: grid; grid-template-columns: 1.5rem 1fr auto; align-items: center; column-gap: 0.5rem; height: 2.5rem` (40px); `padding: 0 0.5rem 0 0.375rem`; `background: color-mix(in srgb, var(--card-window) 80%, transparent)`; `border-radius: var(--radius-control)`; `border-left: 3px solid <MERCHANT_INFO[type].color>` (decorative accent, no contrast duty).
-    - Col 1: `MERCHANT_INFO[type].icon`, 1rem, `aria-hidden="true"`.
-    - Col 2, two lines, each one line with ellipsis: the merchant's `name` in 0.8125rem/600 `--ink`; under it the type label (`MERCHANT_INFO[type].label`, as the merchants section shows it) in 0.6875rem/400 `--card-metal-light`. When `name` equals the label, show the label once (first line only), as `CaravanMerchants` does.
-    - Col 3, level pill: `lv {level}`, 0.75rem/600 `--ink`, tabular-nums; `height: 1.25rem; padding: 0 0.4rem; border-radius: 999px; background: var(--card-metal-dark); border: 1px solid var(--card-metal-light)`. The same metal treatment as the stat modifier circles.
-  - Capacity: 6 rows fill 6×40 + 5×4 = 260px of the 284px box. With **7 or more** merchants: show the first 5, then a 6th line (not a row box) `+{n} more in merchants`, 0.75rem `--card-metal-light`, centred, 24px tall.
-  - Catalog: not on the card. Services and prices need the panel's width and already live in the `caravan.merchants` section directly below; the card names who is aboard and how good they are (tdj.12: "type, level").
-  - Empty: one centred line `no merchants`, 0.8125rem `--card-metal-light`, at the box's vertical centre. The box keeps its 284px height.
-- Accessible names: each row reads "{name}, {type label}, level {n}" (`aria-label` on the `li`, inner text `aria-hidden`).
+  - Word: `--card-metal-light`, weight 400, lowercase. Value: `--ink`, 600.
+  - Read-only: `<span>`s inside a `role="group"` with `aria-label` "{label} {value}". `compact` shows values ≥ 10000 as `Intl.NumberFormat('en', { notation: 'compact', maximumSignificantDigits: 3 })` ("12.5k"), with the full number in `title`. `decimal` shows up to one decimal place (pace 1.5).
+  - Editable: `<label>` wrapping the word and `<input type="number" inputmode="numeric">`: `flex: 1 1 0; min-width: 0; height: 100%; padding: 0; border: 0; background: transparent; color: inherit; font: inherit; text-align: center`, spinners hidden (tdj.3 rules). While focused the word is hidden (`.slot:focus-within .word { display: none }`) so the full number has the whole slot (7 digits at 10.5px).
+  - Commit on `change`, draft and invalid rules as tdj.3 (empty or non-numeric reverts; the store clamps).
 
-#### `ShipCardBody.vue` (tdj.12: proposal, pending the orchestrator)
-Ships have no supplies, merchants, abilities or character sheet. What a ship already has (`src/entities/entity.ts`, store): `pacePerTurn`, `sight`, `darkvision`, and riders (ships are carriers: `ridersOf(id)`). Proposal:
-```ts
-props: {
-  pacePerTurn: number
-  sight: number
-  riders: readonly Pick<Entity, 'id' | 'name' | 'kind' | 'color'>[]   // store.ridersOf(id) / player.ridersOf(id)
-}
-emits: {}                          // read-only; pace and sight are edited in the entity rows
-```
-- **Tally row**: two read-only cells, `pace` `{pacePerTurn} hex` and `sight` `{sight} hex`. Values as text (1rem/600 `--ink`), never inputs: pace and sight already have their DM edit rows under the card.
-- **Aboard list**: `<ul class="crew" aria-label="aboard">`, same row box as the merchant list, 40px:
-  - Col 1: an 0.625rem circle in the rider's `color` with a 1px `--card-metal-dark` ring (the entity pip), `aria-hidden`.
-  - Col 2: rider `name`, 0.8125rem/600 `--ink`, ellipsis.
-  - Col 3: rider kind (`party` / `npc`), 0.6875rem `--card-metal-light`.
-  - Same capacity rule: 6 rows, or 5 plus `+{n} more aboard`.
-  - Empty: `nobody aboard` (the existing riders phrase), centred.
-- If the orchestrator rejects this, fallback: ship cards carry no slot (292px frame), against tdj.12. A decision is needed only if neither fits.
+| slot state | look |
+|---|---|
+| default | text on the art's slot |
+| hover (editable) | slot `background: rgb(255 255 255 / 0.06); border-radius: 3px`, `var(--card-motion-hover)` |
+| focus | `outline: 2px solid var(--ink); outline-offset: 1px; border-radius: 3px` on the slot wrapper (`:focus-within`) |
+| invalid draft | `outline: 1px dashed var(--danger); outline-offset: 1px`; `aria-invalid="true"`; `title` = invalidTitle |
+| disabled, loading, empty, error | none (read-only text, synchronous values; an empty slot shows bare art) |
 
-## Component contract (reused by tdj.4 and ped.6)
-`CharacterCard` is presentational. It never reads the store, the router, the session or which panel mounts it. Props in, events out.
+**Slot content** (the mount fills the named slots; tdj.4 / ped.12):
+| kind | slot 1 | slot 2 | slot 3 |
+|---|---|---|---|
+| party, npc | `lv` level: edit when `may('editCharacter', e)`, 1–20 | `gp` purse, `compact`: edit when `may('editCharacter', e)`, 0–999999 | `pace` pacePerTurn, `decimal`, read-only |
+| caravan | `gp` caravan gold this turn (`suppliesOf(id).gold`), edit when `may('supplies')`, 0–1000 | `pace`, read-only | `sight`, read-only |
+| ship | `pace`, read-only | `sight`, read-only | empty (bare art) |
 
+Third slot for people: **pace** (proposal, Q5). Pace is what players plan with, and it is the only per-entity number besides level and gold that every kind has. Edits to pace and sight stay in the DM entity rows.
+
+Target size: a slot is 57×13px at 296. WCAG 2.2 SC 2.5.8 passes through the spacing exception: slot centres are at least 62px apart and nothing else is interactive within 12px above or below them. The whole slot is the label, so it is the click area.
+
+### Plate (lower trapezoid) [proposal, Q6]
+- `.plate`: region `plate` (the text box, inset from the trapezoid's slanted sides); `display: flex; flex-direction: column; justify-content: center; align-items: center; gap: 2px; text-align: center; font-size: max(10.5px, 3.24cqw); line-height: 1.2; text-shadow: 0 1px 1px rgb(0 0 0 / 0.9)`. Each line is `max-width: 100%`, one line with ellipsis.
+- New prop `plate?: readonly string[]`; the card renders up to 2 entries (line 1 in `--ink` 600, line 2 in `--card-metal-light` 400). An empty array or no prop leaves the art's bare plate.
+- Content (mount):
+  - Line 1, **who plays it**, DM view only: `played by {store.playerOf(id)}`, or `dm` when `owner === 'dm'`, or `no player` when player-owned and unseated. In the player view line 1 is left out; they know who they are.
+  - Line 2, **what it is doing**, both views: `riding {carrier name}` when `carrierOf(id)` is set; else `{n} hexes to go` when the pending route has n > 0 hexes (`1 hex to go` for n = 1); else `standing`.
+
+## Below the frame [amended]
+Default slot, rendered only when given, with `margin-top: 0.5rem`. The tally rows of the old bodies moved into the frame's slots:
+- `StatHexagon` (tdj.3): the hexagon box only.
+- `CaravanCardBody`: **merchant list only**. The `gold` prop, `editable` prop and `gold` emit are removed (gold is in slot 1). The list rules stay as specified before (rows of 40px, 6 rows max, else 5 plus `+{n} more in merchants`, `no merchants`, `aria-label` per row). Width `min(100%, 16rem)`; restyled: row `background: var(--card-window); border: 1px solid var(--card-metal-dark); border-left: 3px solid <MERCHANT_INFO[type].color>`, level pill `background: var(--card-plate)` with a 1px `--card-metal-light` border. The box keeps `min-height: 284px` so every kind is the same height.
+- `ShipCardBody`: **aboard list only**. `pacePerTurn` and `sight` props are removed (slots 1 and 2). Same row restyle, same capacity rules, `nobody aboard`, `min-height: 284px`.
+- `cardBody.ts`: drop what only fed the removed tally rows. Keep the rest.
+
+## Component contract [amended]
 ```ts
 // src/components/CharacterCard.vue
 props: {
-  entity: Pick<Entity, 'id' | 'name' | 'kind' | 'owner' | 'portrait'>  // DM store or player projection
-  pickable: boolean          // mount passes store.may('entitySettings', entity): DM only
-  headingLevel?: 2 | 3 | 4   // level of the name heading; default 3
+  entity: Pick<Entity, 'id' | 'name' | 'kind' | 'owner' | 'hidden' | 'portrait'>
+  pickable: boolean            // store.may('entitySettings', entity): DM only
+  headingLevel?: 2 | 3 | 4     // default 3
+  plate?: readonly string[]    // up to 2 lines, see Plate
 }
-emits: {
-  bust: [id: string | null]  // mount calls store.setPortrait(entity.id, id)
-}
+emits: { bust: [id: string | null] }
 slots: {
-  default: the 324px body under the name (StatHexagon, CaravanCardBody or ShipCardBody,
-           chosen by the mount from entity.kind). Empty slot: no wrapper is rendered.
+  slot1, slot2, slot3: the frame's small slots (CardTally, see Slot content)
+  default: the body below the frame (StatHexagon, CaravanCardBody, ShipCardBody)
 }
 ```
-- Root: `<article class="character-card" :data-variant="variant" :aria-label="`${entity.name}, ${entity.kind}`">`. The variant custom properties are set on the root, so slotted children inherit them.
-- When `pickable`, the oval is a `<button type="button">` that opens `BustPicker`; otherwise a `<div>`.
-- The card sets no outer margin and assumes no panel width beyond its container.
+- Root `<article class="character-card" :data-variant="variant" :aria-label="`${entity.name}, ${entity.kind}`">`. The variant tokens are set on the root, so slotted children inherit them.
+- Presentational: never reads the store, router, session or panel.
 
-### `BustPicker.vue` (unchanged except tiles)
-- Wraps `PopupDialog`. Props `open` (v-model), `name: string`, `current: string | undefined`. Emits `pick: [id: string | null]`; the card relays it as `bust` and closes.
-- Title `` `${name}: bust` ``.
-- Grid `.busts`: `grid-template-columns: repeat(auto-fill, minmax(6rem, 1fr)); gap: 0.6rem`.
-- Tile: a button; thumbnail `aspect-ratio: 4 / 5; border-radius: 50%; overflow: hidden; background: var(--surface-deep)`, image `object-fit: cover; object-position: center top` (the same crop as the card, so the DM sees what the card will show); label under it, 0.78rem.
-- First tile "no bust": the oval thumbnail with a dashed 1px `--line-strong` border.
-- Current tile: `aria-pressed="true"` and the existing `.here` style. Unknown `current`: no tile pressed.
-- Picking closes the dialog; `showModal` returns focus to the oval button.
-
-### Oval states
-| State | When | Shows |
-|---|---|---|
-| default | known bust, not pickable | Image, `alt` = bust label (e.g. "Wizard") |
-| default, pickable | known bust, DM | Image `alt=""` (the button carries the name). Strip hidden (`opacity: 0`) |
-| hover | pickable | Strip visible; ring `border-color: var(--card-metal-light)`. `var(--card-motion-hover)` |
-| focus-visible | pickable | `outline: 2px solid var(--ink); outline-offset: 4px` (follows the ellipse; clears the 2px bezel), plus the strip |
-| active | pickable | Image `filter: brightness(0.85)` |
-| empty | no `portrait` | Hexagon mark. Pickable: strip always visible, "choose a bust". Read-only: no text |
-| unknown id | `portrait` set, `bustOf()` undefined | As empty. Pickable: strip "unknown bust"; the button's `title` gives the stored id. Never cleared automatically |
-| loading | image decoding | Window fill only. No spinner (bundled SVGs) |
-| error | `@error` | Falls back to empty |
-| disabled | none | Not pickable means not a button; no disabled look |
-
-Bust change: crossfade, `opacity` over `var(--card-motion-swap)`. Reduced motion: instant swap.
-
-## Assets (designer-specified placeholders, made in-repo, AGPL with the repo)
-All shapes use the variant's metal colours (tokens.md, Card) as hard-coded fills, so the files stay standalone. "Metal gradient" = vertical linear gradient metal-light (top) to metal-mid (bottom). Outline strokes are 1px metal-dark unless stated.
-
-### `src/assets/frames/<variant>-frame.svg` (viewBox `0 0 72 72`, 9-slice source, slice 24)
-- **Band**: an 8px ring between the outer rect (0,0)-(72,72) and the inner rect (8,8)-(64,64), `fill-rule: evenodd`, fill metal-mid. A 1.5px metal-light line along the outer edge (inset 0.75) and a 1px metal-dark line along the inner edge.
-- **Corners** (top-left drawn, mirrored to the other three; everything stays inside its 24×24 square):
-  - Diamond stud: polygon `8,0 16,8 8,16 0,8`, metal gradient, metal-dark stroke.
-  - Inner thorns: triangle `16,8 22,8 19,13` on the top arm and `8,16 8,22 13,19` on the left arm, fill metal-mid, metal-dark stroke.
-- **Edge segments** (24 to 48 on each side): band only. No ornament: it would visibly stretch.
-- Transparent everywhere inside the inner rect.
-
-### `src/assets/frames/<variant>-crest.svg` (viewBox `0 0 160 40`, shown at 160×40)
-- Base plate: path `M20 30 Q80 8 140 30 Q80 20 20 30 Z`, metal gradient.
-- Centre horns: two curved spikes from bases (70,16) and (90,16) to tips (64,0) and (96,0), curving outward, 6px wide at the base, metal gradient.
-- Outer horns: bases (44,22) and (116,22) to tips (36,8) and (124,8), 5px wide at the base, metal gradient.
-- Filigree: 2px metal-mid strokes, round caps: `M6 34 Q30 20 56 22` and its mirror `M154 34 Q130 20 104 22`.
-- Centre gem: polygon `80,12 85,20 80,28 75,20`, fill metal-light.
-- Nothing below y 34 except the plate's lower curve, so the oval stays clear.
-
-### `src/assets/frames/<variant>-foot.svg` (viewBox `0 0 288 40`, shown at width 100%)
-- Crossed blades (under everything else): two straight blades, 4px lozenges in metal-light with a 1px metal-dark spine, from (24,6) to (180,36) and mirrored from (264,6) to (108,36). They cross at the centre.
-- Axe hooks: crescents about 18×14 at (14,10) and (274,10), opening outward, metal gradient.
-- Centre point: polygon `126,14 162,14 144,38`, metal gradient, a nod to the old shield point.
-- Transparent elsewhere; between x 40 and 248 above y 14 only the blades show, so the hexagon's bottom modifier circle (tdj.3) stays readable above the frame's inner edge.
-
-### Name font: `src/assets/fonts/inter-tight/` **[amended: new]**
-| file | source | licence |
-|---|---|---|
-| `inter-tight-latin-600-normal.woff2` (22,660 B) | `@fontsource/inter-tight` 5.3.0 via jsDelivr, `files/inter-tight-latin-600-normal.woff2` | SIL OFL 1.1 |
-| `inter-tight-latin-ext-600-normal.woff2` (37,904 B) | same package, `files/inter-tight-latin-ext-600-normal.woff2` | SIL OFL 1.1 |
-| `OFL.txt` | `google/fonts`, `ofl/intertight/OFL.txt` ("Copyright 2022 The Inter Project Authors") | the licence itself; ship it next to the fonts |
-
-OFL 1.1 allows commercial use, bundling and self-hosting; the font may not be sold alone and the licence must travel with it. No CDN at runtime: Vite bundles the files from `src/assets`. The font is not AGPL; `OFL.txt` stays in the folder.
-
-### Busts: `src/assets/busts/<id>.svg` (unchanged)
-viewBox `0 0 256 192`, transparent, head top near y 24, flat 3–4 tones, rim light `#e6e8ec` at 30% on the upper-left contour, shared palette (skin `#b89a82`, shade `#7d6553`, hair `#3a3530`, metal `#9aa3ad`, one accent at ≤45% saturation). The 14 ids and labels stay: knight, ranger, rogue, wizard, cleric, bard, dwarf, elf, crone, brute, merchant, captain, wagon, ship.
-
-**New rule for the oval crop**: each figure's recognisable silhouette must sit within x 56 to 200 (the oval's central width with a margin). The `wagon` placeholder spans x 40 to 216 today and `ship` likely does too: redraw both narrower (wagon wheels and canvas inside x 60 to 196; ship hull and sail inside x 64 to 192). The others are head-and-shoulders and need no change; the UI review checks all 14.
-
-Real-art brief addition: busts for the oval are 4:5 portrait art, subject centred, head top at about 12% of the height, the oval and name areas kept dark.
+### `BustPicker.vue` [amended: tiles]
+Unchanged behaviour. Tile thumbnail: `aspect-ratio: 23 / 21; border-radius: 6px; overflow: hidden; background: var(--surface-deep)`, image `object-fit: cover; object-position: center top` (about the steel window's shape). The "no bust" tile has a dashed 1px `--line-strong` border.
 
 ## Copy (English only; the repo ships no other language)
 Lowercase, as the panels.
-- Strip: "choose a bust" (empty), "change bust" (has one), "unknown bust" (unknown id; the long form moved to the button `title`: "stored bust: {id}").
-- Oval button `aria-label`: `` `choose a bust for ${name}` ``; with a bust `` `change ${name}'s bust (now ${label})` ``.
-- Picker title `` `${name}: bust` ``; first tile "no bust"; other tiles use the bust labels.
-- **[amended]** Caravan body: tally word `gold`; list `aria-label` "merchants"; `lv {n}`; overflow `+{n} more in merchants`; empty `no merchants`; gold input `aria-label` "caravan gold, in coins", invalid `title` "a whole number from 0 to 1000".
-- **[amended]** Ship body (proposal): tally words `pace`, `sight`, values `{n} hex`; list `aria-label` "aboard"; overflow `+{n} more aboard`; empty `nobody aboard`.
-- Article `aria-label`: `` `${name}, ${kind}` `` with the raw kind (`party`, `npc`, `caravan`, `ship`).
+- Slot words: `lv`, `gp`, `pace`, `sight`. Input `aria-label`s: "level", "gold, in coins", "caravan gold, in coins". Read-only group labels: "level 3", "gold 1250", "pace 1.5 hexes a turn", "sight 3 hexes". Invalid titles: "a whole number from 1 to 20", "a whole number from 0 to 999999", "a whole number from 0 to 1000".
+- Plate: `played by {name}`, `dm`, `no player`; `riding {name}`, `{n} hexes to go`, `1 hex to go`, `standing`.
+- Strip: "choose a bust", "change bust", "unknown bust"; button `title` "stored bust: {id}".
+- Pick button `aria-label`: `` `choose a bust for ${name}` `` or `` `change ${name}'s bust (now ${label})` ``.
+- Picker title `` `${name}: bust` ``; first tile "no bust".
+- Article `aria-label`: `` `${name}, ${kind}` ``.
+- Lists: as before (`merchants`, `lv {n}`, `+{n} more in merchants`, `no merchants`; `aboard`, `+{n} more aboard`, `nobody aboard`).
 
 ## Accessibility
-- `<article>` labelled "name, kind"; frame, crest, foot and the empty-state mark are `aria-hidden`.
-- The name is a heading (`headingLevel`, default `h3`).
-- Focus order: the oval button (DM only), then the slot content.
-- Keyboard: Enter or Space on the oval opens the picker; Tab through tiles, Enter picks, Esc closes (native `<dialog>`); focus returns to the oval.
-- Alt text: read-only bust = bust label; pickable bust image `alt=""` (button is named).
-- Target: the oval button is 160×200. Picker tiles at least 6rem wide.
-- Contrast: tokens.md, Card. No text sits on frame art: the name sits on the fill, strip text on its own dark strip. Real art must keep the oval and the band between oval and hexagon dark.
-- Reduced motion: no crossfade; colour-only hover changes stay.
+- Contrast (tokens.md, Card, measured on colours sampled from the art): `--ink` on the banner, slots and plate ≥ 14.9:1 in every variant. Slot words and plate line 2 in `--card-metal-light` ≥ 6.5:1 on the brightest slot or plate. The `text-shadow` is an aid, not counted.
+- `img.art`, the window shade and the empty mark are `aria-hidden`. The name is a heading. The plate is plain text after the slots in DOM order.
+- Focus order: pick button (DM), slot 1, slot 2, slot 3 (editable ones only), then the body (StatHexagon: STR to CHA).
+- Keyboard: Enter or Space on the pick button opens the picker; Tab through tiles, Enter picks, Esc closes; focus returns to the button. Slots: type, Enter commits, arrows step.
+- Alt text: read-only bust = bust label; pickable bust `alt=""` (the button is named).
+- Reduced motion: no crossfade; colour-only hover stays.
+
+## Assets
+| asset | source | licence |
+|---|---|---|
+| `src/assets/frames/<v>-frame.webp`, `<v>-window.png` | cropped and keyed from `docs/reference/character-card-frame.jpg` by `design/tools/card-frames.mjs` | **user-supplied** art (see `docs/ASSETS.md`; licence terms are open question Q1) |
+| `src/assets/fonts/inter-tight/*` | unchanged | SIL OFL 1.1 |
+| `src/assets/busts/*.svg` | unchanged, designer-made placeholders | AGPL with the repo |
+
+- **Becoming unused** (grep on main `d7517cf`: their only importer is `src/entities/busts.ts`, through `FRAME_ART`): all nine `src/assets/frames/{steel,bronze,crimson}-{frame,crest,foot}.svg`. Delete them in the same change that adds the webp and png files. Also drop `.frame::after` border-image, `.crest`, `.foot`, `.oval` and the `--card-oval-*`, `--card-pad`, `--card-overhang`, `--card-fill-*`, `--card-field-h` declarations from `CharacterCard.vue`.
+- Add `src/assets/frames/SOURCE.md` (next to the files, as `OFL.txt` sits next to the fonts):
+  ```md
+  # Card frame art
+  `<variant>-frame.webp` and `<variant>-window.png` are cropped from `docs/reference/character-card-frame.jpg`,
+  art supplied by the project owner, with `design/tools/card-frames.mjs`. Source and licence: `docs/ASSETS.md`.
+  Rebuild: `node design/tools/card-frames.mjs docs/reference/character-card-frame.jpg src/assets/frames`.
+  ```
+- Bust crop rule [amended]: busts are 4:3 (256×192), shown with `cover` and `center top`. The narrowest window (bronze, 215×229) shows art x 38 to 218, so each bust's recognisable silhouette must sit within x 40 to 216. The wagon (x 40 to 216) now fits; the earlier wagon and ship redraw is no longer needed. The UI review checks all 14 in all three windows.
 
 ## Acceptance checks (UI review)
-Screens: caravan panel and entities panel (DM), at 360, 768 and 1280px.
-1. The card is 288px wide at all three widths, centred, with no horizontal scroll inside the panel.
-2. The frame is a rectangle with fixed ornate corners; edges stretch without visible distortion; crest and foot are not cut off by the panel scroller.
-3. The oval is 160×200 and centred; busts are not distorted; each of the 14 busts is recognisable in the oval and in the picker (wagon and ship not clipped).
-4. Frame variant follows the rule; reassigning the owner recolours it.
-5. DM: oval focusable with a visible 2px elliptical ring; Enter opens the picker; picking sets the bust, closes and refocuses; "no bust" clears it.
-6. Not pickable: the oval is not focusable and no picker opens.
-7. Empty and unknown ids show the empty state; an unknown id survives a reload.
-8. A 40-character name ellipsizes on one line.
-9. **[amended]** Every kind's frame is 620px tall at 288px wide. Caravan: gold row (input for the DM, text for players) and the merchant list with type and level; 7+ merchants show 5 rows plus the "+n more" line; none shows "no merchants". Ship: pace and sight row and the aboard list, or per the orchestrator's call.
+Screens: the ped.12 sub-panel (or the tdj.4 harness until it lands) at 360, 768 and 1280px; one card per variant; DM and player.
+1. The frame is the cropped art, 340×438 scaled to the card width (296 to 320px in current mounts), never wider than 340px; no black box or dark halo around the ornaments on the panel; no ornament cut off.
+2. Variant follows the rule table; hiding or revealing an entity, or assigning it to a player, recolours it.
+3. The bust fills the window's exact shape (bronze arch included); it never covers the rim, the banner or the slots.
+4. The name sits inside the banner, vertically centred, Inter Tight 600, 11 to 12px; a 40-character name ellipsizes before the banner's sloped end; `title` shows the full name.
+5. The slot texts sit inside their art slots at all widths; "gp 999999" shows as "gp 1M" read-only and in full while editing; DM and owning player can edit lv and gp in place, other players cannot.
+6. The plate shows the two lines (DM) or one line (player), centred within the trapezoid's slanted sides.
+7. DM: the pick button takes focus with a 2px ring; Enter opens the picker; picking sets the bust and refocuses. Players: no button, no tab stop on the window.
+8. StatHexagon or a list sits 8px under the frame; every kind's card has the same height at the same width.
+9. The art looks soft but not pixelated on a DPR 2 screen (`image-rendering: auto`).
 10. Reduced motion: no crossfade.
-11. **[amended]** The name renders in Inter Tight 600 (devtools > Fonts shows the self-hosted file, no third-party request); other card text uses the system stack.
 
 ## Open questions
-**[amended]** All six from a3e3baa are answered (tdj.11–tdj.16). Still open: the ship slot body (proposal above), for the orchestrator.
+Q1–Q6 are for the user; the defaults are what this spec builds.
+- **Q1, art licence**: the frame art is user-supplied (the original file was named `Gemini_Generated_Image_…`, which suggests Google Gemini output). Confirm the project may use it commercially and under which terms it ships in this AGPL repo. Options: (a) user owns or may use it, record as "user-supplied, all rights reserved by the user, not AGPL"; (b) record as AGPL with the repo; (c) placeholder only until licensed art arrives. Default (a).
+- **Q2, hostile**: there is no hostile field, so crimson = hidden. Options: (a) keep hidden as the only crimson trigger; (b) add a saved `hostile: boolean` (DM only, all map-field touchpoints) and use `hidden || hostile`. Default (a).
+- **Q3, player-owned carriers and UI-made npcs**: the add row creates every entity as `owner: 'player'`, so caravans and ships made in the UI are player-owned, and npcs made there come out blue, not "DM npc bronze". Options: (a) carriers always bronze, people follow `owner` [default]; (b) owner first, so player-owned carriers are blue; (c) also make the add row create npcs as `owner: 'dm'` (they would then start hidden, so crimson, until a reveal control exists).
+- **Q4, long names**: the banner holds about 15 characters at 296px. Options: (a) ellipsis, full name in `title` and the sub-panel header [default]; (b) let the name run past the banner over the window bottom on a dark scrim (departs from "as drawn"); (c) shrink the font to fit, down to 9px.
+- **Q5, third slot for people**: (a) pace [default]; (b) sight; (c) empty.
+- **Q6, lower plate**: (a) "played by" (DM) plus travel status [default]; (b) a free-text epithet the DM writes (new saved field); (c) bare art.
