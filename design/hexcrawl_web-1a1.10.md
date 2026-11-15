@@ -40,8 +40,8 @@ export const frameVariant = (entity: Pick<Entity, 'kind' | 'owner' | 'hidden'>):
 | false | party, npc | player | **steel** (blue) |
 | false | party, npc | dm | **bronze** |
 
-- "Hostile" has no data, so crimson means **hidden** only (open question Q2).
-- Carriers are checked before owner. Today the add row in MapView creates every entity with `owner: 'player'`, so an owner-first rule would turn every caravan blue (open question Q3).
+- "Hostile" has no data yet, so this build's crimson means **hidden** only. Q2 answered (b): a saved `hostile` field and `hidden || hostile` come in hexcrawl_web-tdj.30, not here.
+- Carriers are checked before owner. Today the add row in MapView creates every entity with `owner: 'player'`, so an owner-first rule would turn every caravan blue (Q3 answered (a): carriers first).
 - Players never see crimson: the projection drops hidden entities.
 - Unit test: all 16 combinations (2 hidden × 4 kinds × 2 owners).
 - `CharacterCard`'s `entity` prop gains `'hidden'` in its `Pick`.
@@ -198,7 +198,7 @@ The trigger stays on the portrait. The **window** is the button:
 ### Name in the banner
 - `<h3 class="name">` (level from `headingLevel`, default 3) in region `banner`. `margin: 0; padding: 0 3.6% 0 1.8%` (% of the banner, keeps the text off the sloped right end); `display: block; line-height` = the banner height (`calc(100cqw * 15 / 340)`, 14 for bronze); one line, `white-space: nowrap; overflow: hidden; text-overflow: ellipsis`.
 - `font: 600 max(11px, 3.53cqw) / inherit var(--card-name-font)`: 12px at 340, 11px at 312 and below. `color: var(--ink); text-shadow: 0 1px 1px rgb(0 0 0 / 0.9)` (lifts the text off JPEG noise).
-- Capacity: about 15 characters at 296px, 17 at 340px. Longer names truncate. The full name is in `title`, in the article's `aria-label`, and in the ped.12 sub-panel header right above the card, so truncation loses nothing (open question Q4 has an alternative).
+- Capacity: about 15 characters at 296px, 17 at 340px. Longer names truncate. The full name is in `title`, in the article's `aria-label`, and in the ped.12 sub-panel header right above the card, so truncation loses nothing (Q4 answered (a)).
 - **Font check (Inter Tight vs the art)**: kept. At 11 to 12px inside a 13 to 15px banner, a high-contrast or blackletter display face would break up at 1× and soften on HiDPI. Inter Tight's narrow 600 fits the most characters and reads as cleanly as the art's flat inset panels. No decision bead needed.
 
 ### Slots
@@ -233,15 +233,15 @@ emits: { commit: [value: number] }
 **Slot content** (the mount fills the named slots; tdj.4 / ped.12):
 | kind | slot 1 | slot 2 | slot 3 |
 |---|---|---|---|
-| party, npc | `lv` level: edit when `may('editCharacter', e)`, 1–20 | `gp` purse, `compact`: edit when `may('editCharacter', e)`, 0–999999 | `pace` pacePerTurn, `decimal`, read-only |
+| party, npc | `lv` level: edit when `may('editCharacter', e)`, 1–20 | `gp` purse, `compact`: edit when `may('editCharacter', e)`, 0–999999 | `sight` (sight radius in hexes), read-only |
 | caravan | `gp` caravan gold this turn (`suppliesOf(id).gold`), edit when `may('supplies')`, 0–1000 | `pace`, read-only | `sight`, read-only |
 | ship | `pace`, read-only | `sight`, read-only | empty (bare art) |
 
-Third slot for people: **pace** (proposal, Q5). Pace is what players plan with, and it is the only per-entity number besides level and gold that every kind has. Edits to pace and sight stay in the DM entity rows.
+Third slot for people: **sight** (Q5 answered (b)). Read-only, word `sight`, group label "sight {n} hexes" ("sight 1 hex" for n = 1). Edits to pace and sight stay in the DM entity rows.
 
 Target size: a slot is 57×13px at 296. WCAG 2.2 SC 2.5.8 passes through the spacing exception: slot centres are at least 62px apart and nothing else is interactive within 12px above or below them. The whole slot is the label, so it is the click area.
 
-### Plate (lower trapezoid) [proposal, Q6]
+### Plate (lower trapezoid) [Q6 answered (a)]
 - `.plate`: region `plate` (the text box, inset from the trapezoid's slanted sides); `display: flex; flex-direction: column; justify-content: center; align-items: center; gap: 2px; text-align: center; font-size: max(10.5px, 3.24cqw); line-height: 1.2; text-shadow: 0 1px 1px rgb(0 0 0 / 0.9)`. Each line is `max-width: 100%`, one line with ellipsis.
 - New prop `plate?: readonly string[]`; the card renders up to 2 entries (line 1 in `--ink` 600, line 2 in `--card-metal-light` 400). An empty array or no prop leaves the art's bare plate.
 - Content (mount):
@@ -278,7 +278,7 @@ Unchanged behaviour. Tile thumbnail: `aspect-ratio: 23 / 21; border-radius: 6px;
 
 ## Copy (English only; the repo ships no other language)
 Lowercase, as the panels.
-- Slot words: `lv`, `gp`, `pace`, `sight`. Input `aria-label`s: "level", "gold, in coins", "caravan gold, in coins". Read-only group labels: "level 3", "gold 1250", "pace 1.5 hexes a turn", "sight 3 hexes". Invalid titles: "a whole number from 1 to 20", "a whole number from 0 to 999999", "a whole number from 0 to 1000".
+- Slot words: `lv`, `gp`, `pace`, `sight`. Input `aria-label`s: "level", "gold, in coins", "caravan gold, in coins". Read-only group labels: "level 3", "gold 1250", "pace 1.5 hexes a turn", "sight 3 hexes" ("sight 1 hex" for 1). Invalid titles: "a whole number from 1 to 20", "a whole number from 0 to 999999", "a whole number from 0 to 1000".
 - Plate: `played by {name}`, `dm`, `no player`; `riding {name}`, `{n} hexes to go`, `1 hex to go`, `standing`.
 - Strip: "choose a bust", "change bust", "unknown bust"; button `title` "stored bust: {id}".
 - Pick button `aria-label`: `` `choose a bust for ${name}` `` or `` `change ${name}'s bust (now ${label})` ``.
@@ -297,7 +297,7 @@ Lowercase, as the panels.
 ## Assets
 | asset | source | licence |
 |---|---|---|
-| `src/assets/frames/<v>-frame.webp`, `<v>-window.png` | cropped and keyed from `docs/reference/character-card-frame.jpg` by `design/tools/card-frames.mjs` | **user-supplied** art (see `docs/ASSETS.md`; licence terms are open question Q1) |
+| `src/assets/frames/<v>-frame.webp`, `<v>-window.png` | cropped and keyed from `docs/reference/character-card-frame.jpg` by `design/tools/card-frames.mjs` | **user-supplied** art (see `docs/ASSETS.md`; Q1 answered (a): all rights with the user, not AGPL) |
 | `src/assets/fonts/inter-tight/*` | unchanged | SIL OFL 1.1 |
 | `src/assets/busts/*.svg` | unchanged, designer-made placeholders | AGPL with the repo |
 
@@ -325,10 +325,10 @@ Screens: the ped.12 sub-panel (or the tdj.4 harness until it lands) at 360, 768 
 10. Reduced motion: no crossfade.
 
 ## Open questions
-Q1–Q6 are for the user; the defaults are what this spec builds.
-- **Q1, art licence**: the frame art is user-supplied (the original file was named `Gemini_Generated_Image_…`, which suggests Google Gemini output). Confirm the project may use it commercially and under which terms it ships in this AGPL repo. Options: (a) user owns or may use it, record as "user-supplied, all rights reserved by the user, not AGPL"; (b) record as AGPL with the repo; (c) placeholder only until licensed art arrives. Default (a).
-- **Q2, hostile**: there is no hostile field, so crimson = hidden. Options: (a) keep hidden as the only crimson trigger; (b) add a saved `hostile: boolean` (DM only, all map-field touchpoints) and use `hidden || hostile`. Default (a).
-- **Q3, player-owned carriers and UI-made npcs**: the add row creates every entity as `owner: 'player'`, so caravans and ships made in the UI are player-owned, and npcs made there come out blue, not "DM npc bronze". Options: (a) carriers always bronze, people follow `owner` [default]; (b) owner first, so player-owned carriers are blue; (c) also make the add row create npcs as `owner: 'dm'` (they would then start hidden, so crimson, until a reveal control exists).
-- **Q4, long names**: the banner holds about 15 characters at 296px. Options: (a) ellipsis, full name in `title` and the sub-panel header [default]; (b) let the name run past the banner over the window bottom on a dark scrim (departs from "as drawn"); (c) shrink the font to fit, down to 9px.
-- **Q5, third slot for people**: (a) pace [default]; (b) sight; (c) empty.
-- **Q6, lower plate**: (a) "played by" (DM) plus travel status [default]; (b) a free-text epithet the DM writes (new saved field); (c) bare art.
+All answered by the user 2026-11-15 (decision beads tdj.21 to tdj.26).
+- **Q1, art licence**: the frame art is user-supplied (the original file was named `Gemini_Generated_Image_…`, which suggests Google Gemini output). Confirm the project may use it commercially and under which terms it ships in this AGPL repo. **Answered (a)** (tdj.21). Options: (a) user owns or may use it, record as "user-supplied, all rights reserved by the user, not AGPL"; (b) record as AGPL with the repo; (c) placeholder only until licensed art arrives. Default (a).
+- **Q2, hostile**: there is no hostile field, so crimson = hidden. **Answered (b)** (tdj.22): add the saved field, crimson = `hidden || hostile`; deferred to hexcrawl_web-tdj.30, this build stays hidden-only. Options: (a) keep hidden as the only crimson trigger; (b) add a saved `hostile: boolean` (DM only, all map-field touchpoints) and use `hidden || hostile`. Default (a).
+- **Q3, player-owned carriers and UI-made npcs**: the add row creates every entity as `owner: 'player'`, so caravans and ships made in the UI are player-owned, and npcs made there come out blue, not "DM npc bronze". **Answered (a)** (tdj.23). Options: (a) carriers always bronze, people follow `owner` [default]; (b) owner first, so player-owned carriers are blue; (c) also make the add row create npcs as `owner: 'dm'` (they would then start hidden, so crimson, until a reveal control exists).
+- **Q4, long names**: the banner holds about 15 characters at 296px. **Answered (a)** (tdj.24). Options: (a) ellipsis, full name in `title` and the sub-panel header [default]; (b) let the name run past the banner over the window bottom on a dark scrim (departs from "as drawn"); (c) shrink the font to fit, down to 9px.
+- **Q5, third slot for people**: **Answered (b) sight** (tdj.25). Options: (a) pace; (b) sight; (c) empty.
+- **Q6, lower plate**: **Answered (a)** (tdj.26). Options: (a) "played by" (DM) plus travel status [default]; (b) a free-text epithet the DM writes (new saved field); (c) bare art.
