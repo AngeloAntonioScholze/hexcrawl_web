@@ -202,7 +202,7 @@ The trigger stays on the portrait. The **window** is the button:
 - **Font check (Inter Tight vs the art)**: kept. At 11 to 12px inside a 13 to 15px banner, a high-contrast or blackletter display face would break up at 1× and soften on HiDPI. Inter Tight's narrow 600 fits the most characters and reads as cleanly as the art's flat inset panels. No decision bead needed.
 
 ### Slots
-- Each `.slot`: region `slots[i]`; `display: flex; align-items: center; justify-content: center; gap: 0.25em; padding-inline: 4%; white-space: nowrap; overflow: hidden`; `font: 600 max(10.5px, 3.24cqw) / 1 system-ui stack` (11px at 340); `font-variant-numeric: tabular-nums; text-shadow: 0 1px 1px rgb(0 0 0 / 0.9)`.
+- Each `.slot`: region `slots[i]`; `display: flex; align-items: center; justify-content: center; gap: 0.25em; padding-inline: 4%; white-space: nowrap; overflow-x: clip; overflow-y: visible` (tdj.32: never `overflow: hidden`, it clips descenders at narrow widths); `font: 600 max(10.5px, 3.24cqw) / 1 system-ui stack` (11px at 340); `font-variant-numeric: tabular-nums; text-shadow: 0 1px 1px rgb(0 0 0 / 0.9)`.
 - Content comes from named slots `slot1`, `slot2`, `slot3`. An empty named slot renders nothing in the wrapper, and the art's empty slot shows.
 - The content is `CardTally` (new, `src/components/CardTally.vue`; this extraction was optional before and is now required):
 ```ts
@@ -218,7 +218,7 @@ props: {
 emits: { commit: [value: number] }
 ```
   - Word: `--card-metal-light`, weight 400, lowercase. Value: `--ink`, 600.
-  - Read-only: `<span>`s inside a `role="group"` with `aria-label` "{label} {value}". `compact` shows values ≥ 10000 as `Intl.NumberFormat('en', { notation: 'compact', maximumSignificantDigits: 3 })` ("12.5k"), with the full number in `title`. `decimal` shows up to one decimal place (pace 1.5).
+  - Read-only: `<span>`s inside a `role="group"` with `aria-label` "{label} {value}". `compact` shows values ≥ 10000 as `Intl.NumberFormat('en', { notation: 'compact', maximumSignificantDigits: 3 })` ("12.5K", "1M": Intl's own case, kept, tdj.32), with the full number in `title`. `decimal` shows up to one decimal place (pace 1.5).
   - Editable: `<label>` wrapping the word and `<input type="number" inputmode="numeric">`: `flex: 1 1 0; min-width: 0; height: 100%; padding: 0; border: 0; background: transparent; color: inherit; font: inherit; text-align: center`, spinners hidden (tdj.3 rules). While focused the word is hidden (`.slot:focus-within .word { display: none }`) so the full number has the whole slot (7 digits at 10.5px).
   - Commit on `change`, draft and invalid rules as tdj.3 (empty or non-numeric reverts; the store clamps).
 
@@ -227,7 +227,7 @@ emits: { commit: [value: number] }
 | default | text on the art's slot |
 | hover (editable) | slot `background: rgb(255 255 255 / 0.06); border-radius: 3px`, `var(--card-motion-hover)` |
 | focus | `outline: 2px solid var(--ink); outline-offset: 1px; border-radius: 3px` on the slot wrapper (`:focus-within`) |
-| invalid draft | `outline: 1px dashed var(--danger); outline-offset: 1px`; `aria-invalid="true"`; `title` = invalidTitle |
+| invalid draft | 1px dashed `var(--danger)` border drawn by `.slot::after` at the slot's edge, **in addition to** the focus ring (tdj.32); `aria-invalid="true"`; `title` = invalidTitle |
 | disabled, loading, empty, error | none (read-only text, synchronous values; an empty slot shows bare art) |
 
 **Slot content** (the mount fills the named slots; tdj.4 / ped.12):
@@ -332,3 +332,27 @@ All answered by the user 2026-11-15 (decision beads tdj.21 to tdj.26).
 - **Q4, long names**: the banner holds about 15 characters at 296px. **Answered (a)** (tdj.24). Options: (a) ellipsis, full name in `title` and the sub-panel header [default]; (b) let the name run past the banner over the window bottom on a dark scrim (departs from "as drawn"); (c) shrink the font to fit, down to 9px.
 - **Q5, third slot for people**: **Answered (b) sight** (tdj.25). Options: (a) pace; (b) sight; (c) empty.
 - **Q6, lower plate**: **Answered (a)** (tdj.26). Options: (a) "played by" (DM) plus travel status [default]; (b) a free-text epithet the DM writes (new saved field); (c) bare art.
+
+## tdj.32: card polish (2026-11-16)
+From the UI review of 1a1.10 + tdj.3. Screens: `.worktrees/hexcrawl_web/scratch/tdj-ui-review/state-p1-lv-invalid.png`, `detail-r2-dpr2.png`, `width-240-p1.png`. All three changes are in `CharacterCard.vue`'s `<style>`; `CardTally.vue` is unchanged.
+
+1. **Focus ring and invalid dashes, both visible.** Today `.slot:focus-within` and `.slot:has([aria-invalid='true'])` both set `outline`; equal specificity, the later wins, so the ring is lost exactly while the DM is typing a bad value. Keep the ring on `outline`, move the dashes to a pseudo-element (as `StatHexagon` keeps the ring on `.ring` and the dashes on the hex stroke):
+   ```css
+   .slot:focus-within { outline: 2px solid var(--ink); outline-offset: 1px; }   /* unchanged */
+   .slot:has([aria-invalid='true'])::after {
+     content: '';
+     position: absolute;
+     inset: 0;
+     border: 1px dashed var(--danger, #e07a6a);
+     border-radius: 3px;
+     pointer-events: none;
+   }
+   ```
+   Delete the `outline` and `outline-offset` from the `:has([aria-invalid='true'])` rule. `.slot` is already `position: absolute` (`.frame > *`), so it anchors the `::after`. Result: dashes on the slot's edge, a 1px gap, the 2px `--ink` ring outside. Test (`CharacterCard.test.ts` can't see computed outlines in happy-dom): skip; the UI review checks it.
+2. **12.5K, not 12.5k.** Keep Intl's output (`K`, `M`). Why: it is the standard compact form, the 1a1.10 acceptance check already says "gp 1M", PROJECT.md logs "12.5K, 1M", and a lowercase `1m` reads as metres or minutes. Spec line under Slots amended; no code change (`CardTally.test.ts` already asserts `12.5K` and `1M`).
+3. **Descenders clipped at 240px.** At a 240px card the frame is 309px tall, so a slot is 15/438 × 309 = 10.6px (crimson 11.3px), while the text is at its 10.5px floor with `line-height: 1`. The system font's glyph box is about 1.33em (14px), so the `g` of `gp` and `g`/`p` of `sight` reach about 1.2px below the slot and `overflow: hidden` cuts them. Fix in `.slot`: replace `overflow: hidden` with
+   ```css
+   overflow-x: clip;
+   overflow-y: visible;
+   ```
+   (`clip` does not force the other axis to `auto` as `hidden` does; Chromium 90, Firefox 81, Safari 16.) Horizontal overflow is still cut, so long values keep the `.value` ellipsis from `CardTally`. Vertically the descender may sit up to 1.5px over the art's slot rim at 240px only; at 296px and wider it stays inside. Keep the 10.5px floor and `line-height: 1` (shrinking the text to fit would drop below the readable floor). Check in review at 240, 296 and 340px, all three variants.
