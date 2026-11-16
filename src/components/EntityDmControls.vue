@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { nextTick, ref, watch } from 'vue'
+import { computed, nextTick, ref, watch } from 'vue'
 import type { Entity } from '../entities/entity'
 import { useHexMapStore } from '../stores/hexMap'
 import PopupDialog from './PopupDialog.vue'
@@ -13,6 +13,15 @@ const select = ref<HTMLSelectElement>()
 const keep = ref<HTMLButtonElement>()
 
 const player = ref('')
+
+const ownerHint = computed((): string | null => {
+  const { owner, hidden, hostile } = props.entity
+  if (owner !== 'dm') return null
+  if (hidden && hostile) return 'handing it to the players shows it on their map and clears hostile'
+  if (hidden) return 'handing it to the players also shows it on their map'
+  if (hostile) return 'handing it to the players also clears hostile'
+  return null
+})
 
 const onOwner = (event: Event): void => {
   const el = event.target as HTMLSelectElement
@@ -56,21 +65,15 @@ const onHostile = (event: Event): void =>
         ref="select"
         :value="entity.owner"
         aria-label="who the entity belongs to"
-        :aria-describedby="
-          entity.owner === 'dm' && entity.hidden ? `dm-${entity.id}-owner-hint` : undefined
-        "
+        :aria-describedby="ownerHint ? `dm-${entity.id}-owner-hint` : undefined"
         @change="onOwner"
       >
         <option value="player">player</option>
         <option value="dm">dm</option>
       </select>
     </label>
-    <p
-      v-if="entity.owner === 'dm' && entity.hidden"
-      :id="`dm-${entity.id}-owner-hint`"
-      class="hint"
-    >
-      handing it to the players also shows it on their map
+    <p v-if="ownerHint" :id="`dm-${entity.id}-owner-hint`" class="hint">
+      {{ ownerHint }}
     </p>
 
     <label class="row" :class="{ off: entity.owner === 'player' }">
@@ -88,17 +91,24 @@ const onHostile = (event: Event): void =>
       players' entities are always on the map
     </p>
 
-    <label class="row">
+    <label class="row" :class="{ off: entity.owner === 'player' }">
       <span>hostile</span>
       <input
         type="checkbox"
         :checked="entity.hostile"
+        :disabled="entity.owner === 'player'"
         aria-label="hostile to the players"
         :aria-describedby="`dm-${entity.id}-hostile-hint`"
         @change="onHostile"
       />
     </label>
-    <p :id="`dm-${entity.id}-hostile-hint`" class="hint">only you see it</p>
+    <p :id="`dm-${entity.id}-hostile-hint`" class="hint">
+      {{
+        entity.owner === 'player'
+          ? "players' entities are never hostile"
+          : 'players see it as a foe'
+      }}
+    </p>
 
     <PopupDialog v-model="confirming" :title="`take ${entity.name} from ${player}?`">
       <p class="body">

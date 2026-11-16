@@ -51,13 +51,18 @@ describe('the dm controls', () => {
     },
   )
 
-  it('hands a dm entity to the players, out of hiding', async () => {
-    const { make, live } = setup()
+  it('hands a hidden, hostile dm entity to the players, clearing both', async () => {
+    const { make, live, store } = setup()
     const npc = make('npc', 'dm')
-    useHexMapStore().setEntityHidden(npc.id, true)
+    store.setEntityHidden(npc.id, true)
+    store.setEntityHostile(npc.id, true)
     const wrapper = mountFor(npc.id)
     await select(wrapper).setValue('player')
-    expect(live(npc.id)).toMatchObject({ owner: 'player', hidden: false })
+    expect(live(npc.id)).toMatchObject({ owner: 'player', hidden: false, hostile: false })
+    for (const name of [HIDDEN, HOSTILE]) {
+      expect((box(wrapper, name).element as HTMLInputElement).checked).toBe(false)
+      expect(box(wrapper, name).attributes('disabled')).toBeDefined()
+    }
   })
 
   it('hands an unseated player entity to the dm at once', async () => {
@@ -159,6 +164,7 @@ describe('the dm controls', () => {
     expect(box(wrapper, HIDDEN).attributes('disabled')).toBeDefined()
     expect(wrapper.find(`#dm-${npc.id}-hidden-hint`).exists()).toBe(true)
   })
+
   it('toggles hidden on a dm entity', async () => {
     const { make, live } = setup()
     const npc = make('npc', 'dm')
@@ -170,26 +176,54 @@ describe('the dm controls', () => {
     expect(live(npc.id).hidden).toBe(false)
   })
 
-  it.each<Owner>(['player', 'dm'])('toggles hostile on a %s entity', async (owner) => {
-    const { make, live } = setup()
-    const npc = make('npc', owner)
+  it('disables hostile, unchecked, with its hint, for a player entity', () => {
+    const { make } = setup()
+    const npc = make('npc', 'player')
     const wrapper = mountFor(npc.id)
+    expect(box(wrapper, HOSTILE).attributes('disabled')).toBeDefined()
+    expect((box(wrapper, HOSTILE).element as HTMLInputElement).checked).toBe(false)
+    expect(wrapper.find(`#dm-${npc.id}-hostile-hint`).text()).toBe(
+      "players' entities are never hostile",
+    )
+    expect(box(wrapper, HOSTILE).attributes('aria-describedby')).toBe(`dm-${npc.id}-hostile-hint`)
+  })
+
+  it('toggles hostile on a dm entity, with its hint', async () => {
+    const { make, live } = setup()
+    const npc = make('npc', 'dm')
+    const wrapper = mountFor(npc.id)
+    expect(box(wrapper, HOSTILE).attributes('disabled')).toBeUndefined()
+    expect(wrapper.find(`#dm-${npc.id}-hostile-hint`).text()).toBe('players see it as a foe')
+    expect(box(wrapper, HOSTILE).attributes('aria-describedby')).toBe(`dm-${npc.id}-hostile-hint`)
     await box(wrapper, HOSTILE).setValue(true)
     expect(live(npc.id).hostile).toBe(true)
     await box(wrapper, HOSTILE).setValue(false)
     expect(live(npc.id).hostile).toBe(false)
   })
 
-  it('shows the owner hint only for a hidden dm entity', async () => {
+  it.each<[boolean, boolean, string | null]>([
+    [false, false, null],
+    [true, false, 'handing it to the players also shows it on their map'],
+    [false, true, 'handing it to the players also clears hostile'],
+    [true, true, 'handing it to the players shows it on their map and clears hostile'],
+  ])('owner hint for a dm entity hidden %s, hostile %s', (hidden, hostile, copy) => {
     const { make, store } = setup()
     const npc = make('npc', 'dm')
-    store.setEntityHidden(npc.id, false)
-    const hint = `#dm-${npc.id}-owner-hint`
-    expect(mountFor(npc.id).find(hint).exists()).toBe(false)
-    store.setEntityHidden(npc.id, true)
-    const hidden = mountFor(npc.id)
-    expect(hidden.find(hint).text()).toBe('handing it to the players also shows it on their map')
-    expect(select(hidden).attributes('aria-describedby')).toBe(hint.slice(1))
+    store.setEntityHidden(npc.id, hidden)
+    store.setEntityHostile(npc.id, hostile)
+    const wrapper = mountFor(npc.id)
+    const hint = wrapper.find(`#dm-${npc.id}-owner-hint`)
+    if (copy === null) {
+      expect(hint.exists()).toBe(false)
+      expect(select(wrapper).attributes('aria-describedby')).toBeUndefined()
+    } else {
+      expect(hint.text()).toBe(copy)
+      expect(select(wrapper).attributes('aria-describedby')).toBe(`dm-${npc.id}-owner-hint`)
+    }
+  })
+
+  it('shows no owner hint for a player entity', () => {
+    const { make } = setup()
     const player = make('npc', 'player')
     expect(mountFor(player.id).find(`#dm-${player.id}-owner-hint`).exists()).toBe(false)
   })
