@@ -83,7 +83,7 @@ export const bustOf = (id: string | undefined): Bust | undefined =>
  * session, and the frame should not.
  */
 export const frameVariant = (
-  entity: Pick<Entity, 'kind' | 'owner' | 'hidden'> & Partial<Pick<Entity, 'hostile'>>,
+  entity: Pick<Entity, 'kind' | 'owner' | 'hidden' | 'hostile'>,
 ): FrameVariant => {
   if (entity.hidden || entity.hostile) return 'crimson'
   if (entity.kind === 'caravan' || entity.kind === 'ship') return 'bronze'

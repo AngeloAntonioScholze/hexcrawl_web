@@ -8,7 +8,7 @@ import BustPicker from './BustPicker.vue'
 // projection alike, and turns a picked bust into setPortrait itself.
 const props = withDefaults(
   defineProps<{
-    entity: Pick<Entity, 'id' | 'name' | 'kind' | 'owner' | 'hidden' | 'portrait'>
+    entity: Pick<Entity, 'id' | 'name' | 'kind' | 'owner' | 'hidden' | 'hostile' | 'portrait'>
     pickable: boolean
     headingLevel?: 2 | 3 | 4
     plate?: readonly string[]

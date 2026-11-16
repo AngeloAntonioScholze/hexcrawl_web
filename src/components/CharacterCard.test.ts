@@ -6,7 +6,7 @@ import type { Entity } from '../entities/entity'
 import BustPicker from './BustPicker.vue'
 import CharacterCard from './CharacterCard.vue'
 
-type CardEntity = Pick<Entity, 'id' | 'name' | 'kind' | 'owner' | 'hidden' | 'portrait'>
+type CardEntity = Pick<Entity, 'id' | 'name' | 'kind' | 'owner' | 'hidden' | 'hostile' | 'portrait'>
 
 const entity = (change: Partial<CardEntity> = {}): CardEntity => ({
   id: 'e1',
@@ -14,6 +14,7 @@ const entity = (change: Partial<CardEntity> = {}): CardEntity => ({
   kind: 'party',
   owner: 'player',
   hidden: false,
+  hostile: false,
   portrait: undefined,
   ...change,
 })
@@ -44,6 +45,7 @@ describe('CharacterCard', () => {
     [{ owner: 'dm' }, 'bronze'],
     [{ kind: 'caravan' }, 'bronze'],
     [{ owner: 'dm', hidden: true }, 'crimson'],
+    [{ hostile: true }, 'crimson'],
   ])('draws %o on the %s art', (change, variant) => {
     const wrapper = mountCard(false, change)
     expect(wrapper.attributes('data-variant')).toBe(variant)

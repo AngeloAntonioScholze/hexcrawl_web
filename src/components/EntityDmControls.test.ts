@@ -1,0 +1,162 @@
+// @vitest-environment happy-dom
+import { mount } from '@vue/test-utils'
+import { createPinia, setActivePinia } from 'pinia'
+import { beforeEach, describe, expect, it } from 'vitest'
+import { defineComponent, h } from 'vue'
+import type { EntityKind, Owner } from '../entities/entity'
+import { useHexMapStore } from '../stores/hexMap'
+import EntityDmControls from './EntityDmControls.vue'
+
+const setup = () => {
+  const store = useHexMapStore()
+  const make = (kind: EntityKind, owner: Owner, name = `${kind} ${owner}`) =>
+    store.addEntity(name, kind, owner)!
+  const live = (id: string) => store.entities.find((one) => one.id === id)!
+  return { store, make, live }
+}
+
+const mountFor = (id: string) => {
+  const store = useHexMapStore()
+  return mount(
+    defineComponent({
+      render: () => h(EntityDmControls, { entity: store.entities.find((one) => one.id === id)! }),
+    }),
+    { attachTo: document.body },
+  )
+}
+
+const select = (wrapper: ReturnType<typeof mountFor>) => wrapper.find('select')
+const box = (wrapper: ReturnType<typeof mountFor>, name: string) =>
+  wrapper.find(`input[aria-label="${name}"]`)
+
+const HIDDEN = "kept off the players' map"
+const HOSTILE = 'hostile to the players'
+
+beforeEach(() => {
+  setActivePinia(createPinia())
+  document.body.innerHTML = ''
+})
+
+describe('the dm controls', () => {
+  it.each<EntityKind>(['party', 'npc', 'caravan', 'ship'])(
+    'shows the three rows for a %s',
+    (kind) => {
+      const { make } = setup()
+      const wrapper = mountFor(make(kind, 'dm').id)
+      expect(wrapper.findAll('label.row').map((row) => row.find('span').text())).toEqual([
+        'owner',
+        'hidden',
+        'hostile',
+      ])
+    },
+  )
+
+  it('hands a dm entity to the players, out of hiding', async () => {
+    const { make, live } = setup()
+    const npc = make('npc', 'dm')
+    useHexMapStore().setEntityHidden(npc.id, true)
+    const wrapper = mountFor(npc.id)
+    await select(wrapper).setValue('player')
+    expect(live(npc.id)).toMatchObject({ owner: 'player', hidden: false })
+  })
+
+  it('hands an unseated player entity to the dm at once', async () => {
+    const { make, live } = setup()
+    const npc = make('npc', 'player')
+    const wrapper = mountFor(npc.id)
+    await select(wrapper).setValue('dm')
+    expect(live(npc.id).owner).toBe('dm')
+    expect(wrapper.find('dialog').attributes('open')).toBeUndefined()
+  })
+
+  describe('with a player seated', () => {
+    const seated = () => {
+      const ctx = setup()
+      const party = ctx.make('party', 'player', 'Wanderers')
+      ctx.store.assignEntity(party.id, 'Ana')
+      return { ...ctx, party }
+    }
+
+    it('asks first and leaves the select on player', async () => {
+      const { party } = seated()
+      const wrapper = mountFor(party.id)
+      await select(wrapper).setValue('dm')
+      expect(wrapper.find('h2').text()).toBe('take Wanderers from Ana?')
+      expect(wrapper.find('.body').text()).toContain('Ana plays Wanderers now.')
+      expect((select(wrapper).element as HTMLSelectElement).value).toBe('player')
+    })
+
+    it('keeps everything as it was on "keep it with"', async () => {
+      const { store, live, party } = seated()
+      const wrapper = mountFor(party.id)
+      await select(wrapper).setValue('dm')
+      await wrapper.find('.actions button').trigger('click')
+      expect(live(party.id).owner).toBe('player')
+      expect(store.playerOf(party.id)).toBe('Ana')
+      expect(wrapper.find('h2').exists()).toBe(false)
+    })
+
+    it('unseats the player on "take it"', async () => {
+      const { store, live, party } = seated()
+      const wrapper = mountFor(party.id)
+      await select(wrapper).setValue('dm')
+      await wrapper.find('.actions .danger').trigger('click')
+      expect(live(party.id).owner).toBe('dm')
+      expect(store.playerOf(party.id)).toBeNull()
+    })
+  })
+
+  it('disables hidden, with its hint, for a player entity', () => {
+    const { make } = setup()
+    const npc = make('npc', 'player')
+    const wrapper = mountFor(npc.id)
+    expect(box(wrapper, HIDDEN).attributes('disabled')).toBeDefined()
+    expect(wrapper.find(`#dm-${npc.id}-hidden-hint`).text()).toBe(
+      "players' entities are always on the map",
+    )
+  })
+
+  it('toggles hidden on a dm entity', async () => {
+    const { make, live } = setup()
+    const npc = make('npc', 'dm')
+    const wrapper = mountFor(npc.id)
+    expect(box(wrapper, HIDDEN).attributes('disabled')).toBeUndefined()
+    await box(wrapper, HIDDEN).setValue(true)
+    expect(live(npc.id).hidden).toBe(true)
+    await box(wrapper, HIDDEN).setValue(false)
+    expect(live(npc.id).hidden).toBe(false)
+  })
+
+  it.each<Owner>(['player', 'dm'])('toggles hostile on a %s entity', async (owner) => {
+    const { make, live } = setup()
+    const npc = make('npc', owner)
+    const wrapper = mountFor(npc.id)
+    await box(wrapper, HOSTILE).setValue(true)
+    expect(live(npc.id).hostile).toBe(true)
+    await box(wrapper, HOSTILE).setValue(false)
+    expect(live(npc.id).hostile).toBe(false)
+  })
+
+  it('shows the owner hint only for a hidden dm entity', async () => {
+    const { make, store } = setup()
+    const npc = make('npc', 'dm')
+    store.setEntityHidden(npc.id, false)
+    const hint = `#dm-${npc.id}-owner-hint`
+    expect(mountFor(npc.id).find(hint).exists()).toBe(false)
+    store.setEntityHidden(npc.id, true)
+    const hidden = mountFor(npc.id)
+    expect(hidden.find(hint).text()).toBe('handing it to the players also shows it on their map')
+    expect(select(hidden).attributes('aria-describedby')).toBe(hint.slice(1))
+    const player = make('npc', 'player')
+    expect(mountFor(player.id).find(`#dm-${player.id}-owner-hint`).exists()).toBe(false)
+  })
+
+  it('gives each entity its own ids', () => {
+    const { make } = setup()
+    const one = mountFor(make('npc', 'dm', 'a').id)
+    const two = mountFor(make('npc', 'dm', 'b').id)
+    const ids = [...one.findAll('[id]'), ...two.findAll('[id]')].map((el) => el.attributes('id'))
+    expect(new Set(ids).size).toBe(ids.length)
+    expect(ids).toHaveLength(4)
+  })
+})
