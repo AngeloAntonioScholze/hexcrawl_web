@@ -1,6 +1,6 @@
 # hexcrawl_web-ped.12: sub-panel columns (entity panels open to the right of the dock)
 
-Status: spec, 2026-11-14. **Spec only.** Defaults that wait on the user are marked `PENDING Qn`; the questions are at the end.
+Status: final spec, 2026-11-15. **Spec only.** The six open questions were answered by the user (decision beads ped.14 to ped.19); see "Decisions" at the end.
 
 Reference: the user's sketch `docs/reference/sub-panel-columns-sketch-2026-11-14.png`. Three columns, all aligned at the top. Column 1 is the full-height dock (tb0). Columns 2 and 3 are as tall as their content.
 
@@ -16,7 +16,7 @@ The specs it builds on:
 - `design/hexcrawl_web-ped.5.md`, `design/hexcrawl_web-ped.6.md`: the player dock (not built)
 - `design/hexcrawl_web-1a1.10.md`, `design/hexcrawl_web-tdj.4.md`: the card and its mounts. This bead **moves the DM card mounts out of the dock and into the columns** (see "Card mounts: tdj.4 amendment").
 
-Not in this spec: the restyle (q55), motion (17y; columns open and close instantly here), and new store actions.
+Not in this spec: the restyle (q55), motion (17y; columns open and close instantly here), new store actions, and **mounting any card**. ped.12 leaves an empty card slot as row 0 of every sub-panel. tdj.4 fills it for entities. ped.21 fills it for merchants. ped.12 does not import or edit `CharacterCard`, `StatHexagon`, `CaravanCardBody`, `ShipCardBody` or `BustPicker`.
 
 ## Goal
 For the DM at a desktop. The DM picks an entity in the dock's list and gets its whole sheet beside the dock: card, details, inventory, log. Something inside that entity (a rider, a merchant) opens one column further right. The list, route and orders stay in view in the dock the whole time. The one action: **open an entity from the list and read or edit its sheet without losing the list**.
@@ -35,14 +35,14 @@ How many levels show side by side. One rule covers every width: **show the dock 
 | mode | width | what shows | sample |
 |---|---|---|---|
 | three-up | `min-width: 1600px` | dock, level 1, level 2 side by side | 1600 x 900 |
-| two-up | 1280 to 1599px | dock and the **deepest** open level. With level 2 open, level 1 is hidden behind back (PENDING Q2) | 1280 x 800 |
-| stacked | up to 1279px: phone 360, tablet 768, small desktop 1024 | only one level: the deepest open one, **in the dock's own box**. The dock is hidden while a sub-panel is open (PENDING Q1) | 360 x 740, 768 x 1024 |
+| two-up | 1280 to 1599px | dock and the **deepest** open level. With level 2 open, level 1 is hidden behind back (ped.15) | 1280 x 800 |
+| stacked | up to 1279px: phone 360, tablet 768, small desktop 1024 | only one level: the deepest open one, **in the dock's own box**. The dock is hidden while a sub-panel is open (ped.14) | 360 x 740, 768 x 1024 |
 
 Why these widths: each column needs 21rem plus a 0.75rem gap (348px). The DM toolbar needs about 320px of free band between the columns and the minimap reserve (204px):
 - two-up: 728 + 320 + 204 = 1252px, so 1280 works
 - three-up: 1076 + 320 + 204 = 1600px
 
-Below 1280 a column beside the dock would leave the toolbar under 100px of band. Put the mode in a pure helper `columnMode(width): 1 | 2 | 3` and a `visibleLevels(stackLength, mode)` that returns the levels to render (for example `[0, 2]` in two-up with 2 open). MapView reads `innerWidth` on `resize`, as `phone()` does today.
+Below 1280 a column beside the dock would leave the toolbar under 100px of band. Put the mode in the pure helpers `columnMode(width): 1 | 2 | 3` and `visibleLevels(stackLength, mode)` in `useSubPanels.ts` ("Column state"). `visibleLevels` returns the levels to render (for example `[0, 2]` in two-up with 2 open). MapView reads `innerWidth` on `resize`, as `phone()` does today.
 
 ## Layout
 
@@ -89,7 +89,7 @@ Everything still reads `--dock-reserve`, so the dial and toolbar formulas from t
 |---|---|---|
 | 1 | world | unchanged |
 | 2 | entities | slimmed, see below |
-| 3 | caravan | **removed from the DM dock**: a caravan opens as a level-1 sub-panel (PENDING Q4). `rendered.caravan` becomes `forPlayers` (ped.7 stays for players) |
+| 3 | caravan | **removed from the DM dock**: a caravan opens as a level-1 sub-panel (ped.17). `rendered.caravan` becomes `forPlayers`. `CaravanPanel.vue` keeps only its player branch (ped.7, unchanged). Its DM branch moves into the caravan's entity sub-panel; the DM `.bust-row` and its `BustPicker` dialog move as they are (see "Card slot") |
 | 4 | hex details | unchanged |
 
 Entities panel body, top to bottom:
@@ -109,13 +109,22 @@ One component, `EntitySubPanel.vue` (new), props `entity`, `level` and `parentNa
 
 | # | block | party, npc | ship | caravan |
 |---|---|---|---|---|
-| 0 | card (tdj.4), never folds | `CharacterCard` + `StatHexagon` | `CharacterCard` + `ShipCardBody` | `CharacterCard` + `CaravanCardBody` |
-| 1 | details | name, colour, pace, sight, darkvision rows, moved unchanged from `entities.selected` with the same `may()` gates | same | same |
+| 0 | card slot, never folds. **Empty in ped.12**; tdj.4 mounts the card here | (tdj.4: `CharacterCard` + `StatHexagon`) | (tdj.4: `CharacterCard` + `ShipCardBody`) | (tdj.4: `CharacterCard` + `CaravanCardBody`). ped.12 puts the DM `.bust-row` from `CaravanPanel.vue` here, moved as it is; tdj.4 deletes it as already specced |
+| 1 | details | name, colour, pace, sight, darkvision rows, moved unchanged from `entities.selected` with the same `may()` gates. The handlers act on the sub-panel's `entity.id`, not `store.selectedId` | same | same |
 | 2 | supplies | none | none | `CaravanSupplies` |
 | 3 | inventory | `InventoryList` (today's `ownInventory` rule) | same | `InventoryList` |
 | 4 | riders | none | rider rows that open level 2 | rider rows that open level 2 |
 | 5 | merchants | none | none | compact merchant rows that open level 2, plus DM `add merchant` |
 | 6 | adventure log | moved unchanged from `entities.log`, for this entity | same | same |
+
+**Card slot** (row 0 of every sub-panel, entity and merchant): `<div class="card-slot">` as the first child of the body, before section 1. It is the one agreed place where tdj.4 (entities) and ped.21 (merchants) put the card, with tdj.4's `.card { margin-block: 0.25rem 0.75rem }`.
+- ped.12 ships it empty: `.card-slot:empty { display: none }`, so no gap shows. The caravan's moved `.bust-row` is the only thing ped.12 puts inside it.
+- `data-testid="card-slot"`, so tests and the UI review can find it.
+
+**This entity, not the selection.** `›` opens without selecting, and a rider click selects the rider while its carrier stays open at level 1. So the sub-panel never reads selection-bound getters:
+- details handlers take `entity.id`
+- `InventoryList` and `CaravanSupplies` already take an owner id
+- the log needs `store.adventureLogFor(id)` and `store.hexesWalkedFor(id)`: today's `adventureLog`, `journey` and `hexesWalked` in `hexMap.ts` take `selectedId`. Make them functions of an id, and keep the existing computeds as calls on `selectedId`. These are getters, not actions, and the only `hexMap.ts` change in this bead.
 
 Fold keys group by kind, so folding a section folds it for every entity of that kind:
 - party and npc: `person.details`, `person.inventory`, `person.log`
@@ -130,23 +139,24 @@ Section titles: `details`, `supplies`, `inventory`, `riders`, `merchants`, `adve
 - A click selects the rider (`store.selectEntity`, as today) and opens it at level 2.
 - `aria-current="true"` marks the row that is open at level 2.
 
-**Compact merchant rows** (caravan), replacing the inline catalog in `caravan.merchants`:
+**Compact merchant rows** (caravan, DM only), replacing the inline catalog in the DM's `caravan.merchants`. The player caravan panel (ped.7) keeps today's priced catalog in `CaravanMerchants.vue` unchanged:
 - Layout: icon, name (with type label when different, as today), `lv {n}`, `›`. The level stepper and remove move to the merchant sub-panel.
 - A click opens the merchant at level 2.
 - `nothing offered yet` and the catalog no longer show here.
 - Empty: `no merchants in the crew` (existing). The DM `add merchant` button and dialog stay here unchanged.
 
 ### Merchant sub-panel (level 2), `MerchantSubPanel.vue` (new)
-Merchants have no card (PENDING Q6). Header: the merchant's icon (`aria-hidden`) and name. Body:
+The user wants a merchant card (ped.19 (b)), but it is its own bead, **hexcrawl_web-ped.21**: it needs a new saved portrait field on merchants (map-field touchpoints) and waits on ped.12 and tdj.4. In ped.12 the merchant sub-panel has an **empty card slot** at row 0 and adds no portrait field, no schema change and no bust picker. Header: the merchant's icon (`aria-hidden`) and name. Body:
 
 | # | block | contents |
 |---|---|---|
-| 0 | summary `dl`, never folds | `type`: the type label; `level`: `lv {n}`, with the DM stepper `−` / `+` (existing buttons, labels and limits); `with`: the caravan's name |
-| 1 | blurb `p.dim` | `MERCHANT_INFO[type].blurb` (today only a `title` tooltip) |
-| 2 | offers section, foldKey `merchant.offers`, title `offers`, meta `{count}` | one row per unlocked service: name on the left, price on the right (existing `entry.price`). Under them, the description `entry.description` in `--text-meta`, `--ink-dim`, up to 3 lines (`-webkit-line-clamp: 3`). Empty: `nothing offered yet` |
-| 3 | DM only, at the foot | `let {name} go` button (existing `removeMerchant`), full width, with the existing danger look if q55 has landed, else the plain button |
+| 0 | card slot, never folds | **empty in ped.12** (same `.card-slot` as entity sub-panels, hidden while empty); ped.21 mounts the merchant card here |
+| 1 | summary `dl`, never folds | `type`: the type label; `level`: `lv {n}`, with the DM stepper `−` / `+` (existing buttons, labels and limits); `with`: the caravan's name |
+| 2 | blurb `p.dim` | `MERCHANT_INFO[type].blurb` (today only a `title` tooltip) |
+| 3 | offers section, foldKey `merchant.offers`, title `offers`, meta `{count}` | one row per unlocked service: name on the left, price on the right (existing `entry.price`). Under them, the description `entry.description` in `--text-meta`, `--ink-dim`, up to 3 lines (`-webkit-line-clamp: 3`). Empty: `nothing offered yet` |
+| 4 | DM only, at the foot | `let {name} go` button (existing `removeMerchant`), full width, with the existing danger look if q55 has landed, else the plain button |
 
-Read-only for players. No new store actions.
+DM only in this bead (players get no columns, ped.18). The stepper and `let … go` keep their `may('merchants')` gate. No new store actions.
 
 ## Header (sub-panels)
 - `<header>` with `<h2 class="title" :id="'col-' + level + '-title'" tabindex="-1">`. Inside: the pip (entities) or icon (merchants), then the name with ellipsis. The panel `.title` style comes from tb0 and q55. The header is **not** a fold toggle: sub-panels do not fold.
@@ -157,11 +167,11 @@ Read-only for players. No new store actions.
 | yes (three-up, or two-up at level 1) | `×` at the right end, a `var(--dock-row)` square | `aria-label="close {name}"`, `title="close"` |
 | no (two-up at level 2, every stacked level) | `‹` at the left end, before the title, a `var(--dock-row)` square | `aria-label="back to {parent name}"`, where the parent at level 1 is `entities` |
 
-  Both call `store.closeSubPanel(level)`.
+  Both call `useSubPanels().close(level)`.
 - Button states: default `--ink-dim`; hover `--ink`; focus-visible the tb0 ring (`outline: 2px solid` accent, `outline-offset: -2px`); active, as other panel buttons. Never disabled.
 - The `aside` is `aria-labelledby` its title. In stacked mode, closing the last sub-panel brings the dock back.
 
-## Opening (PENDING Q3)
+## Opening (ped.16)
 - **Entities list row** (dock):
   - In two-up and three-up, a click selects the entity (as today) **and** opens it at level 1.
   - In stacked mode, a click only selects it. Opening it would hide the list and the route the DM just picked from.
@@ -189,36 +199,44 @@ Focus after a close: back to the control that opened the closed level (the `›`
 
 ## Keyboard path
 - DOM order: `.panels` (dock), then `.subpanels`, level 1 before level 2. Tab runs dock → column 2 → column 3 → the rest of the page. In stacked mode the dock is `inert`, so Tab stays in the shown sub-panel.
-- Opening through a user action (row, `›`, rider or merchant row) moves focus to the new sub-panel's `h2` (`tabindex="-1"`). The screen reader then announces the entity's name, and the next Tab reaches the header control, then the card.
+- Opening through a user action (row, `›`, rider or merchant row) moves focus to the new sub-panel's `h2` (`tabindex="-1"`). The screen reader then announces the entity's name, and the next Tab reaches the header control, then the first control in the body (the card, once tdj.4 mounts it).
 - Close and back return focus as above. Escape closes, as above.
 - No arrow-key navigation between columns.
 
-## Store (`src/stores/hexMap.ts`): view state, never saved, no `may()` guard
+## Column state (`src/composables/useSubPanels.ts`, new): view state, never saved, no `may()` guard
+It lives outside `hexMap.ts` (a hot spot) because nothing but the panels reads it and it is never saved or synced. Pure functions plus one module-level `ref`, like `useSectionFolds`:
 ```ts
 type SubPanel =
   | { kind: 'entity'; id: string }
   | { kind: 'merchant'; id: string }
-const subPanels = ref<SubPanel[]>([])                              // length 0..2
-openSubPanel(panel: SubPanel, parentLevel: 0 | 1): void            // subPanels = [...subPanels.slice(0, parentLevel), panel]; ignored if parentLevel > subPanels.length
-closeSubPanel(level: 1 | 2): void                                  // subPanels = subPanels.slice(0, level - 1)
+type ColumnMode = 1 | 2 | 3                                        // stacked, two-up, three-up
+columnMode(width: number): ColumnMode                               // <1280 → 1, <1600 → 2, else 3
+visibleLevels(stackLength: number, mode: ColumnMode): number[]      // e.g. (2, 2) → [0, 2]; (2, 1) → [2]; (0, 1) → [0]
+subColumns(levels: number[], mode: ColumnMode): 0 | 1 | 2           // levels above 0 beside the dock; 0 in stacked mode
+openAt(stack: SubPanel[], panel: SubPanel, parentLevel: 0 | 1): SubPanel[]   // [...stack.slice(0, parentLevel), panel]; unchanged if parentLevel > stack.length or the same panel is already there
+closeAt(stack: SubPanel[], level: 1 | 2): SubPanel[]                // stack.slice(0, level - 1)
+firstInvalidLevel(stack: SubPanel[], world: { entityIds: Set<string>; carrierOf(id: string): string | null; merchantCaravan(id: string): string | null }): 1 | 2 | null
+useSubPanels(): { stack: Readonly<Ref<SubPanel[]>>; open(panel, parentLevel): void; close(level): void; clear(): void }
 ```
-- Validity is checked in a computed or watch in MapView, which calls `closeSubPanel` on the first invalid level:
+- `firstInvalidLevel` rules:
   - level 1: the entity exists
   - level 2 entity: it rides the level-1 entity
   - level 2 merchant: it belongs to the level-1 caravan
+- MapView watches it and calls `close` on the first invalid level. It also calls `clear` on every `store.dmView` change.
 - A level-2 panel needs a level-1 caravan or ship. A merchant at level 1, or a rider without a carrier, is never opened.
 
 ## Card mounts: tdj.4 amendment
-tdj.4's DM mounts move into the columns. The card's contract, sizes and slot bodies (1a1.10, tdj.3) are unchanged.
+ped.12 builds no card. It leaves the empty `.card-slot` (row 0) in `EntitySubPanel.vue`, and tdj.4, which lands after ped.12, mounts the card into it. tdj.4's DM mounts move into the columns. The card's contract, sizes and slot bodies (1a1.10, tdj.3) are unchanged.
 
 | tdj.4 mount (as specced) | after ped.12 |
 |---|---|
-| 1. top of the DM caravan panel body | **row 0 of the caravan's entity sub-panel** (level 1, or level 2 for a caravan riding a ship), with `CaravanCardBody`. The `heading-level` is 3 under the sub-panel's `h2` |
-| 2. top of `entities.selected` in the dock | **row 0 of the entity sub-panel** for party, npc and ship (level 1, or level 2 for a rider), with `StatHexagon` or `ShipCardBody`. `heading-level="3"`. The dock shows no card |
-| player: ped.7 card slot in the dock caravan panel | unchanged (PENDING Q5) |
-| player: ped.6 character panel | unchanged (PENDING Q5) |
+| 1. top of the DM caravan panel body | **`.card-slot` of the caravan's entity sub-panel** (level 1, or level 2 for a caravan riding a ship), with `CaravanCardBody`. The `heading-level` is 3 under the sub-panel's `h2` |
+| 2. top of `entities.selected` in the dock | **`.card-slot` of the entity sub-panel** for party, npc and ship (level 1, or level 2 for a rider), with `StatHexagon` or `ShipCardBody`. `heading-level="3"`. The dock shows no card |
+| player: ped.7 card slot in the dock caravan panel | unchanged (ped.18) |
+| player: ped.6 character panel | unchanged (ped.18) |
+| (merchant) | not tdj.4: ped.21 mounts a merchant card into the merchant sub-panel's `.card-slot` |
 
-- The DM `.bust-row` (with its `BustPicker`) that main `342a1ec` has in `CaravanPanel.vue` does not move into the sub-panel. The card's own oval is the bust picker for every kind (`pickable = store.may('entitySettings', entity)`), as tdj.4 already removes that row.
+- ped.12 moves the DM `.bust-row` (with its `BustPicker` dialog) from `CaravanPanel.vue` into the caravan sub-panel's `.card-slot`, as it is, so the DM keeps picking caravan busts until the card lands. tdj.4 deletes it: the card's own oval is the bust picker for every kind (`pickable = store.may('entitySettings', entity)`), as tdj.4 already specs.
 - Key the card on the entity id, as tdj.4 does.
 - The "never twice" rule holds by construction: a caravan's card shows only in its own sub-panel.
 - Spacing stays as tdj.4 has it: `.card { margin-block: 0.25rem 0.75rem }`. The card may be taller than the visible column; the body scrolls (tdj.13).
@@ -227,7 +245,7 @@ tdj.4's DM mounts move into the columns. The card's contract, sizes and slot bod
 The tdj.4 spec needs this amendment before it builds (cards epic manager).
 
 ## Players
-Default (PENDING Q5): players get **no sub-columns** in this bead.
+Decided (ped.18): players get **no sub-columns** in this bead.
 - The player dock stays as ped.5, ped.6 and ped.7 specify: character panel (with the ped.6 card section) and caravan info (with the tdj.4 card slot).
 - The stack is emptied on every `dmView` change, and nothing in the player dock opens a sub-panel.
 - `--sub-columns` stays 0 for players, so overlays sit as tb0.
@@ -265,13 +283,14 @@ New accessible names:
 - Images: the card art and alt text follow 1a1.10. The merchant icon is `aria-hidden`; the name carries the meaning.
 
 ## Tests
-- Store, in a `describe('the sub-panel columns')`:
-  1. `openSubPanel(entity a, 0)` gives `[a]`.
-  2. Then `openSubPanel(merchant m, 1)` gives `[a, m]`.
-  3. `openSubPanel(entity b, 0)` with `[a, m]` gives `[b]`.
-  4. `openSubPanel(entity r, 1)` with `[a, m]` gives `[a, r]`.
-  5. `openSubPanel(x, 1)` with `[]` changes nothing.
-  6. `closeSubPanel(2)` with `[a, m]` gives `[a]`. `closeSubPanel(1)` gives `[]`.
+- `useSubPanels.test.ts`, in a `describe('the sub-panel columns')`:
+  1. `openAt([], entity a, 0)` gives `[a]`.
+  2. Then `openAt([a], merchant m, 1)` gives `[a, m]`.
+  3. `openAt([a, m], entity b, 0)` gives `[b]`.
+  4. `openAt([a, m], entity r, 1)` gives `[a, r]`.
+  5. `openAt([], x, 1)` gives `[]`. `openAt([a, m], entity a, 0)` gives `[a, m]`.
+  6. `closeAt([a, m], 2)` gives `[a]`. `closeAt([a, m], 1)` gives `[]`.
+- Store getters: `adventureLogFor(id)` and `hexesWalkedFor(id)` for a non-selected entity match what `adventureLog` and `hexesWalked` give once it is selected.
 - Pure helpers:
   - `columnMode` at 360, 768, 1024, 1279, 1280, 1599 and 1600
   - `visibleLevels` for stack lengths 0, 1 and 2 in each mode, for example: three-up with 2 open gives `[0, 1, 2]`; two-up gives `[0, 2]`; stacked gives `[2]`; stacked with 0 open gives `[0]`
@@ -297,53 +316,31 @@ As DM, unless noted:
 - **Removals**:
   - Remove the open entity: its columns close and focus lands on the entities header.
   - Let the open merchant go: column 3 closes.
-- **Card**: in column 2 for every kind, never in the dock. A caravan card shows once.
+- **Card slot**: every sub-panel has an empty `[data-testid="card-slot"]` as the first body child, with no visible gap. No card shows anywhere for the DM. The caravan sub-panel shows the `bust` row inside the slot, and its picker still works. No card or `.bust-row` remains in the dock. (The card itself is checked in tdj.4's review, the merchant card in ped.21's.)
 - **Player view** (debug toggle): no columns. The player dock is as ped.5, ped.6 and ped.7 specify, and switching views empties the stack.
 - **Tab**: from the dock's last control into column 2, then column 3.
 
 ## Assets
 None new. The card art comes from 1a1.10. Reference added: `docs/reference/sub-panel-columns-sketch-2026-11-14.png`, the user's sketch.
 
-## Open questions (PENDING user answer)
-1. **Narrow screens (phone 360, tablet 768, small desktop up to 1279).** There is no room for three columns.
-   - Options:
-     - (a) **stacked**: one level at a time, in the dock's own box, with a back control; the dock comes back when the stack empties
-     - (b) a bottom sheet over the map for the sub-panel, with the dock still visible above it
-     - (c) no sub-panels below 1280: entity sheets stay inside the dock, as tdj.4 first planned (two layouts to build and keep)
-   - Default **(a)**: one pattern at every width (like a navigation stack), no second layout, and the card always gets a full panel width.
-   - Waits on it: the stacked-mode layout, and the tdj.4 mounts below 1280.
-2. **Mid desktop (1280 to 1599) with column 3 open.**
-   - Options:
-     - (a) dock and the deepest level; level 1 hides behind `‹ back`
-     - (b) levels 1 and 2; the dock hides
-     - (c) all three side by side from 1280, with the dial and toolbar hidden while three are open (fails the bead's "nothing overlaps" check as written)
-     - (d) another threshold for three-up than 1600
-   - Default **(a)**: the dock (list, route, orders) is the DM's home and stays visible.
-   - Waits on it: `visibleLevels`.
-3. **What opens column 2.**
-   - Options:
-     - (a) a list-row click selects and opens in two-up and three-up; only selects in stacked mode; a `›` open button on every row at every width
-     - (b) only the `›` button opens; a row click only selects, as today
-     - (c) every selection opens, from anywhere
-   - Default **(a)**: on a desktop picking an entity shows its sheet at no cost to the dock; on narrow screens opening would hide the list just picked from.
-   - Waits on it: entities list markup and the open rule.
-4. **The DM's caravan panel.**
-   - Options:
-     - (a) it leaves the dock; a caravan opens as a level-1 sub-panel like any entity
-     - (b) it stays in the dock as today, and column 2 for a caravan shows only its card and details
-     - (c) both: the dock panel and the column
-   - Default **(a)**: one place per entity, no duplicate sections, and the card shows once.
-   - Waits on it: the CaravanPanel refactor, `rendered.caravan`, and tdj.4 mount 1.
-5. **Players.**
-   - Options:
-     - (a) no sub-columns for players in this bead; ped.5, ped.6 and ped.7 as specified (card inside the character panel; ped.7 card slot)
-     - (b) the player's own sheet (card, details, inventory, log) opens in column 2 from the character panel, with the same component as the DM; ped.5 and ped.6 respecced so the character panel keeps summary, switcher, orders, route, paths and hint
-     - (c) as (b), plus ped.7's riders and merchants opening columns for players
-   - Default **(a)**: the player dock has one character and one caravan, so there is little to drill into, and ped.5, ped.6 and ped.7 stay as decided.
-   - Waits on it: the ped.6 spec and the player side of the tdj.4 mounts.
-6. **A card for merchants.** Merchants are not entities and have no portrait field.
-   - Options:
-     - (a) no card: the merchant sub-panel opens with icon, name, type, level, blurb and offers
-     - (b) a merchant card (a new saved portrait field on merchants, a new bead with the map-field touchpoints)
-   - Default **(a)**: no new saved field, and the offers list needs the width a card would take.
-   - Waits on it: merchant sub-panel row 0.
+## Decisions (user, 2026-11-15)
+| q | bead | answer |
+|---|---|---|
+| 1. narrow screens (up to 1279px) | ped.14 | (a) **stacked**: one level at a time in the dock's box, with a back control; the dock is hidden and inert meanwhile and comes back when the stack empties |
+| 2. 1280 to 1599 with level 2 open | ped.15 | (a) dock plus the deepest level; level 1 sits behind `‹ back`. Three-up from 1600px |
+| 3. what opens column 2 | ped.16 | (a) a list-row click selects and opens in two-up and three-up, and only selects when stacked; a `›` open button on every row at every width |
+| 4. the DM caravan panel | ped.17 | (a) it leaves the dock and becomes the caravan's level-1 sub-panel (card slot, supplies, inventory, riders, merchants, log). The player caravan info panel (ped.7) stays in the player dock |
+| 5. players | ped.18 | (a) no columns for players in this bead; ped.5, ped.6 and ped.7 stay as specced |
+| 6. merchant card | ped.19 | (b) a merchant card, built in its own bead **ped.21** (new saved portrait field; waits on ped.12 and tdj.4). ped.12 leaves the merchant sub-panel's card slot empty and adds no portrait field |
+
+## Build slices
+Four slices. Each builds and tests on its own. Every hot-spot file has one owner at a time: MapView.vue is edited by slice 2, then by slice 3 after slice 2 merges. `hexMap.ts` gets only the two getters in slice 3. HexCanvas.vue, scene.ts and messages.ts are not touched.
+
+| # | slice | owns (new or edited) | depends on | tests and check |
+|---|---|---|---|---|
+| 1 | **Column state** (pure) | new `src/composables/useSubPanels.ts` + `useSubPanels.test.ts`: `SubPanel`, `columnMode`, `visibleLevels`, `subColumns`, `openAt`, `closeAt`, `firstInvalidLevel`, `useSubPanels()` | none | the store and helper cases under "Tests" (minus `PanelSection` and getters). No UI |
+| 2 | **Column shell and layout** | `src/views/MapView.vue` (`.subpanels` container after `.panels`; `innerWidth` on `resize` into `columnMode`; `--sub-columns` inline on `<main>`; stacked mode: `.panels` `visibility: hidden` + `inert`; Escape; focus moves on open and close; validity watch; `clear` on `dmView` change; `aria-current` and the `›` open button on entities-list rows; row-click open rule); `src/style.css` `:root` tokens (`--subpanel-width`, `--column-gap`, `--sub-columns`, new `--dock-reserve`); `design/tokens.md` Layout; `src/components/SessionBar.vue` (`lowered` class); new `src/components/SubPanelFrame.vue` (the `aside`, header with `‹`/`×`, `h2` title, body slot, `.card-slot` first); new `src/components/SubPanelStack.vue` (renders the visible levels: entity → `EntitySubPanel`, merchant → `MerchantSubPanel`); **stub** `EntitySubPanel.vue` and `MerchantSubPanel.vue` that show only the frame and name | 1 | open, close, back and Escape at 1600, 1280, 1024, 768 and 360; overlay offsets from the "Overlays" table; DayNightDial.vue and DmToolbar.vue need no edit (they read `--dock-reserve`). Can open merchants only through a test, since merchant rows come in slice 4 |
+| 3 | **Entity sub-panel content and dock slimming** | `src/components/EntitySubPanel.vue` (fills the stub: details, supplies, inventory, riders rows opening level 2, log, the moved `.bust-row` in the card slot); `src/components/PanelSection.vue` (`scope` prop); `src/components/CaravanPanel.vue` (DM branch removed, player branch unchanged); `src/views/MapView.vue` (remove `entities.selected`, `entities.inventory`, `entities.log` and their handlers; add `entities.orders`; `rendered.caravan = forPlayers`); `src/stores/hexMap.ts` (getters `adventureLogFor`, `hexesWalkedFor` only) + `hexMap.test.ts` | 2 (MapView edits after slice 2) | `PanelSection` scope test, getter tests, the dock and level-1 parts of the UI review. The caravan merchants section shows today's `CaravanMerchants` until slice 4 |
+| 4 | **Merchant column (level 2)** | `src/components/MerchantSubPanel.vue` (fills the stub: empty card slot, summary with stepper, blurb, offers, `let {name} go`); new `src/components/MerchantRows.vue` (DM compact rows that open level 2, plus `add merchant`); `src/components/CaravanMerchants.vue` (player catalog only, or keeps both if the implementer finds that simpler, with the player rendering unchanged); one line in `EntitySubPanel.vue` to use `MerchantRows` for the DM | 2; the one `EntitySubPanel.vue` line after slice 3 | merchant rows, stepper and remove in the merchant column; removing the open merchant closes level 2; the 1600 and 1280 merchant cases in the UI review |
+
+Slices 3 and 4 can run in parallel after slice 2: they share only that one `EntitySubPanel.vue` line, and whichever merges second adds it. The UI review runs once, after all four.
