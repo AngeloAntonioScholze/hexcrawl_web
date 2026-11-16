@@ -121,7 +121,7 @@ One component, `EntitySubPanel.vue` (new), props `entity`, `level` and `parentNa
 - ped.12 ships it empty: `.card-slot:empty { display: none }`, so no gap shows. The caravan's moved `.bust-row` is the only thing ped.12 puts inside it.
 - `data-testid="card-slot"`, so tests and the UI review can find it.
 
-**This entity, not the selection.** `›` opens without selecting, and a rider click selects the rider while its carrier stays open at level 1. So the sub-panel never reads selection-bound getters:
+**This entity, not the selection.** `›` and a row click select what they open (ped.28), but the open entity and the selection still part ways: a rider click selects the rider while its carrier stays open at level 1, and a map or token click selects without touching the columns. So the sub-panel never reads selection-bound getters:
 - details handlers take `entity.id`
 - `InventoryList` and `CaravanSupplies` already take an owner id
 - the log needs `store.adventureLogFor(id)` and `store.hexesWalkedFor(id)`: today's `adventureLog`, `journey` and `hexesWalked` in `hexMap.ts` take `selectedId`. Make them functions of an id, and keep the existing computeds as calls on `selectedId`. These are getters, not actions, and the only `hexMap.ts` change in this bead.
@@ -175,8 +175,8 @@ DM only in this bead (players get no columns, ped.18). The stepper and `let … 
 - **Entities list row** (dock):
   - In two-up and three-up, a click selects the entity (as today) **and** opens it at level 1.
   - In stacked mode, a click only selects it. Opening it would hide the list and the route the DM just picked from.
-- **Open control on every list row, at every width**: a `›` button at the row's right end. It is 2rem square (2.5rem on phone), with `aria-label="open {name}"` and `title="open"`. It opens without changing the selection.
-  - Keyboard users always have it; in stacked mode it is the only way in.
+- **Open control on every list row, at every width**: a `›` button at the row's right end. It is 2rem square (2.5rem on phone), with `aria-label="open {name}"` and `title="open"`. It opens **and selects** the entity (ped.28): `store.selectEntity(id)`, then open at level 1. It never clears the selection, unlike today's row click on the already-selected row (`pick` in MapView toggles to none).
+  - Keyboard users always have it; in stacked mode it is the only way in, and it selects there too.
   - The row button and the `›` button are siblings in the `li`, never nested.
 - **Riders and merchants** (inside a level-1 sub-panel): a click opens at level 2. A rider click also selects the rider.
 - Opening at a level replaces whatever was at that level and closes everything deeper. Opening the entity already shown at that level keeps the stack as is.
@@ -309,7 +309,8 @@ As DM, unless noted:
   - Opening a merchant shows dock plus merchant with `‹ back to {caravan}`, and back returns to the caravan.
   - SessionBar is lowered under the dial.
 - **1024, 768, 360**:
-  - A row click only selects. The `›` button opens the sub-panel in the dock's box, and the dock is hidden and inert.
+  - A row click only selects. The `›` button selects and opens the sub-panel in the dock's box, and the dock is hidden and inert.
+  - `›` on an unselected row (any width) selects it too: on return to the dock, that row is the selected one and route and orders follow it.
   - `‹ back to entities` brings the dock back, with focus on the row's `›`.
   - Level 2 drills in further, and back steps out one level.
 - **Escape** closes the focused level. With the bust picker open, Escape closes only the dialog.
@@ -331,6 +332,8 @@ None new. The card art comes from 1a1.10. Reference added: `docs/reference/sub-p
 | 3. what opens column 2 | ped.16 | (a) a list-row click selects and opens in two-up and three-up, and only selects when stacked; a `›` open button on every row at every width |
 | 4. the DM caravan panel | ped.17 | (a) it leaves the dock and becomes the caravan's level-1 sub-panel (card slot, supplies, inventory, riders, merchants, log). The player caravan info panel (ped.7) stays in the player dock |
 | 5. players | ped.18 | (a) no columns for players in this bead; ped.5, ped.6 and ped.7 stay as specced |
+| bust row until tdj.4 | ped.27 | (a) the DM `.bust-row` moves as it is into the caravan sub-panel's card slot; tdj.4 deletes it |
+| does `›` select? | ped.28 | (b) yes: `›` opens **and** selects the entity, at every width |
 | 6. merchant card | ped.19 | (b) a merchant card, built in its own bead **ped.21** (new saved portrait field; waits on ped.12 and tdj.4). ped.12 leaves the merchant sub-panel's card slot empty and adds no portrait field |
 
 ## Build slices
