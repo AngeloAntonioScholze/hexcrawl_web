@@ -1127,9 +1127,9 @@ describe('players seated at the table', () => {
 describe("the DM's say over an entity", () => {
   const of = (store: Store, id: string) => store.entities.find((one) => one.id === id)!
 
-  it('marks an entity hostile, and undoes it', () => {
+  it('marks a DM entity hostile, and undoes it', () => {
     const store = setup()
-    const id = store.selectedId
+    const { id } = store.addEntity('the bandits', 'npc', 'dm')!
     store.setEntityHostile(id, true)
     expect(of(store, id).hostile).toBe(true)
 
@@ -1137,9 +1137,16 @@ describe("the DM's say over an entity", () => {
     expect(of(store, id).hostile).toBe(false)
   })
 
-  it('keeps hostility with the map', () => {
+  it("never makes a player's entity hostile", () => {
     const store = setup()
     const id = store.selectedId
+    store.setEntityHostile(id, true)
+    expect(of(store, id).hostile).toBe(false)
+  })
+
+  it('keeps hostility with the map', () => {
+    const store = setup()
+    const { id } = store.addEntity('the bandits', 'npc', 'dm')!
     store.setEntityHostile(id, true)
     const saved = store.snapshot
 
@@ -1175,6 +1182,26 @@ describe("the DM's say over an entity", () => {
 
     expect(of(store, spy.id)).toMatchObject({ owner: 'player', hidden: false })
     expect(store.undo()).toBe(false)
+  })
+
+  it('makes a hostile DM entity given to the players a friend again', () => {
+    const store = setup()
+    const foe = store.addEntity('the bandits', 'npc', 'dm')!
+    store.setEntityHostile(foe.id, true)
+
+    store.setEntityOwner(foe.id, 'player')
+
+    expect(of(store, foe.id)).toMatchObject({ owner: 'player', hostile: false })
+  })
+
+  it('makes a hostile DM entity handed to a player a friend again', () => {
+    const store = setup()
+    const foe = store.addEntity('the bandits', 'npc', 'dm')!
+    store.setEntityHostile(foe.id, true)
+
+    store.assignEntity(foe.id, 'Mira')
+
+    expect(of(store, foe.id)).toMatchObject({ owner: 'player', hostile: false })
   })
 
   it("takes an entity back for the DM, out of its player's hands", () => {
@@ -3528,7 +3555,7 @@ describe("the store's permissions", () => {
       ['setEntitySight', (s, t) => s.setEntitySight(t.party, 9)],
       ['setDarkvision', (s, t) => s.setDarkvision(t.party, true)],
       ['setEntityHidden', (s, t) => s.setEntityHidden(t.lookout, false)],
-      ['setEntityHostile', (s, t) => s.setEntityHostile(t.party, true)],
+      ['setEntityHostile', (s, t) => s.setEntityHostile(t.lookout, true)],
       ['setPortrait', (s, t) => s.setPortrait(t.wagon, 'wagon')],
       ['setPortrait (party)', (s, t) => s.setPortrait(t.party, 'knight')],
       ['setPlayerReachCapped', (s) => s.setPlayerReachCapped(false)],

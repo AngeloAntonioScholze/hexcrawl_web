@@ -433,12 +433,17 @@ describe('what the players do get', () => {
     expect(view.entities.find((one) => one.id === 'caravan')?.portrait).toBe('night-camp')
   })
 
-  it('keeps who the DM counts as hostile from the players', () => {
+  it('shows the players which visible entities are hostile, the hidden ones still left out', () => {
     const map = snapshot()
-    map.entities = map.entities.map((one) => ({ ...one, hostile: true }))
+    map.entities = map.entities.map((one) =>
+      one.id === 'caravan' || one.id === 'spy' ? { ...one, hostile: true } : one,
+    )
     const view = project(map)
-    expect(view.entities.length).toBeGreaterThan(0)
-    expect(view.entities.every((one) => !one.hostile)).toBe(true)
+    expect(view.entities.map((one) => [one.id, one.hostile])).toEqual([
+      ['party', false],
+      ['caravan', true],
+      ['stowaway', false],
+    ])
   })
 
   it('has the purse and level of every visible party and npc, untouched ones at the defaults', () => {

@@ -617,7 +617,9 @@ export const useHexMapStore = defineStore('hexMap', () => {
     if (!may('assignEntity')) return
     const entity = entityOf(id)
     if (!entity) return
-    if (name !== null && entity.owner !== 'player') patch(id, { owner: 'player', hidden: false })
+    if (name !== null && entity.owner !== 'player') {
+      patch(id, { owner: 'player', hidden: false, hostile: false })
+    }
     seats.value = assignSeat(seats.value, id, name)
     history.clear()
   }
@@ -632,7 +634,7 @@ export const useHexMapStore = defineStore('hexMap', () => {
     const entity = entityOf(id)
     if (!entity || entity.owner === owner) return
     if (owner === 'player') {
-      patch(id, { owner, hidden: false })
+      patch(id, { owner, hidden: false, hostile: false })
     } else {
       patch(id, { owner })
       seats.value = assignSeat(seats.value, id, null)
@@ -646,9 +648,10 @@ export const useHexMapStore = defineStore('hexMap', () => {
     if (entityOf(id)?.owner === 'dm') patch(id, { hidden })
   }
 
+  /** Only a DM entity is a foe: the players' own never are. */
   const setEntityHostile = (id: string, hostile: boolean): void => {
     if (!may('entitySettings', entityOf(id))) return
-    patch(id, { hostile })
+    if (entityOf(id)?.owner === 'dm') patch(id, { hostile })
   }
 
   /** Who plays an entity, by the name they were seated under; null for nobody. */
