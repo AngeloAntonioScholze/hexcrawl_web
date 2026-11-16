@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest'
 import { MERCHANT_TYPES } from './merchant'
-import { PROFESSION_ICONS } from './portraits'
+import { PROFESSION_ICONS } from './professions'
 
 describe('profession icons', () => {
   it('has a picture of its own for every merchant type, and none for anything else', () => {
