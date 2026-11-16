@@ -198,8 +198,10 @@ DM only in this bead (players get no columns, ped.18). The stepper and `let … 
 Focus after a close: back to the control that opened the closed level (the `›` button, or the row) when it still exists. Else the parent level's title. Else the entities header (tb0 fallback).
 
 ## Keyboard path
-- DOM order: `.panels` (dock), then `.subpanels`, level 1 before level 2. Tab runs dock → column 2 → column 3 → the rest of the page. In stacked mode the dock is `inert`, so Tab stays in the shown sub-panel.
-- Opening through a user action (row, `›`, rider or merchant row) moves focus to the new sub-panel's `h2` (`tabindex="-1"`). The screen reader then announces the entity's name, and the next Tab reaches the header control, then the first control in the body (the card, once tdj.4 mounts it).
+- DOM order: `.panels` (dock), then `.subpanels`, level 1 before level 2. Tab runs dock → column 2 → column 3 → the rest of the page. In stacked mode the dock is `inert`, so Tab skips it. Tab is not trapped in the sub-panel: the overlays still on screen (dial, toolbar, session bar) stay reachable, as they are with the dock open today.
+- Opening through a user action (row, `›`, rider or merchant row) moves focus to the new sub-panel's `h2` (`tabindex="-1"`). The screen reader then announces the entity's name.
+  - With `×` (parent in view), the next Tab reaches `×`, then the first control in the body (the card, once tdj.4 mounts it).
+  - With `‹` (back mode: stacked, and two-up at level 2), `‹` comes before the title in the DOM and is reached with Shift+Tab. The next Tab goes to the first control in the body.
 - Close and back return focus as above. Escape closes, as above.
 - No arrow-key navigation between columns.
 
