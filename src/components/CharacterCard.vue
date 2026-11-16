@@ -310,7 +310,8 @@ const picking = ref(false)
   align-items: center;
   justify-content: center;
   gap: 0.25em;
-  overflow: hidden;
+  overflow-x: clip;
+  overflow-y: visible;
   border-radius: 3px;
   color: var(--ink);
   font:
@@ -333,9 +334,13 @@ const picking = ref(false)
   outline-offset: 1px;
 }
 
-.slot:has([aria-invalid='true']) {
-  outline: 1px dashed var(--danger, #e07a6a);
-  outline-offset: 1px;
+.slot:has([aria-invalid='true'])::after {
+  content: '';
+  position: absolute;
+  inset: 0;
+  border: 1px dashed var(--danger, #e07a6a);
+  border-radius: 3px;
+  pointer-events: none;
 }
 
 .plate {
