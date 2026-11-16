@@ -9,6 +9,7 @@ import { KM_PER_HEX } from '../terrain/travel'
 import BustPicker from './BustPicker.vue'
 import CaravanMerchants from './CaravanMerchants.vue'
 import CaravanSupplies from './CaravanSupplies.vue'
+import EntityDmControls from './EntityDmControls.vue'
 import InventoryList from './InventoryList.vue'
 import PanelSection from './PanelSection.vue'
 import SubPanelFrame from './SubPanelFrame.vue'
@@ -184,6 +185,7 @@ const olderTurns = computed(() => Math.max(0, adventureLog.value.length - TURNS_
             @change="onDarkvision"
           />
         </label>
+        <EntityDmControls v-if="store.may('assignEntity')" :entity="entity" />
       </div>
     </PanelSection>
 

@@ -177,4 +177,14 @@ describe('EntitySubPanel', () => {
     expect(wrapper.find('#sec-l1-person-log .row .value').text()).toBe(String(walked))
     expect(wrapper.findAll('.journey li')).toHaveLength(store.adventureLogFor(party.id).length)
   })
+
+  it('gives the dm the owner, hidden and hostile controls in details, and players none', async () => {
+    const store = useHexMapStore()
+    const npc = added('npc', 'Hob')
+    const wrapper = mountPanel(npc)
+    expect(wrapper.find('#sec-l1-person-details .dm-controls').exists()).toBe(true)
+    store.dmView = false
+    await nextTick()
+    expect(wrapper.find('.dm-controls').exists()).toBe(false)
+  })
 })
