@@ -1,5 +1,5 @@
 /** Rows a card's lower box holds before the last one gives way to a "+n more" line. */
-export const CREW_ROWS = 6
+const CREW_ROWS = 6
 
 /** The rows a card shows, and how many it leaves to the panel below. */
 export const crewShown = <T>(

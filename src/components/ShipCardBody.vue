@@ -104,15 +104,4 @@ const crew = computed(() => crewShown(props.riders))
 .none {
   font-size: 0.8125rem;
 }
-
-.sr-only {
-  position: absolute;
-  width: 1px;
-  height: 1px;
-  overflow: hidden;
-  margin: -1px;
-  padding: 0;
-  clip-path: inset(50%);
-  white-space: nowrap;
-}
 </style>

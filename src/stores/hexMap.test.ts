@@ -3461,7 +3461,7 @@ describe("the store's permissions", () => {
       ['setEntitySight', (s, t) => s.setEntitySight(t.party, 9)],
       ['setDarkvision', (s, t) => s.setDarkvision(t.party, true)],
       ['setPortrait', (s, t) => s.setPortrait(t.wagon, 'wagon')],
-      ['setPortrait', (s, t) => s.setPortrait(t.party, 'knight')],
+      ['setPortrait (party)', (s, t) => s.setPortrait(t.party, 'knight')],
       ['setPlayerReachCapped', (s) => s.setPlayerReachCapped(false)],
     ],
     clock: [
