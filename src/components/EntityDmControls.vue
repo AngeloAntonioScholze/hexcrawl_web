@@ -139,7 +139,7 @@ const onHostile = (event: Event): void =>
   justify-content: space-between;
   align-items: center;
   gap: 1rem;
-  min-height: var(--control-h);
+  min-height: var(--control-h, 2.5rem);
   cursor: pointer;
 }
 
@@ -163,12 +163,12 @@ select {
 }
 
 select:hover {
-  border-color: var(--accent);
+  border-color: var(--accent, #7aa2c8);
 }
 
 input[type='checkbox'] {
   margin: 0;
-  accent-color: var(--accent);
+  accent-color: var(--accent, #7aa2c8);
   cursor: pointer;
 }
 
@@ -179,7 +179,7 @@ input[type='checkbox']:disabled {
 select:focus-visible,
 input:focus-visible,
 button:focus-visible {
-  outline: 2px solid var(--accent);
+  outline: 2px solid var(--accent, #7aa2c8);
   outline-offset: 1px;
 }
 
@@ -211,11 +211,11 @@ button:focus-visible {
 }
 
 .actions .danger {
-  border-color: var(--danger);
-  color: var(--danger);
+  border-color: var(--danger, #e07a6a);
+  color: var(--danger, #e07a6a);
 }
 
 .actions .danger:hover {
-  background: color-mix(in srgb, var(--danger) 12%, transparent);
+  background: color-mix(in srgb, var(--danger, #e07a6a) 12%, transparent);
 }
 </style>
