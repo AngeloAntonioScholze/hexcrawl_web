@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { nextTick, ref } from 'vue'
+import { nextTick, ref, watch } from 'vue'
 import type { Entity } from '../entities/entity'
 import { useHexMapStore } from '../stores/hexMap'
 import PopupDialog from './PopupDialog.vue'
@@ -12,12 +12,14 @@ const confirming = ref(false)
 const select = ref<HTMLSelectElement>()
 const keep = ref<HTMLButtonElement>()
 
-const seated = (): string | null => store.playerOf(props.entity.id)
+const player = ref('')
 
 const onOwner = (event: Event): void => {
   const el = event.target as HTMLSelectElement
   const owner = el.value === 'dm' ? 'dm' : 'player'
-  if (owner === 'dm' && seated() !== null) {
+  const seated = store.playerOf(props.entity.id)
+  if (owner === 'dm' && seated !== null) {
+    player.value = seated
     el.value = props.entity.owner
     confirming.value = true
     void nextTick(() => keep.value?.focus())
@@ -26,9 +28,12 @@ const onOwner = (event: Event): void => {
   store.setEntityOwner(props.entity.id, owner)
 }
 
+watch(confirming, (open) => {
+  if (!open) void nextTick(() => select.value?.focus())
+})
+
 const cancel = (): void => {
   confirming.value = false
-  void nextTick(() => select.value?.focus())
 }
 
 const takeIt = (): void => {
@@ -95,13 +100,13 @@ const onHostile = (event: Event): void =>
     </label>
     <p :id="`dm-${entity.id}-hostile-hint`" class="hint">only you see it</p>
 
-    <PopupDialog v-model="confirming" :title="`take ${entity.name} from ${seated() ?? ''}?`">
+    <PopupDialog v-model="confirming" :title="`take ${entity.name} from ${player}?`">
       <p class="body">
-        {{ seated() }} plays {{ entity.name }} now. making it a dm entity takes it off their seat,
-        and undo can't bring it back.
+        {{ player }} plays {{ entity.name }} now. making it a dm entity takes it off their seat, and
+        undo can't bring it back.
       </p>
       <div class="actions">
-        <button ref="keep" type="button" @click="cancel">keep it with {{ seated() }}</button>
+        <button ref="keep" type="button" @click="cancel">keep it with {{ player }}</button>
         <button type="button" class="danger" @click="takeIt">take it</button>
       </div>
     </PopupDialog>

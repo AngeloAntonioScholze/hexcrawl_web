@@ -2,7 +2,7 @@
 import { mount } from '@vue/test-utils'
 import { createPinia, setActivePinia } from 'pinia'
 import { beforeEach, describe, expect, it } from 'vitest'
-import { defineComponent, h } from 'vue'
+import { defineComponent, h, nextTick } from 'vue'
 import type { EntityKind, Owner } from '../entities/entity'
 import { useHexMapStore } from '../stores/hexMap'
 import EntityDmControls from './EntityDmControls.vue'
@@ -96,13 +96,48 @@ describe('the dm controls', () => {
       expect(wrapper.find('h2').exists()).toBe(false)
     })
 
+    it.each([
+      [
+        'the close event',
+        (wrapper: ReturnType<typeof mountFor>) => wrapper.find('dialog').trigger('close'),
+      ],
+      [
+        'the × button',
+        (wrapper: ReturnType<typeof mountFor>) => wrapper.find('.close').trigger('click'),
+      ],
+    ])('keeps owner and seat, and refocuses the select, on %s', async (_name, close) => {
+      const { store, live, party } = seated()
+      const wrapper = mountFor(party.id)
+      await select(wrapper).setValue('dm')
+      await nextTick()
+      expect(document.activeElement).toBe(wrapper.find('.actions button').element)
+      await close(wrapper)
+      await nextTick()
+      expect(live(party.id).owner).toBe('player')
+      expect(store.playerOf(party.id)).toBe('Ana')
+      expect(document.activeElement).toBe(select(wrapper).element)
+    })
+
+    it('keeps the player name in the dialog if they are unseated meanwhile', async () => {
+      const { store, party } = seated()
+      const wrapper = mountFor(party.id)
+      await select(wrapper).setValue('dm')
+      store.assignEntity(party.id, null)
+      await nextTick()
+      expect(wrapper.find('h2').text()).toBe('take Wanderers from Ana?')
+    })
+
     it('unseats the player on "take it"', async () => {
       const { store, live, party } = seated()
       const wrapper = mountFor(party.id)
       await select(wrapper).setValue('dm')
       await wrapper.find('.actions .danger').trigger('click')
+      await nextTick()
       expect(live(party.id).owner).toBe('dm')
       expect(store.playerOf(party.id)).toBeNull()
+      expect(wrapper.find('h2').exists()).toBe(false)
+      expect((select(wrapper).element as HTMLSelectElement).value).toBe('dm')
+      expect(document.activeElement).toBe(select(wrapper).element)
     })
   })
 
@@ -116,6 +151,14 @@ describe('the dm controls', () => {
     )
   })
 
+  it('disables hidden at once when handed to the players', async () => {
+    const { make } = setup()
+    const npc = make('npc', 'dm')
+    const wrapper = mountFor(npc.id)
+    await select(wrapper).setValue('player')
+    expect(box(wrapper, HIDDEN).attributes('disabled')).toBeDefined()
+    expect(wrapper.find(`#dm-${npc.id}-hidden-hint`).exists()).toBe(true)
+  })
   it('toggles hidden on a dm entity', async () => {
     const { make, live } = setup()
     const npc = make('npc', 'dm')
