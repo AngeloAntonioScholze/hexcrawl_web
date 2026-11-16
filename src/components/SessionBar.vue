@@ -151,6 +151,12 @@ const leave = async (): Promise<void> => {
   right: 6rem;
 }
 
+/* With a sub-panel column beside the dock the dial moves right into the bar's
+   spot, so the bar steps down under it, as on a tablet. */
+.session-bar.lowered {
+  top: 9.5rem;
+}
+
 /* A tablet has no room beside the dial next to the panel column: it drops
    under the dial (1rem down, 16.2rem x 108/220 tall, a 0.5rem gap). */
 @media (min-width: 721px) and (max-width: 1023px) {

@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed, nextTick, ref, watch, watchEffect } from 'vue'
+import { computed, nextTick, onBeforeUnmount, onMounted, ref, watch, watchEffect } from 'vue'
 import CaravanPanel from '../components/CaravanPanel.vue'
 import DayNightDial from '../components/DayNightDial.vue'
 import DmToolbar from '../components/DmToolbar.vue'
@@ -10,11 +10,20 @@ import InventoryList from '../components/InventoryList.vue'
 import MapList from '../components/MapList.vue'
 import PanelSection from '../components/PanelSection.vue'
 import SessionBar from '../components/SessionBar.vue'
+import SubPanelStack from '../components/SubPanelStack.vue'
 import ViewToggle from '../components/ViewToggle.vue'
 import { useDebugMode } from '../composables/useDebugMode'
 import { usePlayerView } from '../composables/usePlayerView'
 import { MIN_MAX_ZOOM } from '../composables/useHexWindow'
 import { useStage } from '../composables/useStage'
+import {
+  columnMode,
+  firstInvalidLevel,
+  subColumns,
+  useSubPanels,
+  visibleLevels,
+  type SubPanel,
+} from '../composables/useSubPanels'
 import { useUndoKeys } from '../composables/useUndoKeys'
 import { useViewMode } from '../composables/useViewMode'
 import { useZoomLimit } from '../composables/useZoomLimit'
@@ -202,6 +211,101 @@ watch(rendered, (now, before) => {
   }
 })
 
+// Sub-panel columns (ped.12): the DM's only; players get none.
+const width = ref(window.innerWidth)
+const onResize = (): void => {
+  width.value = window.innerWidth
+}
+onMounted(() => window.addEventListener('resize', onResize))
+onBeforeUnmount(() => window.removeEventListener('resize', onResize))
+
+const subPanels = useSubPanels()
+const subStack = subPanels.stack
+const columns = computed(() => !veiled.value && !forPlayers.value)
+const mode = computed(() => columnMode(width.value))
+const stacked = computed(() => mode.value === 1)
+const shownLevels = computed(() =>
+  visibleLevels(columns.value ? subStack.value.length : 0, mode.value),
+)
+const subColumnCount = computed(() => subColumns(shownLevels.value, mode.value))
+const dockHidden = computed(() => !shownLevels.value.includes(0))
+const subpanelsEl = ref<HTMLElement | null>(null)
+
+const openAtLevelOne = (id: string): boolean =>
+  subStack.value[0]?.kind === 'entity' && subStack.value[0].id === id
+
+// Opening never puts the selection down.
+const openRow = (id: string): void => {
+  store.selectEntity(id)
+  subPanels.open({ kind: 'entity', id }, 0)
+}
+
+// Stacked, a row click only selects, as before columns: opening would hide the
+// list just picked from.
+const onRow = (id: string): void => {
+  if (columns.value && !stacked.value) openRow(id)
+  else pick(id)
+}
+
+const invalidLevel = computed(() =>
+  firstInvalidLevel(subStack.value, {
+    entityIds: new Set(store.entities.map((one) => one.id)),
+    carrierOf: store.carrierOf,
+    merchantCaravan: (id) => store.merchants.find((one) => one.id === id)?.caravanId ?? null,
+  }),
+)
+// The open entity gone, focus goes to the entities header wherever it was, the
+// dock's remove button included.
+watch(invalidLevel, (level) => {
+  if (level === null) return
+  subPanels.close(level)
+  if (level === 1) void nextTick(() => document.getElementById('panel-entities-head')?.focus())
+})
+
+watch(
+  () => store.dmView,
+  () => subPanels.clear(),
+)
+
+watch(veiled, (now) => {
+  if (now) subPanels.clear()
+})
+
+/** What had focus when each level opened, to hand it back when the level closes. */
+const openers = new Map<number, HTMLElement>()
+
+const samePanel = (a: SubPanel | undefined, b: SubPanel | undefined): boolean =>
+  a !== undefined && b !== undefined && a.kind === b.kind && a.id === b.id
+
+// Runs before the DOM changes, so the opener and focus inside a closing level
+// can still be seen. Every open is a user's, so it always takes focus.
+watch(subStack, (now, before) => {
+  let kept = 0
+  while (kept < now.length && samePanel(now[kept], before[kept])) kept++
+  const active = document.activeElement
+  if (now.length > kept) {
+    const level = now.length
+    for (const deeper of [...openers.keys()]) if (deeper >= level) openers.delete(deeper)
+    if (active instanceof HTMLElement && active !== document.body) openers.set(level, active)
+    void nextTick(() => document.getElementById(`col-${level}-title`)?.focus())
+    return
+  }
+  const closing = Array.from({ length: before.length - now.length }, (_, i) => now.length + i + 1)
+  const hadFocus = closing.some(
+    (level) => !!subpanelsEl.value?.querySelector(`[data-level="${level}"]`)?.contains(active),
+  )
+  const opener = openers.get(now.length + 1)
+  for (const level of closing) openers.delete(level)
+  if (!hadFocus) return
+  void nextTick(() => {
+    const target =
+      (opener?.isConnected ? opener : null) ??
+      document.getElementById(`col-${now.length}-title`) ??
+      document.getElementById('panel-entities-head')
+    target?.focus()
+  })
+})
+
 /** Whether the selected entity takes orders from whoever is at this browser. */
 const orderable = computed(
   () => store.selectedEntity !== null && store.may('order', store.selectedEntity),
@@ -313,18 +417,23 @@ const olderTurns = computed(() => Math.max(0, adventureLog.value.length - TURNS_
 </script>
 
 <template>
-  <main :style="{ '--dock-rows': dockRows }">
+  <main :style="{ '--dock-rows': dockRows, '--sub-columns': subColumnCount }">
     <HexCanvas />
     <!-- Nothing but the fogged map behind the enter screen: no tools to reach
          past it, and nothing to give the map away before anyone is in. -->
     <template v-if="!veiled">
       <DayNightDial />
       <ViewToggle v-if="debug" />
-      <SessionBar v-if="session.role" :class="{ beside: debug }" />
+      <SessionBar v-if="session.role" :class="{ beside: debug, lowered: subColumnCount >= 1 }" />
       <DmToolbar />
     </template>
     <EnterScreen />
-    <div v-if="!veiled" class="panels">
+    <div
+      v-if="!veiled"
+      class="panels"
+      :class="{ behind: dockHidden }"
+      :inert="dockHidden || undefined"
+    >
       <aside v-if="shapesWorld" class="panel" :class="{ collapsed: worldCollapsed }">
         <header>
           <h2 class="title">
@@ -604,34 +713,56 @@ const olderTurns = computed(() => Math.max(0, adventureLog.value.length - TURNS_
                   <button
                     type="button"
                     :class="{ here: one.id === store.selectedId }"
+                    :aria-current="openAtLevelOne(one.id) ? 'true' : undefined"
                     :title="
                       store.may('order', one)
                         ? `give ${one.name} the orders`
                         : `look at ${one.name}; it is not yours to order`
                     "
-                    @click="pick(one.id)"
+                    @click="onRow(one.id)"
                   >
                     <span class="pip" :style="{ background: one.color }" />
                     <span>{{ one.name }}</span>
                     <span class="dim">{{ one.kind }}</span>
                     <span class="value">{{ one.pacePerTurn }}/turn</span>
                   </button>
+                  <button
+                    v-if="columns"
+                    type="button"
+                    class="open"
+                    :aria-label="`open ${one.name}`"
+                    title="open"
+                    @click="openRow(one.id)"
+                  >
+                    ›
+                  </button>
                   <ul v-if="ridersOf(one.id).length" class="riders">
                     <li v-for="rider in ridersOf(one.id)" :key="rider.id">
                       <button
                         type="button"
                         :class="{ here: rider.id === store.selectedId }"
+                        :aria-current="openAtLevelOne(rider.id) ? 'true' : undefined"
                         :title="
                           store.atSea(rider.id)
                             ? `${rider.name} is aboard ${one.name} at sea and cannot be ordered off`
                             : `${rider.name} rides in ${one.name}; an order takes it out`
                         "
-                        @click="pick(rider.id)"
+                        @click="onRow(rider.id)"
                       >
                         <span class="pip" :style="{ background: rider.color }" />
                         <span>{{ rider.name }}</span>
                         <span class="dim">{{ store.atSea(rider.id) ? 'at sea' : 'riding' }}</span>
                         <span class="value">{{ one.pacePerTurn }}/turn</span>
+                      </button>
+                      <button
+                        v-if="columns"
+                        type="button"
+                        class="open"
+                        :aria-label="`open ${rider.name}`"
+                        title="open"
+                        @click="openRow(rider.id)"
+                      >
+                        ›
                       </button>
                     </li>
                   </ul>
@@ -896,6 +1027,14 @@ const olderTurns = computed(() => Math.max(0, adventureLog.value.length - TURNS_
       <CaravanPanel />
       <HexDetails />
     </div>
+    <div
+      v-if="columns && subStack.length > 0"
+      ref="subpanelsEl"
+      class="subpanels"
+      :class="{ stacked }"
+    >
+      <SubPanelStack :mode="mode" />
+    </div>
   </main>
 </template>
 
@@ -1040,7 +1179,16 @@ aside:where(.panel).collapsed {
   cursor: pointer;
 }
 
+/* The row and its › open button side by side, riders on a line of their own. */
+.entities li {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  align-items: center;
+  column-gap: 0.25rem;
+}
+
 .entities .riders {
+  grid-column: 1 / -1;
   margin: 0 0 0 0.9rem;
   padding: 0 0 0 0.35rem;
   border-left: 1px solid var(--line);
@@ -1053,6 +1201,53 @@ aside:where(.panel).collapsed {
 
 .entities li button.here {
   background: color-mix(in srgb, var(--line) 70%, transparent);
+}
+
+.entities li button.open {
+  display: block;
+  width: 2rem;
+  height: 2rem;
+  padding: 0;
+  color: var(--ink-dim);
+  font-size: 1.2rem;
+  line-height: 1;
+  text-align: center;
+}
+
+.entities li button.open:hover {
+  color: var(--ink);
+}
+
+.entities li button.open:focus-visible {
+  outline: 2px solid #7aa2c8;
+  outline-offset: -2px;
+}
+
+/* Columns 2 and 3 open to the right of the dock, as tall as their content. */
+.subpanels {
+  position: absolute;
+  top: 1rem;
+  left: calc(1rem + min(var(--panel-width), 100vw - 2rem) + var(--column-gap));
+  bottom: 1rem;
+  z-index: 2;
+  display: flex;
+  align-items: flex-start;
+  gap: var(--column-gap);
+  pointer-events: none;
+}
+
+/* Stacked, the one shown level takes the dock's own box and the dock hides. */
+.subpanels.stacked {
+  left: 1rem;
+  width: min(var(--panel-width), 100vw - 2rem);
+}
+
+.subpanels.stacked :deep(.subpanel) {
+  width: 100%;
+}
+
+.panels.behind {
+  visibility: hidden;
 }
 
 .odds {
@@ -1328,6 +1523,21 @@ p {
 
   aside:where(.panel):not(.collapsed) {
     background: var(--surface-raised);
+  }
+
+  .subpanels.stacked {
+    inset: 0.5rem;
+    z-index: 11;
+    width: calc(100vw - 1rem);
+  }
+
+  .subpanels.stacked :deep(.subpanel) {
+    background: var(--surface-raised);
+  }
+
+  .entities li button.open {
+    width: 2.5rem;
+    height: 2.5rem;
   }
 }
 </style>

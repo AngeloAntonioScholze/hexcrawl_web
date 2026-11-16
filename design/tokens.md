@@ -86,7 +86,10 @@ These are shorthand values for `font` sizing only: `font-size` plus `line-height
 | `--dock-row` | `2.5rem`, phone `2.75rem` | panel header min-height |
 | `--section-row` | `2rem`, phone `2.5rem` | section header min-height (0zz) |
 | `--control-h` | `2rem`, phone `2.5rem` | input and button height (q55) |
-| `--dock-reserve` | `calc(1rem + min(var(--panel-width), 100vw - 2rem) + 0.75rem)` | left edge of the free map area |
+| `--subpanel-width` | `21rem` | width of sub-panel columns 2 and 3 (ped.12) |
+| `--column-gap` | `0.75rem` | gap between the dock and column 2, and between columns 2 and 3 (ped.12) |
+| `--sub-columns` | `0` | sub-panels shown beside the dock (0, 1 or 2). MapView sets it inline on `<main>`; always 0 in stacked mode and for players (ped.12) |
+| `--dock-reserve` | `calc(1rem + min(var(--panel-width), 100vw - 2rem) + var(--column-gap) + var(--sub-columns) * (var(--subpanel-width) + var(--column-gap)))` | left edge of the free map area, after any open columns (380px, 728px, 1076px with 0, 1, 2 columns). Declared on `:root, main`: a custom property resolves its `var()`s where it is declared, so `<main>` must declare it again to pick up its own `--sub-columns` |
 | `--minimap-reserve` | `calc(1rem + 176px + 0.75rem)` | right edge kept for the minimap |
 
 The phone values apply under `@media (max-width: 720px)`.
