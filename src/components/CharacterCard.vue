@@ -294,7 +294,6 @@ const picking = ref(false)
 .name {
   display: block;
   margin: 0;
-  padding-block: 0;
   overflow: hidden;
   color: var(--ink);
   font-family: var(--card-name-font);

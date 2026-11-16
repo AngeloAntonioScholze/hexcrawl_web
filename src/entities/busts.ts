@@ -30,7 +30,7 @@ export interface FrameBox {
   height: number
 }
 
-export interface FrameArt {
+interface FrameArt {
   frame: string
   /** White on alpha: the exact shape of the art's portrait window. */
   window: string
@@ -43,7 +43,7 @@ export interface FrameArt {
   }
 }
 
-export interface Bust {
+interface Bust {
   /** What an entity stores and a map file carries; never reused for other art. */
   id: string
   label: string
