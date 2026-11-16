@@ -17,6 +17,7 @@ const party: Entity = {
   sight: 5,
   darkvision: false,
   hidden: false,
+  hostile: false,
 }
 
 const caravan: Entity = {
@@ -29,6 +30,7 @@ const caravan: Entity = {
   sight: 4,
   darkvision: true,
   hidden: true,
+  hostile: true,
   portrait: 'dusk-road',
 }
 
@@ -265,6 +267,16 @@ describe('schema', () => {
     `)
 
     expect(loadSnapshot(db)!.entities[0].darkvision).toBe(false)
+  })
+
+  it("makes an entity saved before hostility nobody's foe", () => {
+    saveSnapshot(db, snapshot({ entities: [] }))
+    db.exec(`
+      INSERT INTO entity (id, ord, name, kind, owner, color, pace, sight, hidden, darkvision)
+      VALUES ('party-1', 0, 'the party', 'party', 'player', '#e0b25a', 1, 5, 0, 0)
+    `)
+
+    expect(loadSnapshot(db)!.entities[0].hostile).toBe(false)
   })
 
   it('leaves an already current database alone', () => {

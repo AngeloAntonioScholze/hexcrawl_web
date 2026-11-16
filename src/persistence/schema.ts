@@ -278,6 +278,9 @@ const MIGRATIONS: readonly string[] = [
   `
   ALTER TABLE entity ADD COLUMN portrait TEXT;
   `,
+  `
+  ALTER TABLE entity ADD COLUMN hostile INTEGER NOT NULL DEFAULT 0;
+  `,
 ]
 
 export const SCHEMA_VERSION = MIGRATIONS.length

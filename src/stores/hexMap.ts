@@ -622,6 +622,35 @@ export const useHexMapStore = defineStore('hexMap', () => {
     history.clear()
   }
 
+  /**
+   * Gives an entity to the players, out of hiding, or takes it back for the
+   * DM, out of whoever was seated at it; it stays in sight until hidden. Not
+   * undoable, for the same reason as assignEntity.
+   */
+  const setEntityOwner = (id: string, owner: Owner): void => {
+    if (!may('assignEntity')) return
+    const entity = entityOf(id)
+    if (!entity || entity.owner === owner) return
+    if (owner === 'player') {
+      patch(id, { owner, hidden: false })
+    } else {
+      patch(id, { owner })
+      seats.value = assignSeat(seats.value, id, null)
+    }
+    history.clear()
+  }
+
+  /** Only a DM entity hides: a player's is always on its player's map. */
+  const setEntityHidden = (id: string, hidden: boolean): void => {
+    if (!may('entitySettings', entityOf(id))) return
+    if (entityOf(id)?.owner === 'dm') patch(id, { hidden })
+  }
+
+  const setEntityHostile = (id: string, hostile: boolean): void => {
+    if (!may('entitySettings', entityOf(id))) return
+    patch(id, { hostile })
+  }
+
   /** Who plays an entity, by the name they were seated under; null for nobody. */
   const playerOf = (id: string): string | null => seatAt(seats.value, id)?.name ?? null
 
@@ -2152,6 +2181,9 @@ export const useHexMapStore = defineStore('hexMap', () => {
     seatedIds,
     seatPlayer: history.track(seatPlayer),
     assignEntity,
+    setEntityOwner,
+    setEntityHidden: history.track(setEntityHidden),
+    setEntityHostile: history.track(setEntityHostile),
     playerOf,
     seatsFor,
     playerViewer,

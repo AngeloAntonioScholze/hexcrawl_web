@@ -25,6 +25,8 @@ export interface Entity {
   darkvision: boolean
   /** Kept off the players' map. */
   hidden: boolean
+  /** Marked by the DM as a foe; framed in crimson like the hidden ones. */
+  hostile: boolean
   /** An entity's bust, one of the bundled ones; none until the DM picks one. */
   portrait?: string
 }
@@ -108,5 +110,6 @@ export function newEntity(
     ...KIND_DEFAULTS[kind],
     darkvision: false,
     hidden: owner === 'dm',
+    hostile: false,
   }
 }

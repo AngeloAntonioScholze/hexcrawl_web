@@ -77,13 +77,15 @@ export const bustOf = (id: string | undefined): Bust | undefined =>
   BUSTS.find((one) => one.id === id)
 
 /**
- * Hidden DM entities are crimson (there is no hostile flag); carriers are the
- * company's wagons and hulls whoever drives them; everyone else wears the
- * colours of whoever gives them orders. The seat is left out on purpose: it
- * changes per session, and the frame should not.
+ * Hidden DM entities and hostile ones are crimson; carriers are the company's
+ * wagons and hulls whoever drives them; everyone else wears the colours of
+ * whoever gives them orders. The seat is left out on purpose: it changes per
+ * session, and the frame should not.
  */
-export const frameVariant = (entity: Pick<Entity, 'kind' | 'owner' | 'hidden'>): FrameVariant => {
-  if (entity.hidden) return 'crimson'
+export const frameVariant = (
+  entity: Pick<Entity, 'kind' | 'owner' | 'hidden'> & Partial<Pick<Entity, 'hostile'>>,
+): FrameVariant => {
+  if (entity.hidden || entity.hostile) return 'crimson'
   if (entity.kind === 'caravan' || entity.kind === 'ship') return 'bronze'
   return entity.owner === 'player' ? 'steel' : 'bronze'
 }

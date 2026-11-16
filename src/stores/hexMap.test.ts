@@ -1124,6 +1124,71 @@ describe('players seated at the table', () => {
   })
 })
 
+describe("the DM's say over an entity", () => {
+  const of = (store: Store, id: string) => store.entities.find((one) => one.id === id)!
+
+  it('marks an entity hostile, and undoes it', () => {
+    const store = setup()
+    const id = store.selectedId
+    store.setEntityHostile(id, true)
+    expect(of(store, id).hostile).toBe(true)
+
+    store.undo()
+    expect(of(store, id).hostile).toBe(false)
+  })
+
+  it('keeps hostility with the map', () => {
+    const store = setup()
+    const id = store.selectedId
+    store.setEntityHostile(id, true)
+    const saved = store.snapshot
+
+    setActivePinia(createPinia())
+    const fresh = setup()
+    fresh.restore(saved)
+
+    expect(of(fresh, id).hostile).toBe(true)
+  })
+
+  it('hides and shows a DM entity, and undoes it', () => {
+    const store = setup()
+    const spy = store.addEntity('the spy', 'npc', 'dm')!
+    store.setEntityHidden(spy.id, false)
+    expect(of(store, spy.id).hidden).toBe(false)
+
+    store.undo()
+    expect(of(store, spy.id).hidden).toBe(true)
+  })
+
+  it("never hides a player's entity", () => {
+    const store = setup()
+    const id = store.selectedId
+    store.setEntityHidden(id, true)
+    expect(of(store, id).hidden).toBe(false)
+  })
+
+  it("gives a DM entity to the players, there on their map, and can't be undone", () => {
+    const store = setup()
+    const spy = store.addEntity('the spy', 'npc', 'dm')!
+
+    store.setEntityOwner(spy.id, 'player')
+
+    expect(of(store, spy.id)).toMatchObject({ owner: 'player', hidden: false })
+    expect(store.undo()).toBe(false)
+  })
+
+  it("takes an entity back for the DM, out of its player's hands", () => {
+    const store = setup()
+    const token = store.seatPlayer('Mira')!
+
+    store.setEntityOwner(token.id, 'dm')
+
+    expect(of(store, token.id)).toMatchObject({ owner: 'dm', hidden: false })
+    expect(store.playerOf(token.id)).toBeNull()
+    expect(store.undo()).toBe(false)
+  })
+})
+
 describe('handing entities to players', () => {
   it('gives a player another token besides their own', () => {
     const store = setup()
@@ -3455,11 +3520,15 @@ describe("the store's permissions", () => {
         (s, t) => s.assignEntity(t.party, null),
         (s, t) => s.assignEntity(t.party, 'Mira'),
       ],
+      ['setEntityOwner', (s, t) => s.setEntityOwner(t.caravan, 'player')],
+      ['setEntityOwner to the dm', (s, t) => s.setEntityOwner(t.party, 'dm')],
     ],
     entitySettings: [
       ['setPace', (s, t) => s.setPace(t.party, 2)],
       ['setEntitySight', (s, t) => s.setEntitySight(t.party, 9)],
       ['setDarkvision', (s, t) => s.setDarkvision(t.party, true)],
+      ['setEntityHidden', (s, t) => s.setEntityHidden(t.lookout, false)],
+      ['setEntityHostile', (s, t) => s.setEntityHostile(t.party, true)],
       ['setPortrait', (s, t) => s.setPortrait(t.wagon, 'wagon')],
       ['setPortrait (party)', (s, t) => s.setPortrait(t.party, 'knight')],
       ['setPlayerReachCapped', (s) => s.setPlayerReachCapped(false)],

@@ -120,6 +120,10 @@ export const HEX_MAP_RULES = {
   seatPlayer: 'addEntity',
   removeEntity: 'removeEntity',
   assignEntity: 'assignEntity',
+  // Taking an entity off its players unseats them, as handing it over does.
+  setEntityOwner: 'assignEntity',
+  setEntityHidden: 'entitySettings',
+  setEntityHostile: 'entitySettings',
   setPace: 'entitySettings',
   setEntitySight: 'entitySettings',
   setDarkvision: 'entitySettings',

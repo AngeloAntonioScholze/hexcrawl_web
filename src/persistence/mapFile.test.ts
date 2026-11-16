@@ -30,6 +30,7 @@ const snapshot = (): MapSnapshot => ({
       sight: 5,
       darkvision: false,
       hidden: false,
+      hostile: false,
     },
     {
       id: 'ship-1',
@@ -41,6 +42,7 @@ const snapshot = (): MapSnapshot => ({
       sight: 7,
       darkvision: true,
       hidden: true,
+      hostile: true,
     },
     {
       id: 'caravan-1',
@@ -52,6 +54,7 @@ const snapshot = (): MapSnapshot => ({
       sight: 4,
       darkvision: false,
       hidden: false,
+      hostile: false,
       portrait: 'forest-track',
     },
   ],
@@ -238,6 +241,7 @@ describe('parseMapFile', () => {
     ['an entity missing a field', (map) => delete map.entities[1].hidden, 'entities'],
     ['a darkvision that is not a flag', (map) => (map.entities[0].darkvision = 1), 'entities'],
     ['a portrait that is not a name', (map) => (map.entities[2].portrait = 7), 'entities'],
+    ['a hostile that is not a flag', (map) => (map.entities[1].hostile = 'yes'), 'entities'],
     ['a list that is not a list', (map) => (map.notes = {}), 'notes'],
     ['a malformed hex key', (map) => (map.origins[0].hex = 'north'), 'origins'],
     ['a bad hex inside a path', (map) => map.record[0].entered.push('1;0'), 'record'],
@@ -398,6 +402,11 @@ describe('parseMapFile', () => {
   it('opens an entity from before darkvision existed as blind by night', () => {
     const result = parseMapFile(tampered((file) => delete file.map.entities[1].darkvision))
     expect(result.ok && result.snapshot.entities[1].darkvision).toBe(false)
+  })
+
+  it("opens an entity from before hostility as nobody's foe", () => {
+    const result = parseMapFile(tampered((file) => delete file.map.entities[1].hostile))
+    expect(result.ok && result.snapshot.entities[1].hostile).toBe(false)
   })
 
   it('opens a file from before portraits, its caravans going without one', () => {

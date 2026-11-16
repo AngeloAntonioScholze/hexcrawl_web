@@ -243,6 +243,7 @@ export const SNAPSHOT_FIELDS: { [K in keyof MapSnapshot]-?: Guard<MapSnapshot[K]
       sight: isNumber,
       darkvision: isBoolean,
       hidden: isBoolean,
+      hostile: isBoolean,
       // Any name passes: one from a build that shipped other art just shows no picture.
       portrait: (value): value is string | undefined => value === undefined || isString(value),
     }),
@@ -414,10 +415,17 @@ const withDefault = (key: string, value: unknown): unknown => {
   if (value === undefined && Object.hasOwn(ADDED_FIELD_DEFAULTS, key)) {
     return ADDED_FIELD_DEFAULTS[key as keyof typeof ADDED_FIELD_DEFAULTS]()
   }
-  // An entity from before darkvision existed was blind by night like everyone.
+  // An entity from before darkvision existed was blind by night like everyone,
+  // and one from before hostility was nobody's foe.
   if (key === 'entities' && Array.isArray(value)) {
     return value.map((one: unknown) =>
-      isObject(one) && one.darkvision === undefined ? { ...one, darkvision: false } : one,
+      isObject(one)
+        ? {
+            ...one,
+            ...(one.darkvision === undefined ? { darkvision: false } : {}),
+            ...(one.hostile === undefined ? { hostile: false } : {}),
+          }
+        : one,
     )
   }
   // Odds for a terrain the file never knew fall back to the default, as they do

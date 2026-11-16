@@ -34,6 +34,7 @@ const entity = (id: string, kind: Entity['kind'], hidden: boolean): Entity => ({
   sight: 2,
   darkvision: false,
   hidden,
+  hostile: false,
 })
 
 const still = { carry: 0, pending: [], waypoints: [], riding: null }
@@ -430,6 +431,14 @@ describe('what the players do get', () => {
   it("has a visible caravan's portrait", () => {
     const view = project()
     expect(view.entities.find((one) => one.id === 'caravan')?.portrait).toBe('night-camp')
+  })
+
+  it('keeps who the DM counts as hostile from the players', () => {
+    const map = snapshot()
+    map.entities = map.entities.map((one) => ({ ...one, hostile: true }))
+    const view = project(map)
+    expect(view.entities.length).toBeGreaterThan(0)
+    expect(view.entities.every((one) => !one.hostile)).toBe(true)
   })
 
   it('has the purse and level of every visible party and npc, untouched ones at the defaults', () => {

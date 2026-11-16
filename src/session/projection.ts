@@ -309,6 +309,12 @@ export function createProjector(): (
   return (snapshot, field) => project(snapshot, field, cache)
 }
 
+/**
+ * Who the DM counts as a foe is the DM's to know: the players see every visible
+ * entity as not hostile. Pending decision tdj.35; sending it is `{ ...one }`.
+ */
+const asPlayersSeeIt = (one: Entity): Entity => ({ ...one, hostile: false })
+
 function project(
   snapshot: MapSnapshot,
   field: TerrainField,
@@ -409,7 +415,7 @@ function project(
     explored,
     visible: sorted(withoutHidden(inSight, edits.hidden)),
     tiles,
-    entities: shown.map((one) => ({ ...one })),
+    entities: shown.map(asPlayersSeeIt),
     states,
     origins: snapshot.origins.filter(isShown).map((one) => ({ ...one })),
     record: snapshot.record

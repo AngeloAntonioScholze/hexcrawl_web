@@ -65,8 +65,15 @@ describe('frame variant', () => {
   ]
 
   it.each(cases)('frames hidden=%s %s owned by the %s in %s', (hidden, kind, owner, variant) => {
-    expect(frameVariant({ hidden, kind, owner })).toBe(variant)
+    expect(frameVariant({ hidden, hostile: false, kind, owner })).toBe(variant)
   })
+
+  it.each(cases)(
+    'frames hostile hidden=%s %s owned by the %s in crimson',
+    (hidden, kind, owner) => {
+      expect(frameVariant({ hidden, hostile: true, kind, owner })).toBe('crimson')
+    },
+  )
 })
 
 describe('frame art', () => {
