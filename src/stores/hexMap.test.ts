@@ -980,6 +980,23 @@ describe('the record', () => {
     expect(store.hexesWalked).toBe(2)
     expect(store.travelledKm).toBe(20)
   })
+
+  it('reads any entity’s log and ground covered, selected or not', () => {
+    const store = setup()
+    const party = store.selectedId
+    sendEast(store, 3)
+    store.advanceTurn()
+    store.advanceTurn()
+    const log = store.adventureLog
+    const walked = store.hexesWalked
+    const other = store.addEntity(undefined, 'npc')!.id
+
+    store.selectEntity(other)
+    expect(store.adventureLogFor(party)).toEqual(log)
+    expect(store.hexesWalkedFor(party)).toBe(walked)
+    expect(store.hexesWalkedFor(party)).toBe(2)
+    expect(store.adventureLogFor(other)).toEqual(store.adventureLog)
+  })
 })
 
 describe('entities', () => {

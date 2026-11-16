@@ -2,13 +2,20 @@
 import { computed } from 'vue'
 import { useSectionFolds } from '../composables/useSectionFolds'
 
-const props = defineProps<{ foldKey: string; title: string }>()
+const props = defineProps<{
+  foldKey: string
+  title: string
+  /** Sets the ids apart where one fold key shows twice at once, as in two sub-panels. */
+  scope?: string
+}>()
 
 const folds = useSectionFolds()
 const folded = computed(() => folds.isFolded(props.foldKey))
 
-// Each fold key shows at most once at a time, so these ids are unique.
-const bodyId = computed(() => `sec-${props.foldKey.replace('.', '-')}`)
+const bodyId = computed(() => {
+  const key = props.foldKey.replace('.', '-')
+  return props.scope ? `sec-${props.scope}-${key}` : `sec-${key}`
+})
 const headId = computed(() => `${bodyId.value}-head`)
 </script>
 

@@ -1,29 +1,25 @@
 <script setup lang="ts">
-import { computed, ref } from 'vue'
+import { computed } from 'vue'
 import { orderOf, usePlayerView } from '../composables/usePlayerView'
-import { bustOf } from '../entities/busts'
 import { useHexMapStore } from '../stores/hexMap'
-import BustPicker from './BustPicker.vue'
 import CaravanMerchants from './CaravanMerchants.vue'
 import CaravanSupplies from './CaravanSupplies.vue'
 import InventoryList from './InventoryList.vue'
 import PanelSection from './PanelSection.vue'
 
 const store = useHexMapStore()
-// The players read what they see from their projection, as their map does.
+// The players read what they see from their projection, as their map does. The
+// DM's caravan opens as its own sub-panel instead (EntitySubPanel).
 const player = usePlayerView()
 const forPlayers = computed(() => !store.dmView)
 
-// It never opens itself: that would fold away the entities list the caravan was
-// just picked from. The players' panel is always there and swaps what it shows.
+// It never opens itself: that would fold away the entities list. The panel is
+// always there and swaps what it shows.
 const collapsed = computed(() => !store.panelsOpen.caravan)
 const toggle = (): void => store.setPanelOpen('caravan', collapsed.value)
 
-const caravan = computed(() => (forPlayers.value ? player.infoCaravan.value : store.shownCaravan))
-const riders = computed(() => {
-  if (!caravan.value) return []
-  return forPlayers.value ? player.ridersOf(caravan.value.id) : store.ridersOf(caravan.value.id)
-})
+const caravan = computed(() => player.infoCaravan.value)
+const riders = computed(() => (caravan.value ? player.ridersOf(caravan.value.id) : []))
 
 const standing = computed(() =>
   caravan.value ? (player.scene.value.states.get(caravan.value.id)?.at ?? null) : null,
@@ -33,20 +29,10 @@ const headed = computed(() => {
   const ahead = orderOf(player.scene.value, caravan.value.id)
   return ahead[ahead.length - 1] ?? null
 })
-
-const picking = ref(false)
-const mayPick = computed(
-  () => !forPlayers.value && !!caravan.value && store.may('entitySettings', caravan.value),
-)
-const bust = computed(() => bustOf(caravan.value?.portrait))
-
-const pick = (id: string | null): void => {
-  if (caravan.value) store.setPortrait(caravan.value.id, id)
-}
 </script>
 
 <template>
-  <aside v-if="forPlayers || caravan" class="panel caravan" :class="{ collapsed }">
+  <aside v-if="forPlayers" class="panel caravan" :class="{ collapsed }">
     <header>
       <h2 class="title">
         <button
@@ -77,7 +63,7 @@ const pick = (id: string | null): void => {
       <p v-if="!caravan" class="dim empty">not travelling with a caravan</p>
 
       <template v-else>
-        <dl v-if="forPlayers" class="summary">
+        <dl class="summary">
           <dt>standing</dt>
           <dd>{{ standing ?? '—' }}</dd>
 
@@ -88,19 +74,6 @@ const pick = (id: string | null): void => {
           <dd>{{ caravan.pacePerTurn }} hex a turn</dd>
         </dl>
 
-        <div v-if="mayPick" class="row bust-row">
-          <span class="label">bust</span>
-          <button
-            type="button"
-            class="bust-choose"
-            :title="`choose a bust for ${caravan.name}`"
-            @click="picking = true"
-          >
-            <img v-if="bust" :src="bust.url" alt="" class="thumb" />
-            <span>{{ bust?.label ?? 'none' }}</span>
-          </button>
-        </div>
-
         <CaravanSupplies :caravan-id="caravan.id" />
 
         <InventoryList :owner-id="caravan.id" fold-key="caravan.inventory" />
@@ -110,7 +83,7 @@ const pick = (id: string | null): void => {
           <div class="section">
             <ul v-if="riders.length" class="list">
               <li v-for="rider in riders" :key="rider.id">
-                <div v-if="forPlayers && !store.may('order', rider)" class="rider">
+                <div v-if="!store.may('order', rider)" class="rider">
                   <span class="pip" :style="{ background: rider.color }" />
                   <span class="name">{{ rider.name }}</span>
                   <span class="label">{{ rider.kind }}</span>
@@ -119,12 +92,8 @@ const pick = (id: string | null): void => {
                   v-else
                   type="button"
                   :class="{ here: rider.id === store.selectedId }"
-                  :aria-current="forPlayers && rider.id === store.selectedId ? 'true' : undefined"
-                  :title="
-                    store.may('order', rider)
-                      ? `give ${rider.name} the orders`
-                      : `look at ${rider.name}; it is not yours to order`
-                  "
+                  :aria-current="rider.id === store.selectedId ? 'true' : undefined"
+                  :title="`give ${rider.name} the orders`"
                   @click="store.selectEntity(rider.id)"
                 >
                   <span class="pip" :style="{ background: rider.color }" />
@@ -140,14 +109,6 @@ const pick = (id: string | null): void => {
         <CaravanMerchants :caravan-id="caravan.id" />
       </template>
     </div>
-
-    <BustPicker
-      v-if="caravan && mayPick"
-      v-model:open="picking"
-      :name="caravan.name"
-      :current="caravan.portrait"
-      @pick="pick"
-    />
   </aside>
 </template>
 
@@ -246,12 +207,6 @@ header {
   font-size: 0.78rem;
 }
 
-.row {
-  display: flex;
-  justify-content: space-between;
-  gap: 1rem;
-}
-
 .label {
   color: var(--ink-dim);
 }
@@ -284,35 +239,6 @@ p {
 .empty {
   padding-top: 0.75rem;
   font-size: 0.78rem;
-}
-
-.bust-row {
-  align-items: center;
-  font-size: 0.78rem;
-}
-
-.bust-choose {
-  display: flex;
-  align-items: center;
-  gap: 0.4rem;
-  padding: 0.1rem 0.3rem;
-  border: 1px solid var(--line);
-  border-radius: 0.25rem;
-  background: none;
-  color: inherit;
-  font: inherit;
-  cursor: pointer;
-}
-
-.bust-choose:hover {
-  background: color-mix(in srgb, var(--line) 45%, transparent);
-}
-
-.thumb {
-  width: 2rem;
-  height: 1.5rem;
-  border-radius: 0.15rem;
-  object-fit: cover;
 }
 
 .list {

@@ -159,6 +159,8 @@ const HEX_MAP_FREE = new Set([
   'panelGone',
   'positionsAt',
   'recordsOn',
+  'adventureLogFor',
+  'hexesWalkedFor',
   'sightAt',
   'carrierOf',
   'ridersOf',

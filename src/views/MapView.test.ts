@@ -304,6 +304,24 @@ describe('MapView sub-panel columns', () => {
     expect(panels.stack.value).toEqual([{ kind: 'entity', id: caravan.id }])
   })
 
+  it('opens the caravan sheet beside the dock, its bust row in the card slot', async () => {
+    const { view } = mountAt(1600, true)
+    await openButton(view, 'Saltwind').trigger('click')
+    await nextTick()
+    const sheet = view.find('.subpanels aside')
+    expect(sheet.find('[data-testid="card-slot"] .bust-row').exists()).toBe(true)
+    // InventoryList is stubbed here.
+    expect(sheet.find('inventory-list-stub').exists()).toBe(true)
+    expect(sheet.findAll('.psec-name').map((one) => one.text())).toEqual([
+      'details',
+      'supplies',
+      'riders',
+      'merchants',
+      'adventure log',
+    ])
+    expect(view.find('.panels .bust-row').exists()).toBe(false)
+  })
+
   it('empties the stack on a dmView change, and players get no columns', async () => {
     const { view, store, party } = mountAt(1600)
     await openButton(view, 'Saltwind').trigger('click')
@@ -312,5 +330,122 @@ describe('MapView sub-panel columns', () => {
     await nextTick()
     expect(panels.stack.value).toEqual([])
     expect(openButton(view, party.name).exists()).toBe(false)
+  })
+})
+
+describe('MapView dock', () => {
+  const dockSections = (view: VueWrapper): string[] =>
+    view
+      .findAll('#panel-entities .psec-body')
+      .map((one) => one.attributes('id')!.replace(/^sec-/, ''))
+
+  it('gives the DM orders but no sheet: that opens in a sub-panel', async () => {
+    const { view, store, party } = mountAt(1600, true)
+    store.selectEntity(party.id)
+    await nextTick()
+    expect(dockSections(view)).toEqual(['entities-list', 'entities-orders', 'entities-paths'])
+    expect(view.find('#sec-entities-orders').text()).toContain('call off the order')
+    expect(view.find('#sec-entities-orders').text()).toContain('make camp this turn')
+  })
+
+  it('leaves the DM caravan panel out of the dock', () => {
+    const { view } = mountAt(1600, true)
+    const rows = (view.find('main').element as HTMLElement).style.getPropertyValue('--dock-rows')
+    expect(rows).toBe('2')
+  })
+
+  it('keeps the players their sheet in the dock, with orders of its own', async () => {
+    const { view, store, party } = mountAt(1600, true)
+    useDebugMode().value = true
+    store.selectEntity(party.id)
+    store.dmView = false
+    await nextTick()
+    expect(dockSections(view)).toEqual([
+      'entities-list',
+      'entities-orders',
+      'entities-selected',
+      'entities-paths',
+      'entities-log',
+    ])
+    const rows = (view.find('main').element as HTMLElement).style.getPropertyValue('--dock-rows')
+    expect(rows).toBe('2')
+  })
+})
+
+// The real caravan panel and inventory list, so the dock is checked as it renders.
+describe('MapView: an opened entity shows in one place only', () => {
+  const mountReal = (width: number) => {
+    setWidth(width)
+    const store = useHexMapStore()
+    store.setTiles(flatField(6))
+    const party = store.entities[0]
+    const caravan = store.addEntity('Saltwind', 'caravan')!
+    store.selectEntity(caravan.id)
+    store.select({ q: 0, r: 0 })
+    store.selectEntity(party.id)
+    store.select({ q: 2, r: 0 })
+    store.select({ q: 0, r: 0 })
+    store.advanceTurn()
+    store.advanceTurn()
+    store.addEntity('Old Ferris', 'npc')
+    store.addEntity('Gull', 'ship')
+    const stubs = STUBS.filter((name) => name !== 'CaravanPanel' && name !== 'InventoryList')
+    wrapper = mount(MapView, {
+      global: { stubs: Object.fromEntries(stubs.map((name) => [name, true])) },
+      attachTo: document.body,
+    })
+    return { view: wrapper, store, party, caravan }
+  }
+
+  const SHEETS: [string, (party: string) => string, string[]][] = [
+    ['party', (party) => party, ['details', 'inventory', 'adventure log']],
+    ['npc', () => 'Old Ferris', ['details']],
+    ['ship', () => 'Gull', ['details', 'inventory', 'riders']],
+    [
+      'caravan',
+      () => 'Saltwind',
+      ['details', 'supplies', 'inventory', 'riders', 'merchants', 'adventure log'],
+    ],
+  ]
+
+  describe.each([1280, 1600])('at %ipx, as DM', (width) => {
+    it.each(SHEETS)(
+      'opens a %s in its sub-panel and leaves the dock out of it',
+      async (_, nameOf, blocks) => {
+        const { view, store, party } = mountReal(width)
+        const name = nameOf(party.name)
+        await openButton(view, name).trigger('click')
+        await nextTick()
+        expect(store.selectedEntity?.name).toBe(name)
+
+        const sheet = view.find('.subpanels aside[data-level="1"]')
+        expect(sheet.find('#col-1-title').text()).toBe(name)
+        expect(sheet.findAll('.psec-name').map((one) => one.text())).toEqual(blocks)
+
+        const dock = view.find('.panels')
+        const dockIds = dock.findAll('[id^="sec-"]').map((one) => one.attributes('id')!)
+        for (const gone of ['entities-selected', 'entities-inventory', 'entities-log']) {
+          expect(dockIds.some((id) => id.startsWith(`sec-${gone}`))).toBe(false)
+        }
+        expect(dockIds.some((id) => /^sec-(person|caravan|ship|l\d)-/.test(id))).toBe(false)
+        expect(dock.find('#panel-caravan-head').exists()).toBe(false)
+        expect(dock.find('.bust-row').exists()).toBe(false)
+        expect(dock.find('.inventory').exists()).toBe(false)
+        expect(dock.findAll('.psec-name').map((one) => one.text())).not.toContain(name)
+
+        const headings = view.findAll('h2').filter((one) => one.text().includes(name))
+        expect(headings.map((one) => one.attributes('id'))).toEqual(['col-1-title'])
+      },
+    )
+  })
+
+  it('keeps the players their caravan panel in the dock, with no columns', async () => {
+    const { view, store } = mountReal(1600)
+    useDebugMode().value = true
+    store.dmView = false
+    await nextTick()
+    expect(view.find('.panels #panel-caravan-head').text()).toContain('Saltwind')
+    expect(view.find('.subpanels').exists()).toBe(false)
+    expect(openButton(view, 'Saltwind').exists()).toBe(false)
   })
 })

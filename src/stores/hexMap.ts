@@ -1696,29 +1696,34 @@ export const useHexMapStore = defineStore('hexMap', () => {
   }
 
   /**
-   * The selected entity's whole record, including turns the crawl has been
-   * wound back past: the log is what happened, not what has happened yet, and
-   * a row past the current turn is the way back to it.
+   * An entity's whole record, including turns the crawl has been wound back
+   * past: the log is what happened, not what has happened yet, and a row past
+   * the current turn is the way back to it.
    */
-  const journey = computed<JourneyRow[]>(() =>
-    recordsFor(selectedId.value, frames.value.length).map((record) => ({
+  const journeyFor = (id: string): JourneyRow[] =>
+    recordsFor(id, frames.value.length).map((record) => ({
       turn: record.turn,
       hex: record.to ?? record.from ?? ('0,0' as HexKey),
       terrain: tileAt(record.to ?? ('0,0' as HexKey))?.terrain ?? 'grass',
       kind: record.kind,
       entered: record.entered.length,
       spent: record.turn < turn.value,
-    })),
-  )
+    }))
+
+  const journey = computed<JourneyRow[]>(() => journeyFor(selectedId.value))
 
   /** The journey with the encounters met along it, kept like the turns over a rewind. */
+  const adventureLogFor = (id: string): LogEntry<JourneyRow>[] =>
+    interleave(journeyFor(id), encountersMet(events.value))
+
   const adventureLog = computed<LogEntry<JourneyRow>[]>(() =>
     interleave(journey.value, encountersMet(events.value)),
   )
 
-  const hexesWalked = computed(() =>
-    recordsFor(selectedId.value, turn.value).reduce((total, row) => total + row.entered.length, 0),
-  )
+  const hexesWalkedFor = (id: string): number =>
+    recordsFor(id, turn.value).reduce((total, row) => total + row.entered.length, 0)
+
+  const hexesWalked = computed(() => hexesWalkedFor(selectedId.value))
 
   const travelledKm = computed(() => hexesWalked.value * KM_PER_HEX)
 
@@ -2226,11 +2231,13 @@ export const useHexMapStore = defineStore('hexMap', () => {
     canRewind,
     journey,
     adventureLog,
+    adventureLogFor,
     shownEntities,
     tokens,
     positionsAt,
     recordsOn,
     hexesWalked,
+    hexesWalkedFor,
     travelledKm,
     terrain,
     setTerrain,

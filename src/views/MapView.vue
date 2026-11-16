@@ -188,7 +188,8 @@ const rendered = computed<Record<SidePanel, boolean>>(() => ({
   world: shapesWorld.value,
   entities: true,
   // The players' caravan panel is always there, empty when they travel with none.
-  caravan: forPlayers.value || !!shownCaravan.value,
+  // The DM's caravan opens as a sub-panel instead.
+  caravan: forPlayers.value,
   details: store.may('notes') && store.selectedHex !== null,
 }))
 const dockRows = computed(() => Object.values(rendered.value).filter(Boolean).length)
@@ -398,15 +399,13 @@ const straightLine = computed(() => (store.route ? `${store.route.steps * KM_PER
 /** A long crawl would otherwise hang hundreds of rows off the panel. */
 const TURNS_SHOWN = 40
 
+// The DM reads an entity's details, inventory and log in its sub-panel; the
+// players keep them in the dock until their character panel (ped.5) lands.
 // Newest first: the last turn is the one anybody is looking for.
 // The players' log stops at the turn the crawl stands at: a turn wound back
 // past is a future they have not walked, and their projection does not hold it.
-const adventureLog = computed(() =>
-  forPlayers.value ? player.adventureLog.value : store.adventureLog,
-)
-const hexesWalked = computed(() =>
-  forPlayers.value ? player.hexesWalked.value : store.hexesWalked,
-)
+const adventureLog = computed(() => player.adventureLog.value)
+const hexesWalked = computed(() => player.hexesWalked.value)
 
 const recentTurns = computed(() => {
   const from = Math.max(0, adventureLog.value.length - TURNS_SHOWN)
@@ -854,8 +853,30 @@ const olderTurns = computed(() => Math.max(0, adventureLog.value.length - TURNS_
             </ol>
           </PanelSection>
 
+          <!-- With route, as both act on the map's orders. -->
+          <PanelSection v-if="store.selectedEntity" fold-key="entities.orders" title="orders">
+            <div v-if="orderable" class="control stack">
+              <button
+                type="button"
+                :disabled="!store.goal || store.atSea(store.selectedId)"
+                :title="store.atSea(store.selectedId) ? 'no orders for a rider at sea' : undefined"
+                @click="store.clear"
+              >
+                call off the order
+              </button>
+              <button
+                type="button"
+                :disabled="!store.start"
+                @click="store.queueAction(store.selectedId, { kind: 'camp' })"
+              >
+                make camp this turn
+              </button>
+            </div>
+            <p v-else class="dim">not yours to order</p>
+          </PanelSection>
+
           <PanelSection
-            v-if="store.selectedEntity"
+            v-if="forPlayers && store.selectedEntity"
             fold-key="entities.selected"
             :title="store.selectedEntity.name"
           >
@@ -917,31 +938,11 @@ const olderTurns = computed(() => Math.max(0, adventureLog.value.length - TURNS_
                   @change="onDarkvision"
                 />
               </label>
-              <template v-if="orderable">
-                <button
-                  type="button"
-                  :disabled="!store.goal || store.atSea(store.selectedId)"
-                  :title="
-                    store.atSea(store.selectedId) ? 'no orders for a rider at sea' : undefined
-                  "
-                  @click="store.clear"
-                >
-                  call off the order
-                </button>
-                <button
-                  type="button"
-                  :disabled="!store.start"
-                  @click="store.queueAction(store.selectedId, { kind: 'camp' })"
-                >
-                  make camp this turn
-                </button>
-              </template>
-              <p v-else class="dim">not yours to order</p>
             </div>
           </PanelSection>
 
           <InventoryList
-            v-if="ownInventory"
+            v-if="forPlayers && ownInventory"
             :owner-id="ownInventory.id"
             fold-key="entities.inventory"
           />
@@ -958,7 +959,11 @@ const olderTurns = computed(() => Math.max(0, adventureLog.value.length - TURNS_
             </label>
           </PanelSection>
 
-          <PanelSection v-if="adventureLog.length" fold-key="entities.log" title="adventure log">
+          <PanelSection
+            v-if="forPlayers && adventureLog.length"
+            fold-key="entities.log"
+            title="adventure log"
+          >
             <template #meta>{{ hexesWalked * KM_PER_HEX }} km</template>
             <div class="control stack">
               <div class="row">
