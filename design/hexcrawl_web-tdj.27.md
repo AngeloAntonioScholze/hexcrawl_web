@@ -1,22 +1,29 @@
 # hexcrawl_web-tdj.27: DM controls for owner, hidden and hostile
 
-Status: spec, 2026-11-16. **Spec only.** Written against main `ad1cd27`, with the store actions as built in the tdj.30 worktree (`setEntityOwner`, `setEntityHidden`, `setEntityHostile`) and the details section of `EntitySubPanel.vue` as built in the ped.25 worktree.
+Status: spec, 2026-11-16, amended 2026-11-16 for decisions tdj.35 (b), tdj.37 (a), tdj.38 (b). **Spec only.** Written against main `ad1cd27`, with the store actions as built in the tdj.30 worktree (`setEntityOwner`, `setEntityHidden`, `setEntityHostile`), the hostile rule of tdj.41, and the details section of `EntitySubPanel.vue` as built in the ped.25 worktree.
 
 Builds on:
 - `design/hexcrawl_web-ped.12.md`, "Entity sub-panel": row 1 `details`
 - `design/hexcrawl_web-1a1.10.md`, "Frame colour rule"
-- bead tdj.30 notes (actions and their rules), decision tdj.35 (hostile is DM-only, default (a))
+- bead tdj.30 notes (actions and their rules)
+- decisions (user, 2026-11-16): tdj.35 **(b)** players see hostile (the projection sends it); tdj.37 **(a)** hostile toggle on all four kinds; tdj.38 **(b)** a player-owned entity may not be hostile
+- bead tdj.41 (store and projection side of those decisions; this component depends on it)
 
 ## Goal
 For the DM, in an entity's sub-panel. Today the only way to get a DM-owned npc (bronze frame) or a hidden one (crimson) is imported data. The one action: **decide who an entity belongs to and whether the players see it, or see it as a foe**, in one place, with the card above recolouring as feedback.
 
-## Store contract (tdj.30, do not change here)
+## Invariant (tdj.41)
+`hidden` and `hostile` are DM-only states: **an entity with `owner === 'player'` always has `hidden: false` and `hostile: false`**. The store enforces it; this component mirrors it (both checkboxes disabled for a player-owned entity, with a hint each).
+
+## Store contract (tdj.30 + tdj.41, do not change here)
 | action | gate | effect | undo |
 |---|---|---|---|
-| `setEntityOwner(id, 'player')` | `may('assignEntity')` | `owner: 'player', hidden: false` | no, clears history |
-| `setEntityOwner(id, 'dm')` | `may('assignEntity')` | `owner: 'dm'`, unseats any player (`assignSeat(…, null)`); `hidden` unchanged (stays false) | no, clears history |
-| `setEntityHidden(id, b)` | `may('entitySettings', e)` | refused unless `owner === 'dm'` | yes |
-| `setEntityHostile(id, b)` | `may('entitySettings', e)` | `hostile: b`, any owner, any kind | yes |
+| `setEntityOwner(id, 'player')` | `may('assignEntity')` | `owner: 'player', hidden: false, hostile: false` | no, clears history |
+| `setEntityOwner(id, 'dm')` | `may('assignEntity')` | `owner: 'dm'`, unseats any player (`assignSeat(…, null)`); `hidden` and `hostile` unchanged (both stay false) | no, clears history |
+| `assignEntity(id, player)` (dock's `played by`) | `may('assignEntity')` | `owner: 'player', hidden: false, hostile: false` | as today |
+| `setEntityHidden(id, b)` | `may('entitySettings', e)` | `hidden: b`; refused unless `owner === 'dm'` | yes |
+| `setEntityHostile(id, b)` | `may('entitySettings', e)` | `hostile: b`; refused unless `owner === 'dm'`; any kind | yes |
+| projection `asPlayersSeeIt` | n/a | sends `hostile` as is for visible entities; hidden entities still not sent | n/a |
 
 ## Component: `src/components/EntityDmControls.vue` (new)
 ```ts
@@ -38,7 +45,7 @@ Until then the component is built and tested standalone.
 | hidden | yes | yes | yes | yes |
 | hostile | yes | yes | **yes** | **yes** |
 
-Hostile on caravans and ships (designer's call): raider wagon trains and pirate ships are hexcrawl staples; `Entity.hostile` exists on every kind and `frameVariant` checks `hidden || hostile` before the carrier rule, so a hostile ship gets the crimson frame with no extra rule. Hiding the toggle for carriers would leave the field unreachable for no gain. If the user wants it narrower, it is one `v-if` (open question Q1).
+Hostile on caravans and ships: **decided, tdj.37 (a)**. Raider wagon trains and pirate ships are hexcrawl staples; `Entity.hostile` exists on every kind and `frameVariant` checks `hidden || hostile` before the carrier rule, so a hostile ship gets the crimson frame with no extra rule. On every kind the hidden and hostile rows are disabled while `owner === 'player'`.
 
 ### Layout
 Root `<div class="dm-controls">`, scoped styles of its own (EntitySubPanel's scoped `.row` rules reach only this root, not its children; memory `hexcrawl-web-vue-gotcha-scoped-styles-in-a`). Values copied from ped.25's details rows so the block reads as part of the same list:
@@ -50,8 +57,10 @@ Root `<div class="dm-controls">`, scoped styles of its own (EntitySubPanel's sco
  hidden                          [ ]
  players' entities are always on the map   (when owner = player)
  hostile                         [ ]
- only you see it
+ players see it as a foe                   (when owner = dm)
+ players' entities are never hostile       (when owner = player)
 ```
+Exactly one hint shows under the hostile row: the first when the owner is dm, the second when it is player.
 - `.dm-controls`: `display: flex; flex-direction: column; gap: 0.4rem; margin-top: 0.2rem; padding-top: 0.6rem; border-top: 1px solid var(--line); font-size: 0.78rem`. Inside the parent stack its own gap (0.4rem) sits above the divider.
 - `.row`: `display: flex; justify-content: space-between; align-items: center; gap: 1rem`. Label text `span` in `--ink-dim`.
 - `select`: `flex: 0 1 8rem; min-width: 0; padding: 0.3rem; border: 1px solid var(--line); border-radius: 0.35rem; background: var(--surface); color: var(--ink); font: inherit` (as the dock's `played by` select).
@@ -65,11 +74,19 @@ Root `<div class="dm-controls">`, scoped styles of its own (EntitySubPanel's sco
 On `change`:
 | from → to | seated? (`playerOf(id) !== null`) | result |
 |---|---|---|
-| dm → player | n/a | `setEntityOwner(id, 'player')` at once. If it was hidden it now shows on the players' map (see hint) |
+| dm → player | n/a | `setEntityOwner(id, 'player')` at once, no dialog. Hidden and hostile are both cleared (see hint); both checkboxes turn unchecked and disabled |
 | player → dm | no | `setEntityOwner(id, 'dm')` at once |
 | player → dm | yes | **confirm dialog** first (below). The select shows `player` again until confirmed: reset `select.value = entity.owner` in the handler, as `CardTally.onChange` resets its input |
 
-Hint under the owner row, only when `owner === 'dm' && hidden`: `handing it to the players also shows it on their map`. `id="dm-{entity.id}-owner-hint"`, `aria-describedby` on the select.
+Hint under the owner row, only when `owner === 'dm'` and at least one of `hidden`, `hostile` is true. Copy by state:
+| hidden | hostile | owner hint |
+|---|---|---|
+| true | false | `handing it to the players also shows it on their map` |
+| false | true | `handing it to the players also clears hostile` |
+| true | true | `handing it to the players shows it on their map and clears hostile` |
+| false | false | no hint |
+
+`id="dm-{entity.id}-owner-hint"`, `aria-describedby` on the select only while the hint renders.
 
 #### Confirm dialog (player → dm, seated)
 `PopupDialog` (existing), `v-model` local `confirming`.
@@ -87,8 +104,11 @@ Hint under the owner row, only when `owner === 'dm' && hidden`: `handing it to t
 - Hint under it, only while disabled: `players' entities are always on the map`. `id="dm-{entity.id}-hidden-hint"`, `aria-describedby` on the checkbox.
 
 ### Hostile row
-`<label class="row">` with `<span>hostile</span>` and `<input type="checkbox" :checked="entity.hostile" aria-label="hostile to the players">`; `@change` → `setEntityHostile(id, checked)`. Never disabled.
-- Hint under it, always (decision tdj.35 (a)): `only you see it`. `id="dm-{entity.id}-hostile-hint"`, `aria-describedby` on the checkbox.
+`<label class="row">` with `<span>hostile</span>` and `<input type="checkbox" :checked="entity.hostile" aria-label="hostile to the players">`; `@change` → `setEntityHostile(id, checked)`.
+- **Disabled when `owner === 'player'`** (decision tdj.38 (b); the store refuses it anyway). Exactly as the hidden row: `disabled` on the input, label `span` keeps `--ink-dim`, row `cursor: default`, checkbox `cursor: not-allowed`. It is unchecked then (the invariant).
+- Hint under it, always one of two, same `id="dm-{entity.id}-hostile-hint"`, `aria-describedby` on the checkbox in both states:
+  - owner dm (enabled): `players see it as a foe` (decision tdj.35 (b)).
+  - owner player (disabled): `players' entities are never hostile`.
 
 ### States
 | state | owner select | hidden checkbox | hostile checkbox |
@@ -97,7 +117,7 @@ Hint under the owner row, only when `owner === 'dm' && hidden`: `handing it to t
 | hover | `border-color: var(--accent)` | native | native |
 | focus-visible | `outline: 2px solid var(--accent); outline-offset: 1px` | same | same |
 | active | native | native | native |
-| disabled | never | owner = player, with hint | never |
+| disabled | never | owner = player, unchecked, with hint | owner = player, unchecked, with hint |
 | confirm pending | shows the current owner (`player`) | unchanged | unchanged |
 | loading, empty, error | none: synchronous store data; the component is not rendered for players (`v-if` on `may('assignEntity')`) | | |
 
@@ -108,33 +128,35 @@ if (entity.hidden || entity.hostile) return 'crimson'
 if (entity.kind === 'caravan' || entity.kind === 'ship') return 'bronze'
 return entity.owner === 'player' ? 'steel' : 'bronze'
 ```
-What each control does to the card in the slot above (DM view; it re-renders from the same reactive entity, no extra wiring):
+What each control does to the card in the slot above (DM view; it re-renders from the same reactive entity, no extra wiring). Hidden and hostile toggles exist only for dm-owned entities, so there is no player-owned crimson row:
 | action | party / npc | caravan / ship |
 |---|---|---|
-| owner dm → player (not hostile) | crimson or bronze → **steel** (hidden is cleared) | crimson → bronze, or stays bronze |
-| owner player → dm (not hostile) | steel → **bronze** | stays bronze |
-| hidden on | → **crimson** | → **crimson** |
+| owner dm → player | crimson or bronze → **steel** (hidden and hostile are cleared) | crimson → bronze, or stays bronze |
+| owner player → dm | steel → **bronze** (never hidden or hostile at that point) | stays bronze |
+| hidden on (dm-owned) | → **crimson** | → **crimson** |
 | hidden off, not hostile | → bronze | → bronze |
-| hostile on | → **crimson**, any owner | → **crimson** |
-| hostile off, not hidden | → steel (player) or bronze (dm) | → bronze |
+| hostile on (dm-owned) | → **crimson** | → **crimson** |
+| hostile off, not hidden | → bronze | → bronze |
 
-A player-owned hostile party shows crimson to the DM and loses the steel "player" cue; the plate's `played by {name}` line still says who plays it. Accepted.
+The same applies through the dock's `played by` select: `assignEntity` clears both flags, so a crimson npc handed to a player turns steel.
 
-### Under tdj.35 option (b) (players see hostile)
-- Projection keeps `hostile`; a visible hostile entity is crimson in the player view too.
-- Hostile hint copy becomes `players see it as a foe`. Nothing else in this component changes.
-- Note: players get no columns (ped.18) and their dock cards show only their own character and caravan (ped.6, ped.7), so under (b) a player would see crimson only on a hostile entity they play or ride with, until some bead shows other entities' cards to players. Hidden entities stay out of the projection either way.
+### Player view (tdj.35 (b))
+- The projection sends `hostile`; a **visible hostile entity is crimson in the player view too**. Hidden entities stay out of the projection.
+- Since a hostile entity is always dm-owned (tdj.38 (b)), players never see their own character or caravan in crimson. Players get no columns (ped.18) and their dock cards show only their own character and caravan (ped.6, ped.7), so a player sees hostile crimson wherever a dm-owned entity's card is shown to them (the sub-panel of a selected visible entity, if the player view opens one) and nowhere else, until a bead shows other entities' cards to players.
 
 ## Copy (English only, lowercase)
 - Row labels: `owner`, `hidden`, `hostile`. Options: `player`, `dm`.
 - Accessible names: `who the entity belongs to`, `kept off the players' map`, `hostile to the players`.
-- Hints: `handing it to the players also shows it on their map`; `players' entities are always on the map`; `only you see it` ((b): `players see it as a foe`).
+- Owner hints: `handing it to the players also shows it on their map` (hidden); `handing it to the players also clears hostile` (hostile); `handing it to the players shows it on their map and clears hostile` (both).
+- Hidden hint: `players' entities are always on the map` (owner player).
+- Hostile hints: `players see it as a foe` (owner dm); `players' entities are never hostile` (owner player).
+- `only you see it` is retired (it was the tdj.35 (a) copy).
 - Dialog: title `take {name} from {player}?`; body `{player} plays {name} now. making it a dm entity takes it off their seat, and undo can't bring it back.`; buttons `keep it with {player}`, `take it`.
 
 ## Accessibility
 - Contrast: existing pairs only (`tokens.md`): `--ink-dim` labels and hints on `--surface-raised` 5.2:1, `--danger` on `--surface-raised` 5.6:1, `--accent` focus ring 6.1:1.
-- Every control has a visible label (the wrapping `label`) and an accessible name; hints are tied with `aria-describedby`. A disabled checkbox's reason is in its description, not only in its look.
-- Focus order: after darkvision: owner select, hidden checkbox (skipped by Tab while disabled), hostile checkbox. In the dialog: `keep it with …` first, then `take it`, then `×`.
+- Every control has a visible label (the wrapping `label`) and an accessible name; hints are tied with `aria-describedby`. A disabled checkbox's reason is in its description, not only in its look (both hidden and hostile).
+- Focus order: after darkvision: owner select, hidden checkbox, hostile checkbox. For a player-owned entity both checkboxes are disabled and skipped by Tab, so Tab goes from the owner select to whatever follows the block. In the dialog: `keep it with …` first, then `take it`, then `×`.
 - Keyboard: select with arrows (change fires as native), Space toggles checkboxes, Escape cancels the dialog only (ped.12: Escape inside an open `<dialog>` does not close the sub-panel).
 - Reduced motion: nothing animates.
 - No images.
@@ -142,26 +164,30 @@ A player-owned hostile party shows crimson to the DM and loses the steel "player
 ## Tests: `src/components/EntityDmControls.test.ts` (happy-dom, pinia as `SubPanelStack.test.ts`)
 `describe('the dm controls')`, DM store, entity mounted as a prop:
 1. Renders the three rows for each of party, npc, caravan, ship.
-2. Owner `dm → player` calls through: entity is `owner: 'player', hidden: false` afterwards.
+2. Owner `dm → player` on a hidden, hostile dm entity calls through: entity is `owner: 'player', hidden: false, hostile: false` afterwards, and both checkboxes are unchecked and disabled.
 3. Owner `player → dm` with no seat changes at once, no dialog.
 4. Owner `player → dm` while seated opens the dialog; the select still reads `player`; `keep it with …` leaves owner and seat as they were; `take it` sets `owner: 'dm'` and `playerOf(id)` is null.
-5. Hidden checkbox is disabled with the hint when owner is player; enabled when dm, and toggling sets `hidden`.
-6. Hostile toggles `hostile` for a player-owned and a dm-owned entity.
-7. The owner hint shows only for a hidden dm entity.
+5. Hidden checkbox is disabled with the hint `players' entities are always on the map` when owner is player; enabled when dm, and toggling sets `hidden`.
+6. Hostile checkbox is disabled with the hint `players' entities are never hostile` when owner is player; enabled with the hint `players see it as a foe` when dm, and toggling sets `hostile`.
+7. The owner hint shows only for a dm entity that is hidden, hostile or both, with the copy of the owner-hint table for each of the three cases; none for a plain dm entity or any player entity.
 8. Ids are unique per entity (two components for two entities: no duplicate `id` attributes).
-`frameVariant` cases for hostile belong to tdj.30.
+Store refusal and clearing (`setEntityHostile` on a player entity, `setEntityOwner`/`assignEntity` clearing hostile), the projection sending `hostile`, and `frameVariant` cases belong to tdj.41 and tdj.30, not here.
 
 ## UI review checklist
 In a level-1 sub-panel at 1280x800 and 1600x900, and stacked at 768 and 360:
 - The block sits at the end of `details`, under darkvision, behind a 1px divider, rows aligned with the rows above.
-- For each kind: toggling hidden and hostile recolours the card per the table; owner switches recolour per the table.
+- For each kind (dm-owned): toggling hidden and hostile recolours the card per the table; owner switches recolour per the table.
+- A hidden + hostile dm npc: owner hint reads `handing it to the players shows it on their map and clears hostile`; switching to `player` turns the card steel and leaves both checkboxes unchecked and disabled.
 - A seated party set to `dm`: dialog with the player's name, focus on `keep it with …`; Escape keeps it; `take it` unseats (the plate reads `dm`).
-- Player-owned: hidden disabled with its hint.
-- Player view (debug toggle): no DM controls; a hostile npc is not crimson (tdj.35 (a)).
+- Player-owned, every kind: hidden disabled with `players' entities are always on the map`, hostile disabled with `players' entities are never hostile`; Tab skips both.
+- Dm-owned: hostile hint reads `players see it as a foe`.
+- Player view (debug toggle): no DM controls; a visible hostile dm npc **is crimson** wherever its card shows (tdj.35 (b)); a hidden one is not on the map at all.
 
 ## Assets
 None.
 
 ## Open questions
-- **Q1, hostile on carriers**: (a) show hostile on all four kinds [default: pirate ships, raider caravans]; (b) party and npc only, as tdj.30's description first said.
-- **Q2, hostile on player-owned entities**: (a) allowed, any owner [default: the store allows it; a charmed or turned party is a table case]; (b) disable hostile when owner is player and clear it on `owner → player` (needs a tdj.30 store change).
+None open. Resolved 2026-11-16 by the user:
+- **Q1, hostile on carriers** (decision tdj.37): **(a)**, the hostile toggle shows on all four kinds.
+- **Q2, hostile on player-owned entities** (decision tdj.38): **(b)**, a player-owned entity may not be hostile; the toggle is disabled for it, and handing an entity to a player clears hostile (store side in tdj.41).
+- **Players see hostile** (decision tdj.35): **(b)**, the projection sends `hostile`; hint copy `players see it as a foe`.
