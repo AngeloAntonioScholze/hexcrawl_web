@@ -1,4 +1,5 @@
 import { defineStore } from 'pinia'
+import posthog from 'posthog-js'
 import { computed, ref, shallowRef, watch, type WatchHandle } from 'vue'
 import * as room from '../session/admission'
 import { MAX_NAME_LENGTH, type SessionMessage } from '../session/messages'
@@ -157,6 +158,12 @@ export const askingOf = (state: room.Admission): Asking[] =>
 
 const cleanName = (name: string, fallback: string): string =>
   name.trim().slice(0, MAX_NAME_LENGTH).trim() || fallback
+
+const capture = (event: string): void => {
+  if (import.meta.env.VITE_POSTHOG_PROJECT_TOKEN && import.meta.env.VITE_POSTHOG_HOST) {
+    posthog.capture(event)
+  }
+}
 
 /** This tab's live room, as host or guest, and who else is in it. */
 export const useSessionStore = defineStore('session', () => {
@@ -361,6 +368,7 @@ export const useSessionStore = defineStore('session', () => {
       case 'welcome':
         admission.value = 'admitted'
         stopRetrying()
+        capture('session_joined')
         break
       case 'seat':
         useHexMapStore().seatedIds = message.entityIds
@@ -387,12 +395,18 @@ export const useSessionStore = defineStore('session', () => {
 
   const accept = (peerId: string): void => {
     const decision = room.accept(door.value, peerId)
-    if (decision) reply(decision, peerId)
+    if (decision) {
+      reply(decision, peerId)
+      capture('session_join_approved')
+    }
   }
 
   const decline = (peerId: string): void => {
     const decision = room.decline(door.value, peerId)
-    if (decision) reply(decision, peerId)
+    if (decision) {
+      reply(decision, peerId)
+      capture('session_join_declined')
+    }
   }
 
   /**
@@ -470,7 +484,10 @@ export const useSessionStore = defineStore('session', () => {
       }
       session = opened
       code.value = opened.code
-      if (as === 'host') rememberRoom(opened.code)
+      if (as === 'host') {
+        rememberRoom(opened.code)
+        capture('session_hosted')
+      }
     } catch (caught) {
       if (mine === run) fail(caught instanceof SessionError ? reasonFor(caught.type) : 'unknown')
     }

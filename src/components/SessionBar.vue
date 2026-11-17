@@ -1,5 +1,6 @@
 <script setup lang="ts">
 import { computed, ref } from 'vue'
+import posthog from 'posthog-js'
 import { useStage } from '../composables/useStage'
 import { codeSuffix, roomLink, useSessionStore } from '../stores/session'
 import PopupDialog from './PopupDialog.vue'
@@ -40,6 +41,9 @@ const remove = (): void => {
 const checked = (event: Event): boolean => (event.target as HTMLInputElement).checked
 
 const leave = async (): Promise<void> => {
+  if (import.meta.env.VITE_POSTHOG_PROJECT_TOKEN && import.meta.env.VITE_POSTHOG_HOST) {
+    posthog.capture('session_left')
+  }
   session.leave()
   stage.veiled.value = true
   await stage.zoomOut()

@@ -1,5 +1,6 @@
 <script setup lang="ts">
 import { computed, ref, watch } from 'vue'
+import posthog from 'posthog-js'
 import type { EncounterRoll } from '../encounters/tables'
 import type { HexKey } from '../hex'
 import { useHexMapStore } from '../stores/hexMap'
@@ -34,6 +35,9 @@ const dismiss = (): void => {
 const accept = (): void => {
   if (!roll.value) return
   store.acceptEncounter(props.hex, roll.value.entry)
+  if (import.meta.env.VITE_POSTHOG_PROJECT_TOKEN && import.meta.env.VITE_POSTHOG_HOST) {
+    posthog.capture('encounter_accepted')
+  }
   roll.value = undefined
 }
 </script>

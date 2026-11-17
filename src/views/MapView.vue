@@ -1,5 +1,6 @@
 <script setup lang="ts">
 import { computed, nextTick, onBeforeUnmount, onMounted, ref, watch, watchEffect } from 'vue'
+import posthog from 'posthog-js'
 import CaravanPanel from '../components/CaravanPanel.vue'
 import DayNightDial from '../components/DayNightDial.vue'
 import DmToolbar from '../components/DmToolbar.vue'
@@ -110,6 +111,17 @@ const onZoomLimit = (event: Event): void => {
 
 const resourceCounts = computed(() => countByOrigin(store.resources))
 
+const capture = (event: string): void => {
+  if (import.meta.env.VITE_POSTHOG_PROJECT_TOKEN && import.meta.env.VITE_POSTHOG_HOST) {
+    posthog.capture(event)
+  }
+}
+
+const reseedWorld = (): void => {
+  store.reseed()
+  capture('world_reseeded')
+}
+
 const generateResources = (): void => {
   const generated = resourceCounts.value.generated
   if (
@@ -118,6 +130,7 @@ const generateResources = (): void => {
   )
     return
   store.generateResources()
+  capture('resources_generated')
 }
 
 const onTerrain = (key: 'scale' | 'seaLevel' | 'relief', event: Event): void => {
@@ -137,6 +150,7 @@ const exportMap = (): void => {
   link.href = url
   link.download = `hexcrawl-${store.terrain.seed}${MAP_FILE_EXTENSION}`
   link.click()
+  capture('map_exported')
   // Revoked a tick later: some browsers start the download only after click returns.
   setTimeout(() => URL.revokeObjectURL(url), 0)
 }
@@ -158,12 +172,15 @@ const importMap = async (event: Event): Promise<void> => {
   }
   importError.value = null
   if (library.maps.length > 0) {
+    const previousMapId = library.currentId
     await library.importMap(file.name, result.snapshot)
+    if (library.currentId !== previousMapId) capture('map_imported')
     return
   }
   // Without storage there is no list to add it to, only the one map to replace.
   if (!window.confirm(`Replace the current map with ${file.name}? This cannot be undone.`)) return
   store.restore(result.snapshot)
+  capture('map_imported')
 }
 
 const worldSizes = Object.keys(WORLD_SIZES) as WorldSize[]
@@ -474,7 +491,7 @@ const olderTurns = computed(() => Math.max(0, adventureLog.value.length - TURNS_
                 <span>seed</span>
                 <span class="value">{{ store.terrain.seed }}</span>
               </div>
-              <button type="button" @click="store.reseed">roll a new world</button>
+              <button type="button" @click="reseedWorld">roll a new world</button>
 
               <div class="row">
                 <span>world size</span>
