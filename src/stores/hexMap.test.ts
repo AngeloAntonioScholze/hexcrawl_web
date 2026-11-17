@@ -1056,16 +1056,18 @@ describe('entities', () => {
     expect(store.selectedEntity?.name).toBe('the party')
   })
 
-  it.each(['party', 'npc', 'caravan', 'ship'] as const)(
-    'names an unnamed %s after its kind',
-    (kind) => {
-      const store = setup()
+  it.each([
+    ['party', 'party 2'],
+    ['npc', 'npc 2'],
+    ['caravan', 'caravan 2'],
+    ['ship', 'ship 2'],
+  ] as const)('names an unnamed %s %s', (kind, expected) => {
+    const store = setup()
 
-      const made = store.addEntity(undefined, kind)!
+    const made = store.addEntity(undefined, kind)!
 
-      expect(made.name).toBe(`${kind} ${store.entities.length}`)
-    },
-  )
+    expect(made.name).toBe(expected)
+  })
 
   it('moves everybody on the same turn', () => {
     const store = setup()
