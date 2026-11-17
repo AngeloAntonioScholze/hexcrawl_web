@@ -187,4 +187,21 @@ describe('EntitySubPanel', () => {
     await nextTick()
     expect(wrapper.find('.dm-controls').exists()).toBe(false)
   })
+
+  it('shows the DM caravan compact merchant rows, a click opening level 2', async () => {
+    const { store, caravan } = boarded()
+    const merchant = store.addMerchant(caravan.id, 'smith', 'Brann', 3)!
+    panels.clear()
+    panels.open({ kind: 'entity', id: caravan.id }, 0)
+    const wrapper = mountPanel(store.entities.find((one) => one.id === caravan.id)!)
+    const row = wrapper.get('button.merchant')
+    expect(row.text()).toContain('lv 3')
+    expect(wrapper.find('.stepper').exists()).toBe(false)
+    expect(wrapper.text()).not.toContain('nothing offered yet')
+    await row.trigger('click')
+    expect(panels.stack.value).toEqual([
+      { kind: 'entity', id: caravan.id },
+      { kind: 'merchant', id: merchant.id },
+    ])
+  })
 })

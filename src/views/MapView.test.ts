@@ -296,6 +296,26 @@ describe('MapView sub-panel columns', () => {
     expect(panels.stack.value).toEqual([{ kind: 'entity', id: caravan.id }])
   })
 
+  it.each([1600, 1280, 1024])(
+    'focuses the level-1 title when its merchant is let go at %ipx',
+    async (width) => {
+      const { view, caravan, store } = mountAt(width)
+      const merchant = store.addMerchant(caravan.id, 'smith', 'Brann')!
+      panels.open({ kind: 'entity', id: caravan.id }, 0)
+      panels.open({ kind: 'merchant', id: merchant.id }, 1)
+      await nextTick()
+      await nextTick()
+      const go = view.find('.subpanels button.go')
+      ;(go.element as HTMLElement).focus()
+      expect(document.activeElement).toBe(go.element)
+      await go.trigger('click')
+      await nextTick()
+      await nextTick()
+      expect(panels.stack.value).toEqual([{ kind: 'entity', id: caravan.id }])
+      expect(document.activeElement?.id).toBe('col-1-title')
+    },
+  )
+
   it('closes level 2 when the rider is not aboard the level-1 entity', async () => {
     const { caravan, party } = mountAt(1600)
     panels.open({ kind: 'entity', id: caravan.id }, 0)

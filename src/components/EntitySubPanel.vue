@@ -7,10 +7,10 @@ import { carriesInventory } from '../entities/inventory'
 import { MAX_SIGHT, MIN_SIGHT, PACE_LIMITS, useHexMapStore } from '../stores/hexMap'
 import { KM_PER_HEX } from '../terrain/travel'
 import BustPicker from './BustPicker.vue'
-import CaravanMerchants from './CaravanMerchants.vue'
 import CaravanSupplies from './CaravanSupplies.vue'
 import EntityDmControls from './EntityDmControls.vue'
 import InventoryList from './InventoryList.vue'
+import MerchantRows from './MerchantRows.vue'
 import PanelSection from './PanelSection.vue'
 import SubPanelFrame from './SubPanelFrame.vue'
 
@@ -218,8 +218,7 @@ const olderTurns = computed(() => Math.max(0, adventureLog.value.length - TURNS_
       <p v-else class="dim">nobody aboard</p>
     </PanelSection>
 
-    <!-- ped.26 swaps in MerchantRows for the DM here. -->
-    <CaravanMerchants v-if="isCaravan" :caravan-id="entity.id" />
+    <MerchantRows v-if="isCaravan" :caravan-id="entity.id" />
 
     <PanelSection
       v-if="adventureLog.length"
