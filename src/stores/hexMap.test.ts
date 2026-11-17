@@ -1056,6 +1056,17 @@ describe('entities', () => {
     expect(store.selectedEntity?.name).toBe('the party')
   })
 
+  it.each(['party', 'npc', 'caravan', 'ship'] as const)(
+    'names an unnamed %s after its kind',
+    (kind) => {
+      const store = setup()
+
+      const made = store.addEntity(undefined, kind)!
+
+      expect(made.name).toBe(`${kind} ${store.entities.length}`)
+    },
+  )
+
   it('moves everybody on the same turn', () => {
     const store = setup()
     const scout = store.addEntity('the scout')!

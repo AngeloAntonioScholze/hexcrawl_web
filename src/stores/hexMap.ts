@@ -582,7 +582,7 @@ export const useHexMapStore = defineStore('hexMap', () => {
   ): Entity | null => {
     if (!may('addEntity')) return null
     const made = newEntity(
-      name ?? `party ${entities.value.length + 1}`,
+      name ?? `${kind} ${entities.value.length + 1}`,
       entities.value.length,
       kind,
       owner,
