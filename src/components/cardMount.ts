@@ -5,7 +5,6 @@ export const hexes = (count: number): string => `${count} ${count === 1 ? 'hex' 
 export interface PlateFacts {
   dmView: boolean
   owner: Entity['owner']
-  /** Who is seated at the entity, if anyone. */
   player: string | null
   /** The carrier's name while it rides in one. */
   riding: string | null
