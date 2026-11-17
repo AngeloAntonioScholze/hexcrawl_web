@@ -2,7 +2,6 @@
 
 Living project doc for agents and feature lookups. Update `## Features` and `## Decisions` in the same commit as the feature (`/feature-doc`). Tasks live in the root beads DB under label `repo:hexcrawl_web`.
 
-- 2026-11-15: Card frame is the supplied raster art (webp frame + png window mask per tone), not generated SVG. Why: the user rejected the hand-built SVG look (2026-11-14). Consequence: fixed aspect, 1x resolution (soft on HiDPI); window mask coordinates are coupled to `CharacterCard.vue` CSS and `FRAME_ART` regions; record provenance in `src/assets/frames/SOURCE.md` and `docs/ASSETS.md` when a frame changes.
 ## Purpose
 3D hexcrawl sandbox in the browser. A DM and players run hexcrawl-style tabletop RPG maps together: 3D hex terrain, party movement, fog of war, day/night clock, caravans and merchants, encounters, live sessions over WebRTC.
 
@@ -41,6 +40,7 @@ src/
   composables/  view glue: useHexWindow, usePlayerView, useViewMode, useZoomLimit, useUndoKeys
   components/   panels: Caravan*, HexDetails/*, DmToolbar, MiniMap, SessionBar, Enter/Host/Join
   views/        MapView.vue
+  analytics/    the only module that imports posthog-js (consent-gated)
 docs/reference/ art references
 ```
 - **Windowed world**: the grid draws only a viewport-sized window of a large world (`engine/hexWindow.ts`, `composables/useHexWindow.ts`).
@@ -67,6 +67,8 @@ docs/reference/ art references
 - Test files live next to their source. Match the surrounding code and comment style.
 - Component tests use `@vue/test-utils` + happy-dom (devDeps), enabled per file with `// @vitest-environment happy-dom`.
 - `session.test.ts` runs every fake session through one shared outbox, so every session store a test creates must come from the file's `useSessionStore` wrapper, which the root `beforeEach` teardown leaves. A store left hosting keeps its 100 ms broadcast coalescer (`stateSync.ts` `createCoalescer`) on a real timer, which later drops a stray patch into another test's outbox (seen as flaky "the map over the wire" tests, projects-jww).
+- **UI copy and titles are sentence case** ("Usage stats", "Share stats" / "Don't share").
+- **Analytics**: capture only through `src/analytics`, never import `posthog-js` elsewhere. Event props are controlled enums: no PII, no free text, no map content. Never add per-frame capture.
 - More gotchas are in bd memories with the `hexcrawl-web-` prefix (thin instances, Vite on Windows, scoped styles, perf tools).
 
 ## Hot spots
@@ -81,6 +83,9 @@ Small, separate additions to these files (a new action, a new message type) are 
 
 ## Features
 Grouped by area, newest first within each group. Bead IDs are in the root beads DB.
+
+**Analytics and consent** (`projects-qrk.7`, spec `design/projects-qrk.7.md`)
+- 2026-11-17: PostHog analytics behind a consent prompt (awaiting user validation). Single module `src/analytics`; `posthog-js` is dynamically imported only after consent. Decline is kept in localStorage `hexcrawl.analytics=declined` and strips `ph_*`. Session replay and autocapture off. No-op unless `VITE_POSTHOG_PROJECT_TOKEN` and `VITE_POSTHOG_HOST` are set (`.env.local`). Events: `map_created{source}`, `map_loaded{source}`, `map_exported`, `resources_generated`, `view_switched{to}` (user toggle only), `tool_used{tool}` (on selection only), `entity_added{kind}`, `turn_advanced{advance_type}`, `encounter_accepted`, `session_hosted`, `session_joined`, `session_left{role}`, `session_join_decided{decision}`, `render_init_failed{reason}`, `$exception` via `app.config.errorHandler`, one `$pageview`. Super props `app='hexcrawl_web'`, `view` (dm|player). `ConsentPrompt` is a strip at <=1023px wide or <=640px tall, else a 312px (19.5rem) card. "Share usage stats" switch on `EnterScreen`. Shared analytics service doc: bead `projects-qrk.5` (not written yet).
 
 **Session and permissions** (`hexcrawl_web-xp2`, `hexcrawl_web-05c`)
 - 2026-10-18: The player view reads the player projection. Players own entities and are assigned to them. Player snapshots and diffs stream to guests (`session/projection.ts`, `snapshotDiff.ts`, `stateSync.ts`, `composables/usePlayerView.ts`).
@@ -148,5 +153,7 @@ Grouped by area, newest first within each group. Bead IDs are in the root beads 
 - 2026-11-14: Player dock specs are in `design/hexcrawl_web-ped.5.md`, `.6.md` and `.7.md`, with the sketch at `docs/reference/player-card-sketch-2026-11-14.png`. ped.5 (no entities panel for players) ships together with ped.6 (my character panel).
 - 2026-11-14: Card shape comes from the user's sketch (`docs/reference/player-card-sketch-2026-11-14.png`): the same tall card for every entity kind. Card names use Inter Tight 600 (SIL OFL 1.1), self-hosted woff2 in `src/assets/fonts/inter-tight` with `OFL.txt`, `@font-face` in `style.css`, no CDN. The caravan card shows caravan gold (its own purse) and a merchant summary. Entity cards will open in sub-panel columns right of the dock (ped.12); the in-dock mount was dropped by the user (branch deleted); cards mount in the sub-panel columns (tdj.4, 2026-11-17).
 - 2026-11-16: Hostile rules (tdj.35 b, tdj.37 a, tdj.38 b, tdj.41): players see hostile (the projection sends it; hidden entities are still not sent); hostile is available on all four kinds; only dm-owned entities can be hidden or hostile, and handing an entity to a player (`setEntityOwner`, `assignEntity`) clears both. `restore()` enforces the same on load and import (tdj.40).
+- 2026-11-17: Consent decisions qrk.11, qrk.12, qrk.13 are open; built on the defaults: a decline is remembered, the switch lives only on the enter screen, prompt copy as shipped (sentence case).
+- 2026-11-15: Card frame is the supplied raster art (webp frame + png window mask per tone), not generated SVG. Why: the user rejected the hand-built SVG look (2026-11-14). Consequence: fixed aspect, 1x resolution (soft on HiDPI); window mask coordinates are coupled to `CharacterCard.vue` CSS and `FRAME_ART` regions; record provenance in `src/assets/frames/SOURCE.md` and `docs/ASSETS.md` when a frame changes.
 - Known gap: the default entity name can repeat after a delete (tdj.44).
 - Beads stays local-only: no Dolt remote.
