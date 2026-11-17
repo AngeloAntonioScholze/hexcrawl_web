@@ -67,7 +67,6 @@ describe('ConsentPrompt', () => {
     expect(buttons.map((one) => one.text())).toEqual(['Share stats', "Don't share"])
     expect(buttons.map((one) => one.attributes('type'))).toEqual(['button', 'button'])
     expect(buttons.map((one) => one.classes())).toEqual([[], []])
-    // It never takes focus on its own.
     expect(section.element.contains(document.activeElement)).toBe(false)
   })
 

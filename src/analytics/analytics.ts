@@ -1,10 +1,10 @@
 import { readonly, shallowRef } from 'vue'
 import type { PostHog, PostHogConfig } from 'posthog-js'
 
-export type Consent = 'granted' | 'declined'
+type Consent = 'granted' | 'declined'
 export type View = 'dm' | 'player'
 
-export const CONSENT_KEY = 'hexcrawl.analytics'
+const CONSENT_KEY = 'hexcrawl.analytics'
 
 const token = import.meta.env.VITE_POSTHOG_PROJECT_TOKEN as string | undefined
 const host = import.meta.env.VITE_POSTHOG_HOST as string | undefined
@@ -34,8 +34,8 @@ const EVENTS = {
 } as const satisfies Record<string, Record<string, readonly string[]>>
 
 type Events = typeof EVENTS
-export type EventName = keyof Events
-export type EventProps<E extends EventName> = {
+type EventName = keyof Events
+type EventProps<E extends EventName> = {
   [P in keyof Events[E]]: Events[E][P] extends readonly (infer V)[] ? V : never
 }
 
