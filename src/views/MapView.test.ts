@@ -330,7 +330,6 @@ describe('MapView sub-panel columns', () => {
     await nextTick()
     const sheet = view.find('.subpanels aside')
     expect(sheet.find('[data-testid="card-slot"] .bust-row').exists()).toBe(true)
-    // InventoryList is stubbed here.
     expect(sheet.find('inventory-list-stub').exists()).toBe(true)
     expect(sheet.findAll('.psec-name').map((one) => one.text())).toEqual([
       'details',
