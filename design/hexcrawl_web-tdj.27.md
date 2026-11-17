@@ -66,6 +66,7 @@ Exactly one hint shows under the hostile row: the first when the owner is dm, th
 - `select`: `flex: 0 1 8rem; min-width: 0; padding: 0.3rem; border: 1px solid var(--line); border-radius: 0.35rem; background: var(--surface); color: var(--ink); font: inherit` (as the dock's `played by` select).
 - `input[type='checkbox']`: `margin: 0; accent-color: var(--accent); cursor: pointer`.
 - `.hint`: `margin: -0.2rem 0 0; color: var(--ink-dim); font-size: 0.75rem; line-height: 1.3`, sits right under the row it explains.
+- **Token fallbacks (until bead q55 defines them in `src/style.css`)**: `--accent`, `--danger` and `--control-h` are not defined on main yet, so every use carries a literal fallback, as `CharacterCard.vue` does: `var(--accent, #7aa2c8)` (checkbox `accent-color`, select hover border, focus outline), `var(--danger, #e07a6a)` (take-it border, text and hover tint), `var(--control-h, 2.5rem)` (row `min-height`). Without them the focus ring disappears, take-it is not red and rows shrink to 16px. When q55 lands, the fallbacks may stay or go; the values must match.
 - Same at every breakpoint: the sub-panel is 336px wide (two-up, three-up) or the dock's box (stacked: 360 phone, 768 tablet, 1024). Phone: checkbox and select keep native size; the whole `label` row is the hit area (at least 2.5rem tall via `min-height: var(--control-h)` on `.row`).
 
 ### Owner row
