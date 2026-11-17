@@ -1204,6 +1204,52 @@ describe("the DM's say over an entity", () => {
     expect(of(store, id).hidden).toBe(false)
   })
 
+  it('pushes no undo step for an unknown id or an unchanged value', () => {
+    const store = setup()
+    const { id } = store.addEntity('the bandits', 'npc', 'dm')!
+    store.setEntityHostile(id, true)
+    const before = JSON.stringify(store.entities)
+
+    store.setEntityHostile(id, true)
+    store.setEntityHostile('nobody', true)
+    store.setEntityHidden(id, of(store, id).hidden)
+    store.setEntityHidden('nobody', true)
+    store.setDarkvision(id, of(store, id).darkvision)
+    store.setDarkvision('nobody', true)
+
+    expect(JSON.stringify(store.entities)).toBe(before)
+    store.undo()
+    expect(of(store, id).hostile).toBe(false)
+  })
+
+  it('forces a player-owned entity not hidden or hostile when a map is restored', () => {
+    const store = setup()
+    const saved = store.snapshot
+    const id = store.selectedId
+
+    setActivePinia(createPinia())
+    const fresh = setup()
+    fresh.restore({
+      ...saved,
+      entities: saved.entities.map((one) =>
+        one.id === id ? { ...one, hidden: true, hostile: true } : one,
+      ),
+    })
+
+    expect(of(fresh, id)).toMatchObject({ owner: 'player', hidden: false, hostile: false })
+  })
+
+  it('takes an entity back for the DM as no foe, and the DM can then make it one', () => {
+    const store = setup()
+    const id = store.selectedId
+
+    store.setEntityOwner(id, 'dm')
+    expect(of(store, id)).toMatchObject({ owner: 'dm', hostile: false })
+
+    store.setEntityHostile(id, true)
+    expect(of(store, id).hostile).toBe(true)
+  })
+
   it("gives a DM entity to the players, there on their map, and can't be undone", () => {
     const store = setup()
     const spy = store.addEntity('the spy', 'npc', 'dm')!

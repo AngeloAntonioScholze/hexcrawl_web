@@ -272,10 +272,15 @@ describe('schema', () => {
   it("makes an entity saved before hostility nobody's foe", () => {
     saveSnapshot(db, snapshot({ entities: [] }))
     db.exec(`
+      ALTER TABLE entity DROP COLUMN hostile;
+      PRAGMA user_version = ${SCHEMA_VERSION - 1};
       INSERT INTO entity (id, ord, name, kind, owner, color, pace, sight, hidden, darkvision)
-      VALUES ('party-1', 0, 'the party', 'party', 'player', '#e0b25a', 1, 5, 0, 0)
+      VALUES ('caravan-1', 0, 'the caravan', 'caravan', 'dm', '#6fa8dc', 1, 5, 0, 0)
     `)
 
+    migrate(db)
+
+    expect(schemaVersion(db)).toBe(SCHEMA_VERSION)
     expect(loadSnapshot(db)!.entities[0].hostile).toBe(false)
   })
 

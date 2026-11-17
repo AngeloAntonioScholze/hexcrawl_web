@@ -645,13 +645,15 @@ export const useHexMapStore = defineStore('hexMap', () => {
   /** Only a DM entity hides: a player's is always on its player's map. */
   const setEntityHidden = (id: string, hidden: boolean): void => {
     if (!may('entitySettings', entityOf(id))) return
-    if (entityOf(id)?.owner === 'dm') patch(id, { hidden })
+    const entity = entityOf(id)
+    if (entity?.owner === 'dm' && entity.hidden !== hidden) patch(id, { hidden })
   }
 
   /** Only a DM entity is a foe: the players' own never are. */
   const setEntityHostile = (id: string, hostile: boolean): void => {
     if (!may('entitySettings', entityOf(id))) return
-    if (entityOf(id)?.owner === 'dm') patch(id, { hostile })
+    const entity = entityOf(id)
+    if (entity?.owner === 'dm' && entity.hostile !== hostile) patch(id, { hostile })
   }
 
   /** Who plays an entity, by the name they were seated under; null for nobody. */
@@ -733,6 +735,8 @@ export const useHexMapStore = defineStore('hexMap', () => {
 
   const setDarkvision = (id: string, darkvision: boolean): void => {
     if (!may('entitySettings', entityOf(id))) return
+    const entity = entityOf(id)
+    if (!entity || entity.darkvision === darkvision) return
     patch(id, { darkvision })
   }
 
@@ -2055,7 +2059,11 @@ export const useHexMapStore = defineStore('hexMap', () => {
     showHistory.value = saved.showHistory
     // Taken as saved, nobody included: an empty board is one the DM cleared, and
     // the opening party only belongs to a map that was never saved at all.
-    entities.value = saved.entities.map((one) => ({ ...one }))
+    // A player's token is never hidden or a foe, whatever an older or edited
+    // file says.
+    entities.value = saved.entities.map((one) =>
+      one.owner === 'player' ? { ...one, hidden: false, hostile: false } : { ...one },
+    )
     selectedId.value =
       entities.value.find((one) => one.id === saved.selectedId)?.id ?? entities.value[0]?.id ?? ''
     origins.value = new Map(
