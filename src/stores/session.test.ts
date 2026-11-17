@@ -1,6 +1,7 @@
 import { createPinia, getActivePinia, setActivePinia, type Pinia } from 'pinia'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 import { nextTick } from 'vue'
+import { capture } from '../analytics/analytics'
 import { parseEnvelope, wrap, type SessionMessage } from '../session/messages'
 import type { Session, SessionHandlers } from '../session/peer'
 import { projectForPlayers } from '../session/projection'
@@ -28,6 +29,8 @@ const useSessionStore = (): ReturnType<typeof sessionStoreOf> => {
   stores.set(store, pinia)
   return store
 }
+
+vi.mock('../analytics/analytics', () => ({ capture: vi.fn() }))
 
 const opened = vi.hoisted(() => ({
   handlers: null as SessionHandlers | null,
@@ -76,6 +79,7 @@ vi.mock('../session/peer', async (importOriginal) => {
 })
 
 beforeEach(() => {
+  vi.mocked(capture).mockClear()
   setActivePinia(createPinia())
   opened.handlers = null
   opened.sent = []
@@ -755,6 +759,17 @@ describe('the map over the wire', () => {
     return { map, dm, player, toHost, toGuest, asGuest, deliver, connect, dmView, sinceNow }
   }
 
+  it('counts the map arriving once for the guest, not each patch after it', async () => {
+    const { map, deliver, connect } = await room()
+    await connect()
+    const caravan = map.entities.find((one) => one.kind === 'caravan')!
+    map.addItem(caravan.id, { name: 'rope' })
+    await deliver()
+
+    const loaded = vi.mocked(capture).mock.calls.filter(([event]) => event === 'map_loaded')
+    expect(loaded).toEqual([['map_loaded', { source: 'session' }]])
+  })
+
   it('starts a player off with the player view and keeps it in step', async () => {
     const { map, player, deliver, connect, dmView, sinceNow } = await room()
     const joining = sinceNow()
@@ -854,5 +869,57 @@ describe('the map over the wire', () => {
     await deliver()
     expect(asking().map((one) => one.type)).toEqual(['state'])
     expect(player.remote).not.toBeNull()
+  })
+})
+
+describe('usage stats', () => {
+  const HOST = 'hexcrawl-abcdef'
+  const events = () => vi.mocked(capture).mock.calls
+
+  it('counts a room hosted', async () => {
+    await useSessionStore().host('Mara')
+    expect(events()).toEqual([['session_hosted']])
+  })
+
+  it("counts the DM's answer to a guest waiting at the door", async () => {
+    const session = useSessionStore()
+    await session.host('Mara')
+    session.setApproval(true)
+    opened.handlers?.message?.({ type: 'hello', name: 'Tobin' }, 'guest-1')
+    opened.handlers?.message?.({ type: 'hello', name: 'Ilse' }, 'guest-2')
+    vi.mocked(capture).mockClear()
+
+    session.accept('guest-1')
+    session.decline('guest-2')
+    session.decline('guest-2')
+
+    expect(events()).toEqual([
+      ['session_join_decided', { decision: 'approved' }],
+      ['session_join_decided', { decision: 'declined' }],
+    ])
+  })
+
+  it('counts a guest let in once, not again when it gets back in after a drop', async () => {
+    vi.useFakeTimers()
+    try {
+      const session = useSessionStore()
+      await session.join('Tobin', 'abcdef')
+      opened.handlers?.peer?.(HOST, true)
+      opened.handlers?.status?.('open')
+      opened.handlers?.message?.({ type: 'welcome' }, HOST)
+      expect(events()).toEqual([['session_joined']])
+
+      opened.handlers?.peer?.(HOST, false)
+      opened.handlers?.status?.('closed')
+      await vi.advanceTimersByTimeAsync(3000)
+      opened.handlers?.peer?.(HOST, true)
+      opened.handlers?.status?.('open')
+      opened.handlers?.message?.({ type: 'welcome' }, HOST)
+
+      expect(session.admission).toBe('admitted')
+      expect(events()).toEqual([['session_joined']])
+    } finally {
+      vi.useRealTimers()
+    }
   })
 })

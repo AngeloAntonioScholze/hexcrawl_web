@@ -343,7 +343,7 @@ const onPointerCancel = (): void => {
 .minimap {
   position: absolute;
   right: 1rem;
-  bottom: 1rem;
+  bottom: calc(1rem + var(--consent-reserve, 0px));
   border: 1px solid var(--line);
   border-radius: 0.4rem;
   background: color-mix(in srgb, var(--surface-raised) 88%, transparent);

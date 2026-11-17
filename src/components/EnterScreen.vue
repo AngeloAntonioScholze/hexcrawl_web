@@ -1,5 +1,6 @@
 <script setup lang="ts">
 import { computed, nextTick, onMounted, ref, useTemplateRef, watch, type Ref } from 'vue'
+import { configured, consent, decline, grant } from '../analytics/analytics'
 import { useEnterPrefs, type EnterChoice } from '../composables/useEnterPrefs'
 import { useStage, type StageMark } from '../composables/useStage'
 import type { Seat } from '../engine/stageSeats'
@@ -76,6 +77,11 @@ const back = async (): Promise<void> => {
   focusLastChoice()
 }
 
+// Once there is an answer it can be changed here, on the card every role passes.
+const statsAnswered = computed(() => configured && consent.value !== null)
+const statsOn = computed(() => consent.value === 'granted')
+const toggleStats = (): void => (statsOn.value ? decline() : grant())
+
 const enter = (): void => {
   view.value = null
   veiled.value = false
@@ -134,6 +140,16 @@ const prepare = async (): Promise<void> => {
             Prepare
           </button>
         </div>
+        <button
+          v-if="statsAnswered"
+          type="button"
+          role="switch"
+          class="stats-switch"
+          :aria-checked="statsOn"
+          @click="toggleStats"
+        >
+          Share usage stats: <span>{{ statsOn ? 'on' : 'off' }}</span>
+        </button>
       </section>
 
       <div class="card" :inert="view !== 'host'" :style="styles.host">
@@ -157,6 +173,7 @@ const prepare = async (): Promise<void> => {
   display: grid;
   place-items: center;
   padding: 1rem;
+  padding-bottom: calc(1rem + var(--consent-reserve, 0px));
   overflow: hidden;
   background: radial-gradient(
     ellipse at center,
@@ -225,6 +242,26 @@ button:focus-visible {
   outline-offset: 2px;
 }
 
+/* Not a way into the app: plain text, no stage effect, not a last choice. */
+.stats-switch {
+  margin-top: var(--space-4, 1rem);
+  min-height: 1.5rem;
+  padding: 0 var(--space-1, 0.25rem);
+  border: none;
+  background: none;
+  color: var(--ink-dim);
+  font-size: 0.75rem;
+  line-height: 1.3;
+}
+
+.stats-switch span {
+  color: var(--ink);
+}
+
+.stats-switch:hover {
+  text-decoration: underline;
+}
+
 /* The way in this browser took last time, so a returning visitor finds it. */
 button.last {
   border-color: color-mix(in srgb, #7aa2c8 60%, var(--line));
@@ -242,6 +279,10 @@ button.last {
 @media (max-width: 720px) {
   .choices {
     grid-template-columns: 1fr;
+  }
+
+  .stats-switch {
+    min-height: 2.5rem;
   }
 }
 </style>

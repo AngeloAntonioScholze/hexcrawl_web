@@ -1,5 +1,6 @@
 import { defineStore } from 'pinia'
 import { computed, ref } from 'vue'
+import { capture } from '../analytics/analytics'
 import type { MapEntry } from '../persistence/mapIndex'
 import type { MapSnapshot } from '../persistence/mapState'
 import type { MapList } from '../persistence/protocol'
@@ -46,6 +47,13 @@ export const useMapLibraryStore = defineStore('mapLibrary', () => {
     }
   }
 
+  // The backend owns its own failures; a map that arrived is one the list now points at.
+  const counted = async (work: () => Promise<void>, arrived: () => void): Promise<void> => {
+    const before = currentId.value
+    await work()
+    if (currentId.value !== before) arrived()
+  }
+
   return {
     maps,
     currentId,
@@ -53,10 +61,21 @@ export const useMapLibraryStore = defineStore('mapLibrary', () => {
     current,
     connect,
     show,
-    open: (id: string) => run((to) => (id === currentId.value ? Promise.resolve() : to.open(id))),
-    create: () => run((to) => to.create()),
+    open: (id: string) =>
+      counted(
+        () => run((to) => (id === currentId.value ? Promise.resolve() : to.open(id))),
+        () => capture('map_loaded', { source: 'storage' }),
+      ),
+    create: () =>
+      counted(
+        () => run((to) => to.create()),
+        () => capture('map_created', { source: 'new' }),
+      ),
     importMap: (fileName: string, snapshot: MapSnapshot) =>
-      run((to) => to.importMap(fileName, snapshot)),
+      counted(
+        () => run((to) => to.importMap(fileName, snapshot)),
+        () => capture('map_loaded', { source: 'file' }),
+      ),
     rename: (id: string, name: string) => run((to) => to.rename(id, name)),
     remove: (id: string) => run((to) => to.remove(id)),
   }

@@ -1,5 +1,6 @@
 <script setup lang="ts">
 import { computed, ref } from 'vue'
+import { capture } from '../analytics/analytics'
 import { useStage } from '../composables/useStage'
 import { codeSuffix, roomLink, useSessionStore } from '../stores/session'
 import PopupDialog from './PopupDialog.vue'
@@ -40,6 +41,7 @@ const remove = (): void => {
 const checked = (event: Event): boolean => (event.target as HTMLInputElement).checked
 
 const leave = async (): Promise<void> => {
+  if (session.role) capture('session_left', { role: session.role })
   session.leave()
   stage.veiled.value = true
   await stage.zoomOut()

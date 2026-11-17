@@ -91,6 +91,7 @@ These are shorthand values for `font` sizing only: `font-size` plus `line-height
 | `--sub-columns` | `0` | sub-panels shown beside the dock (0, 1 or 2). MapView sets it inline on `<main>`; always 0 in stacked mode and for players (ped.12) |
 | `--dock-reserve` | `calc(1rem + min(var(--panel-width), 100vw - 2rem) + var(--column-gap) + var(--sub-columns) * (var(--subpanel-width) + var(--column-gap)))` | left edge of the free map area, after any open columns (380px, 728px, 1076px with 0, 1, 2 columns). Declared on `:root, main`: a custom property resolves its `var()`s where it is declared, so `<main>` must declare it again to pick up its own `--sub-columns` |
 | `--minimap-reserve` | `calc(1rem + 176px + 0.75rem)` | right edge kept for the minimap |
+| `--consent-reserve` | px, set inline on `:root` by `ConsentPrompt` in strip mode only; fallback `0px` | bottom space taken by the consent strip (height + 16px); bottom-anchored chrome (toolbar, minimap, dock, sub-panels, enter screen) adds it (qrk.7) |
 
 The phone values apply under `@media (max-width: 720px)`.
 

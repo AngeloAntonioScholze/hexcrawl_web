@@ -1,5 +1,6 @@
 import { defineStore } from 'pinia'
 import { computed, ref, shallowRef, watch, type WatchHandle } from 'vue'
+import { capture } from '../analytics/analytics'
 import * as room from '../session/admission'
 import { MAX_NAME_LENGTH, type SessionMessage } from '../session/messages'
 import {
@@ -251,7 +252,10 @@ export const useSessionStore = defineStore('session', () => {
         if (mine === run) session?.send(message)
       },
       onChange: (projection) => {
-        if (mine === run) remote.value = projection
+        if (mine !== run) return
+        // A map kept through a reconnect is not loaded again.
+        if (!remote.value) capture('map_loaded', { source: 'session' })
+        remote.value = projection
       },
     })
   }
@@ -359,6 +363,8 @@ export const useSessionStore = defineStore('session', () => {
         admission.value = 'pending'
         break
       case 'welcome':
+        // Let back in after a dropped connection is the same visit to the room.
+        if (!reconnecting.value) capture('session_joined')
         admission.value = 'admitted'
         stopRetrying()
         break
@@ -387,12 +393,16 @@ export const useSessionStore = defineStore('session', () => {
 
   const accept = (peerId: string): void => {
     const decision = room.accept(door.value, peerId)
-    if (decision) reply(decision, peerId)
+    if (!decision) return
+    reply(decision, peerId)
+    capture('session_join_decided', { decision: 'approved' })
   }
 
   const decline = (peerId: string): void => {
     const decision = room.decline(door.value, peerId)
-    if (decision) reply(decision, peerId)
+    if (!decision) return
+    reply(decision, peerId)
+    capture('session_join_decided', { decision: 'declined' })
   }
 
   /**
@@ -470,7 +480,10 @@ export const useSessionStore = defineStore('session', () => {
       }
       session = opened
       code.value = opened.code
-      if (as === 'host') rememberRoom(opened.code)
+      if (as === 'host') {
+        rememberRoom(opened.code)
+        capture('session_hosted')
+      }
     } catch (caught) {
       if (mine === run) fail(caught instanceof SessionError ? reasonFor(caught.type) : 'unknown')
     }

@@ -1,4 +1,5 @@
 <script setup lang="ts">
+import { capture } from '../analytics/analytics'
 import type { FogMode } from '../hex/fogEdits'
 import { BRUSH_LIMITS, BRUSH_TOOLS, DM_TOOLS, useHexMapStore, type DmTool } from '../stores/hexMap'
 import RoadOptions from './RoadOptions.vue'
@@ -12,6 +13,13 @@ const TOOL_LABELS: Readonly<Record<DmTool, string>> = {
   fog: 'fog',
   road: 'road',
   river: 'river',
+}
+
+// Counted when a tool is picked, never per stroke or hex it is used on.
+const pickTool = (tool: DmTool): void => {
+  if (tool === store.dmTool) return
+  store.setDmTool(tool)
+  if (store.dmTool === tool) capture('tool_used', { tool })
 }
 
 const FOG_MODES: readonly FogMode[] = ['reveal', 'hide']
@@ -34,7 +42,7 @@ const SWATCHES = Object.fromEntries(
         type="button"
         :class="{ here: store.dmTool === tool }"
         :aria-pressed="store.dmTool === tool"
-        @click="store.setDmTool(tool)"
+        @click="pickTool(tool)"
       >
         {{ TOOL_LABELS[tool] }}
       </button>
@@ -98,7 +106,7 @@ const SWATCHES = Object.fromEntries(
 /* Centred in the band between the panel column and the minimap. */
 .dm-toolbar {
   position: absolute;
-  bottom: 12px;
+  bottom: calc(12px + var(--consent-reserve, 0px));
   left: calc(var(--dock-reserve) + (100% - var(--dock-reserve) - var(--minimap-reserve)) / 2);
   translate: -50% 0;
   box-sizing: border-box;
@@ -185,7 +193,7 @@ button.here {
    it and centres between the column and the right edge. */
 @media (min-width: 721px) and (max-width: 1023px) {
   .dm-toolbar {
-    bottom: calc(1rem + 176px + 0.5rem);
+    bottom: calc(1rem + 176px + 0.5rem + var(--consent-reserve, 0px));
     left: calc(var(--dock-reserve) + (100% - var(--dock-reserve) - 1rem) / 2);
     max-width: calc(100% - var(--dock-reserve) - 1rem);
   }

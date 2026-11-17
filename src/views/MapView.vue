@@ -1,5 +1,6 @@
 <script setup lang="ts">
 import { computed, nextTick, onBeforeUnmount, onMounted, ref, watch, watchEffect } from 'vue'
+import { capture } from '../analytics/analytics'
 import CaravanPanel from '../components/CaravanPanel.vue'
 import DayNightDial from '../components/DayNightDial.vue'
 import DmToolbar from '../components/DmToolbar.vue'
@@ -99,6 +100,12 @@ watchEffect(() => {
   if (!debug.value && !store.dmView && session.role !== 'guest') store.dmView = true
 })
 
+// Counted at the switch itself, which has already flipped dmView when this runs:
+// the view is also put back without anyone asking, and that is no switch.
+const viewSwitched = (): void => {
+  if (session.role !== 'guest') capture('view_switched', { to: store.dmView ? 'dm' : 'player' })
+}
+
 // Picking the picked token again puts it down, so the DM's clicks go back to the ground.
 const pick = (id: string): void => store.selectEntity(id === store.selectedId ? '' : id)
 
@@ -110,6 +117,11 @@ const onZoomLimit = (event: Event): void => {
 
 const resourceCounts = computed(() => countByOrigin(store.resources))
 
+const reseedWorld = (): void => {
+  store.reseed()
+  capture('map_created', { source: 'reseed' })
+}
+
 const generateResources = (): void => {
   const generated = resourceCounts.value.generated
   if (
@@ -118,6 +130,7 @@ const generateResources = (): void => {
   )
     return
   store.generateResources()
+  capture('resources_generated')
 }
 
 const onTerrain = (key: 'scale' | 'seaLevel' | 'relief', event: Event): void => {
@@ -130,6 +143,11 @@ const onStyle = (event: Event): void => {
 
 const addKind = ref<EntityKind>('caravan')
 
+const addEntity = (): void => {
+  const added = store.addEntity(undefined, addKind.value, 'player')
+  if (added) capture('entity_added', { kind: added.kind })
+}
+
 const exportMap = (): void => {
   const blob = new Blob([serialiseMap(store.snapshot)], { type: 'application/json' })
   const url = URL.createObjectURL(blob)
@@ -137,6 +155,7 @@ const exportMap = (): void => {
   link.href = url
   link.download = `hexcrawl-${store.terrain.seed}${MAP_FILE_EXTENSION}`
   link.click()
+  capture('map_exported')
   // Revoked a tick later: some browsers start the download only after click returns.
   setTimeout(() => URL.revokeObjectURL(url), 0)
 }
@@ -164,6 +183,7 @@ const importMap = async (event: Event): Promise<void> => {
   // Without storage there is no list to add it to, only the one map to replace.
   if (!window.confirm(`Replace the current map with ${file.name}? This cannot be undone.`)) return
   store.restore(result.snapshot)
+  capture('map_loaded', { source: 'file' })
 }
 
 const worldSizes = Object.keys(WORLD_SIZES) as WorldSize[]
@@ -422,7 +442,7 @@ const olderTurns = computed(() => Math.max(0, adventureLog.value.length - TURNS_
          past it, and nothing to give the map away before anyone is in. -->
     <template v-if="!veiled">
       <DayNightDial />
-      <ViewToggle v-if="debug" />
+      <ViewToggle v-if="debug" @click="viewSwitched" />
       <SessionBar v-if="session.role" :class="{ beside: debug, lowered: subColumnCount >= 1 }" />
       <DmToolbar />
     </template>
@@ -474,7 +494,7 @@ const olderTurns = computed(() => Math.max(0, adventureLog.value.length - TURNS_
                 <span>seed</span>
                 <span class="value">{{ store.terrain.seed }}</span>
               </div>
-              <button type="button" @click="store.reseed">roll a new world</button>
+              <button type="button" @click="reseedWorld">roll a new world</button>
 
               <div class="row">
                 <span>world size</span>
@@ -775,9 +795,7 @@ const olderTurns = computed(() => Math.max(0, adventureLog.value.length - TURNS_
                   <option value="npc">npc</option>
                   <option value="ship">ship</option>
                 </select>
-                <button type="button" @click="store.addEntity(undefined, addKind, 'player')">
-                  add
-                </button>
+                <button type="button" @click="addEntity">add</button>
               </div>
               <button
                 v-if="store.may('removeEntity', store.selectedEntity ?? undefined)"
@@ -1058,7 +1076,7 @@ main {
   position: absolute;
   top: 1rem;
   left: 1rem;
-  bottom: 1rem;
+  bottom: calc(1rem + var(--consent-reserve, 0px));
   z-index: 2;
   display: flex;
   flex-direction: column;
@@ -1233,7 +1251,7 @@ aside:where(.panel).collapsed {
   position: absolute;
   top: 1rem;
   left: calc(1rem + min(var(--panel-width), 100vw - 2rem) + var(--column-gap));
-  bottom: 1rem;
+  bottom: calc(1rem + var(--consent-reserve, 0px));
   z-index: 2;
   display: flex;
   align-items: flex-start;
@@ -1522,6 +1540,7 @@ p {
 
   .panels {
     inset: 0.5rem;
+    bottom: calc(0.5rem + var(--consent-reserve, 0px));
     z-index: 11;
     width: calc(100vw - 1rem);
   }
@@ -1532,6 +1551,7 @@ p {
 
   .subpanels.stacked {
     inset: 0.5rem;
+    bottom: calc(0.5rem + var(--consent-reserve, 0px));
     z-index: 11;
     width: calc(100vw - 1rem);
   }

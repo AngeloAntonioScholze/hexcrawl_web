@@ -10,3 +10,4 @@ dist/
 .beads/proxieddb/
 
 .claude/skills/
+.env

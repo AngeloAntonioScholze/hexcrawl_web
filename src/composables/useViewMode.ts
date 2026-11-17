@@ -1,4 +1,5 @@
 import { watch } from 'vue'
+import { setView, type View } from '../analytics/analytics'
 import type { useHexMapStore } from '../stores/hexMap'
 import type { useSessionStore } from '../stores/session'
 
@@ -34,7 +35,14 @@ export function useViewMode(
   watch(
     () => store.dmView,
     (dm) => {
-      if (session.role !== 'guest') writePlayerView(!dm)
+      if (session.role === 'guest') return
+      writePlayerView(!dm)
     },
+  )
+  // A guest only ever sees the players' side, whatever this browser's switch says.
+  watch(
+    (): View => (store.dmView && session.role !== 'guest' ? 'dm' : 'player'),
+    (view) => setView(view),
+    { immediate: true },
   )
 }

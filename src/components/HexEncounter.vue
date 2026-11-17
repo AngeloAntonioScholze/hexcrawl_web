@@ -1,5 +1,6 @@
 <script setup lang="ts">
 import { computed, ref, watch } from 'vue'
+import { capture } from '../analytics/analytics'
 import type { EncounterRoll } from '../encounters/tables'
 import type { HexKey } from '../hex'
 import { useHexMapStore } from '../stores/hexMap'
@@ -34,6 +35,7 @@ const dismiss = (): void => {
 const accept = (): void => {
   if (!roll.value) return
   store.acceptEncounter(props.hex, roll.value.entry)
+  capture('encounter_accepted')
   roll.value = undefined
 }
 </script>

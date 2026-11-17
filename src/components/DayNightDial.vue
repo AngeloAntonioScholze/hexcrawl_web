@@ -1,10 +1,21 @@
 <script setup lang="ts">
 import { computed } from 'vue'
+import { capture } from '../analytics/analytics'
 import sunAndMoon from '../assets/sun-and-moon.png'
 import { useHexMapStore } from '../stores/hexMap'
 import { clockLabel, timeOfDay, TURNS_PER_PHASE, widestClockLabels } from '../time/clock'
 
 const store = useHexMapStore()
+
+const advanceTurn = (): void => {
+  store.advanceTurn()
+  capture('turn_advanced', { advance_type: 'turn' })
+}
+
+const skipPhase = (): void => {
+  store.skipPhase()
+  capture('turn_advanced', { advance_type: 'phase' })
+}
 
 const CENTRE = { x: 110, y: 96 }
 const RADIUS = 88
@@ -128,7 +139,7 @@ const dome = [
           type="button"
           class="step"
           title="let a turn pass"
-          @click="store.advanceTurn"
+          @click="advanceTurn"
         >
           <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M7 4 L20 12 L7 20 Z" /></svg>
           <span class="sr">let the next turn pass</span>
@@ -140,7 +151,7 @@ const dome = [
         type="button"
         class="skip"
         :title="store.clock.phase === 'day' ? 'travel on until dark' : 'camp until first light'"
-        @click="store.skipPhase"
+        @click="skipPhase"
       >
         {{ store.clock.phase === 'day' ? 'until dark' : 'until dawn' }}
       </button>
