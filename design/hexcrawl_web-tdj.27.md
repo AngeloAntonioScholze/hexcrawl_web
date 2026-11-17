@@ -1,6 +1,6 @@
 # hexcrawl_web-tdj.27: DM controls for owner, hidden and hostile
 
-Status: spec, 2026-11-16, amended 2026-11-16 for decisions tdj.35 (b), tdj.37 (a), tdj.38 (b). **Spec only.** Written against main `ad1cd27`, with the store actions as built in the tdj.30 worktree (`setEntityOwner`, `setEntityHidden`, `setEntityHostile`), the hostile rule of tdj.41, and the details section of `EntitySubPanel.vue` as built in the ped.25 worktree.
+Status: spec, 2026-11-16, amended 2026-11-16 for decisions tdj.35 (b), tdj.37 (a), tdj.38 (b). **Built and merged (01857a7).** Written against main `ad1cd27`, with the store actions of tdj.30 (`setEntityOwner`, `setEntityHidden`, `setEntityHostile`), the hostile rule of tdj.41, and the details section of `EntitySubPanel.vue`.
 
 Builds on:
 - `design/hexcrawl_web-ped.12.md`, "Entity sub-panel": row 1 `details`
@@ -31,12 +31,11 @@ props: { entity: Entity }   // the sub-panel's entity, never store.selectedEntit
 ```
 Reads `useHexMapStore()` for `may`, `playerOf` and the three actions. No emits. Every handler acts on `entity.id`.
 
-### Mount (after ped.25 merges; one line)
-In `EntitySubPanel.vue`, inside the details section's `<div class="control stack">`, as its **last child, right after the darkvision label**:
+### Mount (done)
+Mounted in `EntitySubPanel.vue`, inside the details section's `<div class="control stack">`, as its **last child, right after the darkvision label**:
 ```vue
 <EntityDmControls v-if="store.may('assignEntity')" :entity="entity" />
 ```
-Until then the component is built and tested standalone.
 
 ### Rows by kind
 | row | party | npc | caravan | ship |
