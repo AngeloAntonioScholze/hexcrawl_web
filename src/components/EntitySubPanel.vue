@@ -1,13 +1,12 @@
 <script setup lang="ts">
-import { computed, ref } from 'vue'
+import { computed } from 'vue'
 import { useSubPanels } from '../composables/useSubPanels'
-import { bustOf } from '../entities/busts'
 import type { Entity } from '../entities/entity'
 import { carriesInventory } from '../entities/inventory'
 import { MAX_SIGHT, MIN_SIGHT, PACE_LIMITS, useHexMapStore } from '../stores/hexMap'
 import { KM_PER_HEX } from '../terrain/travel'
-import BustPicker from './BustPicker.vue'
 import CaravanSupplies from './CaravanSupplies.vue'
+import EntityCard from './EntityCard.vue'
 import EntityDmControls from './EntityDmControls.vue'
 import InventoryList from './InventoryList.vue'
 import MerchantRows from './MerchantRows.vue'
@@ -72,12 +71,6 @@ const riderOpen = (riderId: string): boolean => {
   return props.level === 1 && deeper?.kind === 'entity' && deeper.id === riderId
 }
 
-// Until tdj.4 mounts the card, the caravan's bust is picked here.
-const picking = ref(false)
-const mayPick = computed(() => isCaravan.value && store.may('entitySettings', props.entity))
-const bust = computed(() => bustOf(props.entity.portrait))
-const pick = (portrait: string | null): void => store.setPortrait(id.value, portrait)
-
 /** A long crawl would otherwise hang hundreds of rows off the panel. */
 const TURNS_SHOWN = 40
 
@@ -104,25 +97,8 @@ const olderTurns = computed(() => Math.max(0, adventureLog.value.length - TURNS_
       <span class="pip" :style="{ background: entity.color }" aria-hidden="true" />
     </template>
 
-    <template v-if="mayPick" #card>
-      <div class="row bust-row">
-        <span class="label">bust</span>
-        <button
-          type="button"
-          class="bust-choose"
-          :title="`choose a bust for ${entity.name}`"
-          @click="picking = true"
-        >
-          <img v-if="bust" :src="bust.url" alt="" class="thumb" />
-          <span>{{ bust?.label ?? 'none' }}</span>
-        </button>
-      </div>
-      <BustPicker
-        v-model:open="picking"
-        :name="entity.name"
-        :current="entity.portrait"
-        @pick="pick"
-      />
+    <template #card>
+      <EntityCard :key="entity.id" class="card" :entity="entity" :heading-level="3" />
     </template>
 
     <PanelSection :fold-key="`${group}.details`" title="details" :scope="scope">
@@ -307,8 +283,7 @@ p {
   font-size: 0.75rem;
 }
 
-.dim,
-.label {
+.dim {
   color: var(--ink-dim);
 }
 
@@ -318,34 +293,8 @@ p {
   gap: 1rem;
 }
 
-.bust-row {
-  align-items: center;
-  margin-top: 0.5rem;
-  font-size: 0.78rem;
-}
-
-.bust-choose {
-  display: flex;
-  align-items: center;
-  gap: 0.4rem;
-  padding: 0.1rem 0.3rem;
-  border: 1px solid var(--line);
-  border-radius: 0.25rem;
-  background: none;
-  color: inherit;
-  font: inherit;
-  cursor: pointer;
-}
-
-.bust-choose:hover {
-  background: color-mix(in srgb, var(--line) 45%, transparent);
-}
-
-.thumb {
-  width: 2rem;
-  height: 1.5rem;
-  border-radius: 0.15rem;
-  object-fit: cover;
+.card {
+  margin-block: 0.25rem 0.75rem;
 }
 
 .control.stack {

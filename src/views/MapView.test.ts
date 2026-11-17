@@ -324,12 +324,14 @@ describe('MapView sub-panel columns', () => {
     expect(panels.stack.value).toEqual([{ kind: 'entity', id: caravan.id }])
   })
 
-  it('opens the caravan sheet beside the dock, its bust row in the card slot', async () => {
+  it('opens the caravan sheet beside the dock, its card in the card slot', async () => {
     const { view } = mountAt(1600, true)
     await openButton(view, 'Saltwind').trigger('click')
     await nextTick()
     const sheet = view.find('.subpanels aside')
-    expect(sheet.find('[data-testid="card-slot"] .bust-row').exists()).toBe(true)
+    const cards = view.findAll('.character-card')
+    expect(cards).toHaveLength(1)
+    expect(sheet.find('[data-testid="card-slot"] .character-card h3.name').text()).toBe('Saltwind')
     expect(sheet.find('inventory-list-stub').exists()).toBe(true)
     expect(sheet.findAll('.psec-name').map((one) => one.text())).toEqual([
       'details',
@@ -338,7 +340,7 @@ describe('MapView sub-panel columns', () => {
       'merchants',
       'adventure log',
     ])
-    expect(view.find('.panels .bust-row').exists()).toBe(false)
+    expect(view.find('.panels .character-card').exists()).toBe(false)
   })
 
   it('empties the stack on a dmView change, and players get no columns', async () => {
@@ -349,6 +351,29 @@ describe('MapView sub-panel columns', () => {
     await nextTick()
     expect(panels.stack.value).toEqual([])
     expect(openButton(view, party.name).exists()).toBe(false)
+    expect(view.findAll('.character-card')).toHaveLength(0)
+  })
+
+  it('shows the carrier card at level 1 and its rider card at level 2, two in all', async () => {
+    const { view, store, party, caravan } = mountAt(1600, true)
+    store.selectEntity(caravan.id)
+    panels.open({ kind: 'entity', id: caravan.id }, 0)
+    await nextTick()
+    panels.open({ kind: 'entity', id: party.id }, 1)
+    await nextTick()
+    expect(panels.stack.value).toEqual([
+      { kind: 'entity', id: caravan.id },
+      { kind: 'entity', id: party.id },
+    ])
+    const asides = view.findAll('.subpanels aside')
+    expect(asides).toHaveLength(2)
+    expect(asides[0]!.findAll('.character-card h3.name').map((one) => one.text())).toEqual([
+      'Saltwind',
+    ])
+    expect(asides[1]!.findAll('.character-card h3.name').map((one) => one.text())).toEqual([
+      party.name,
+    ])
+    expect(view.findAll('.character-card')).toHaveLength(2)
   })
 })
 
@@ -448,7 +473,7 @@ describe('MapView: an opened entity shows in one place only', () => {
         }
         expect(dockIds.some((id) => /^sec-(person|caravan|ship|l\d)-/.test(id))).toBe(false)
         expect(dock.find('#panel-caravan-head').exists()).toBe(false)
-        expect(dock.find('.bust-row').exists()).toBe(false)
+        expect(dock.find('.character-card').exists()).toBe(false)
         expect(dock.find('.inventory').exists()).toBe(false)
         expect(dock.findAll('.psec-name').map((one) => one.text())).not.toContain(name)
 
@@ -510,7 +535,7 @@ describe('MapView: no entity ever shows in the dock as well as its column', () =
     expect(dock.find('.panel.caravan').exists()).toBe(false)
     expect(dock.find('#panel-caravan-head').exists()).toBe(false)
     expect(dock.find('.inventory').exists()).toBe(false)
-    expect(dock.find('.bust-row').exists()).toBe(false)
+    expect(dock.find('.character-card').exists()).toBe(false)
     const names = dock.findAll('.psec-name').map((one) => one.text())
     for (const section of ['supplies', 'inventory', 'riders', 'merchants', name]) {
       expect(names).not.toContain(section)

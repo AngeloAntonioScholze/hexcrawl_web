@@ -1,7 +1,7 @@
 import { computed, effectScope, type ComputedRef } from 'vue'
 import type { Action, ActionRecord } from '../entities/action'
 import { applyCatalogOverrides, DEFAULT_CATALOG, type CatalogEntry } from '../entities/catalog'
-import type { Entity } from '../entities/entity'
+import type { Entity, EntityState } from '../entities/entity'
 import { carriesInventory, type Item } from '../entities/inventory'
 import type { Merchant } from '../entities/merchant'
 import { NO_SUPPLIES, type Supplies } from '../entities/supplies'
@@ -105,12 +105,22 @@ export function readProjection(projection: PlayerProjection, last?: PlayerScene)
   }
 }
 
+/** The orders and states a route is read from: the players' scene, or the DM's store. */
+interface Orders {
+  queue: ReadonlyMap<string, Action>
+  states: ReadonlyMap<string, EntityState>
+  entityOf: ReadonlyMap<string, unknown>
+}
+
 /** Whose route an entity walks: its own once it has an order, else the caravan it rides in. */
-const routeOwner = (scene: PlayerScene, id: string): string =>
-  scene.queue.has(id) ? id : (scene.states.get(id)?.riding ?? id)
+const routeOwner = (scene: Orders, id: string): string => {
+  if (scene.queue.has(id)) return id
+  const riding = scene.states.get(id)?.riding
+  return riding && scene.entityOf.has(riding) ? riding : id
+}
 
 /** What an entity has left to walk, as the store's orderFor reads it. */
-export function orderOf(scene: PlayerScene, id: string): readonly HexKey[] {
+export function orderOf(scene: Orders, id: string): readonly HexKey[] {
   const owner = routeOwner(scene, id)
   const queued = scene.queue.get(owner)
   if (queued?.kind === 'move') {

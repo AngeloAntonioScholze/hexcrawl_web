@@ -7,7 +7,7 @@ import { projectForPlayers } from '../session/projection'
 import { DM } from '../session/permissions'
 import { useHexMapStore } from '../stores/hexMap'
 import type { TerrainTile } from '../terrain/terrain'
-import { createFogFeed, readProjection, settled, usePlayerView } from './usePlayerView'
+import { createFogFeed, orderOf, readProjection, settled, usePlayerView } from './usePlayerView'
 
 const flat = (radius: number): Map<HexKey, TerrainTile> =>
   new Map(
@@ -347,5 +347,41 @@ describe('the player view', () => {
     expect(view.positionsAt(0)?.get(party)?.hex).toBe('0,0')
     expect(view.positionsAt(5)).toBeNull()
     expect(view.recordsOn(0).map((row) => row.entityId)).toEqual([party])
+  })
+})
+
+describe('orderOf', () => {
+  const state = (riding: string | null, pending: HexKey[]) => ({
+    at: hexKey({ q: 0, r: 0 }),
+    carry: 0,
+    pending,
+    waypoints: [],
+    riding,
+  })
+
+  it('reads a rider of a removed carrier as its own, as the store does', () => {
+    const own = [hexKey({ q: 1, r: 0 }), hexKey({ q: 2, r: 0 })]
+    const scene = {
+      queue: new Map(),
+      states: new Map([['rider', state('gone', own)]]),
+      entityOf: new Map([['rider', {}]]),
+    }
+    expect(orderOf(scene, 'rider')).toEqual(own)
+  })
+
+  it('reads a rider of a carrier that stands as the carrier route', () => {
+    const route = [hexKey({ q: 3, r: 0 })]
+    const scene = {
+      queue: new Map(),
+      states: new Map([
+        ['rider', state('wagon', [])],
+        ['wagon', state(null, route)],
+      ]),
+      entityOf: new Map([
+        ['rider', {}],
+        ['wagon', {}],
+      ]),
+    }
+    expect(orderOf(scene, 'rider')).toEqual(route)
   })
 })

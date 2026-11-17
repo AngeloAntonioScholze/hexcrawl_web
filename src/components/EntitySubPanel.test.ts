@@ -9,6 +9,8 @@ import type { Entity, EntityKind } from '../entities/entity'
 import { hexKey, range, type HexKey } from '../hex/coords'
 import { useHexMapStore } from '../stores/hexMap'
 import type { TerrainTile } from '../terrain/terrain'
+import CaravanPanel from './CaravanPanel.vue'
+import CharacterCard from './CharacterCard.vue'
 import EntitySubPanel from './EntitySubPanel.vue'
 
 const panels = useSubPanels()
@@ -58,13 +60,12 @@ beforeEach(() => {
 })
 
 describe('EntitySubPanel', () => {
-  it('shows a party its details, inventory and log, with an empty card slot', () => {
+  it('shows a party its details, inventory and log', () => {
     const { store, party } = boarded()
     const wrapper = mountPanel(store.entities.find((one) => one.id === party.id)!)
     expect(sections(wrapper)).toEqual(['details', 'inventory', 'adventure log'])
     expect(wrapper.find('#sec-l1-person-details').exists()).toBe(true)
     expect(wrapper.find('#sec-l1-person-log').exists()).toBe(true)
-    expect(wrapper.find('[data-testid="card-slot"]').element.children).toHaveLength(0)
     expect(wrapper.find('.psec-meta').text()).toBe('party')
   })
 
@@ -80,7 +81,6 @@ describe('EntitySubPanel', () => {
     const wrapper = mountPanel(added('ship', 'Gull'))
     expect(sections(wrapper)).toEqual(['details', 'inventory', 'riders'])
     expect(wrapper.find('#sec-l1-ship-riders').text()).toContain('nobody aboard')
-    expect(wrapper.find('[data-testid="card-slot"]').element.children).toHaveLength(0)
   })
 
   it('gives a moved npc and a moved ship their adventure log', () => {
@@ -113,7 +113,7 @@ describe('EntitySubPanel', () => {
     expect(sailed.find('#sec-l1-ship-log').exists()).toBe(true)
   })
 
-  it('gives the DM a caravan its whole sheet, with the bust row in the card slot', () => {
+  it('gives the DM a caravan its whole sheet', () => {
     const { store, caravan } = boarded()
     const wrapper = mountPanel(store.entities.find((one) => one.id === caravan.id)!)
     expect(sections(wrapper)).toEqual([
@@ -127,9 +127,50 @@ describe('EntitySubPanel', () => {
     expect(wrapper.find('#sec-l1-caravan-details').exists()).toBe(true)
     expect(wrapper.find('#sec-l1-caravan-riders').exists()).toBe(true)
     const slot = wrapper.find('[data-testid="card-slot"]')
-    expect(slot.find('.bust-row').text()).toContain('bust')
-    expect(slot.find('.bust-choose').attributes('title')).toBe('choose a bust for Saltwind')
+    expect(slot.element.children).toHaveLength(1)
+    expect(slot.find('.character-card h3.name').text()).toBe('Saltwind')
     expect(wrapper.find('section.psec').find('.psec-meta').text()).toBe('caravan')
+  })
+
+  it('puts exactly one card, its own, first in the card slot of each kind, at either level', () => {
+    const { store, party, caravan } = boarded()
+    const npc = added('npc', 'Old Ferris')
+    const ship = added('ship', 'Gull')
+    const current = (id: string) => store.entities.find((one) => one.id === id)!
+    for (const [id, level] of [
+      [party.id, 2],
+      [npc.id, 1],
+      [caravan.id, 1],
+      [ship.id, 1],
+    ] as const) {
+      const wrapper = mountPanel(current(id), level)
+      const body = wrapper.find('[data-testid="card-slot"]')
+      const cards = wrapper.findAll('.character-card')
+      expect(cards).toHaveLength(1)
+      expect(body.element.firstElementChild).toBe(cards[0]!.element)
+      expect(cards[0]!.find('h3.name').text()).toBe(current(id).name)
+      expect(body.element.children).toHaveLength(1)
+      wrapper.unmount()
+    }
+  })
+
+  it('leaves the dock without a card while a caravan is open beside it', () => {
+    const { store, caravan } = boarded()
+    store.selectEntity(caravan.id)
+    store.setPanelOpen('caravan', true)
+    panels.open({ kind: 'entity', id: caravan.id }, 0)
+    expect(mount(CaravanPanel).find('.character-card').exists()).toBe(false)
+    const column = mountPanel(store.entities.find((one) => one.id === caravan.id)!)
+    expect(column.findAll('.character-card')).toHaveLength(1)
+  })
+
+  it('picks the bust from the card itself', () => {
+    const { store, caravan } = boarded()
+    const wrapper = mountPanel(store.entities.find((one) => one.id === caravan.id)!)
+    const card = wrapper.findComponent(CharacterCard)
+    expect(card.props('pickable')).toBe(true)
+    card.vm.$emit('bust', 'knight')
+    expect(store.entities.find((one) => one.id === caravan.id)?.portrait).toBe('knight')
   })
 
   it('opens a rider at level 2 and selects it, the carrier staying open', async () => {
@@ -149,6 +190,22 @@ describe('EntitySubPanel', () => {
       { kind: 'entity', id: party.id },
     ])
     expect(wrapper.find('.riders button').attributes('aria-current')).toBe('true')
+  })
+
+  it('re-keys the card when the open entity changes, dropping a tally draft', async () => {
+    const store = useHexMapStore()
+    const first = store.addEntity('Saltwind', 'caravan')!
+    const second = store.addEntity('Gullwing', 'caravan')!
+    store.setSupply(second.id, 'gold', 40)
+    const wrapper = mountPanel(first)
+    const gold = () => wrapper.find('input[aria-label="caravan gold, in coins"]')
+    await gold().setValue('999')
+    expect((gold().element as HTMLInputElement).value).toBe('999')
+
+    await wrapper.setProps({ entity: second })
+    expect(wrapper.find('.character-card h3.name').text()).toBe('Gullwing')
+    expect((gold().element as HTMLInputElement).value).toBe('40')
+    expect(wrapper.findAll('.character-card')).toHaveLength(1)
   })
 
   it('edits the open entity, not the selected one', async () => {
