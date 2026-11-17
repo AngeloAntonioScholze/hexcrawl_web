@@ -468,3 +468,108 @@ describe('MapView: an opened entity shows in one place only', () => {
     expect(openButton(view, 'Saltwind').exists()).toBe(false)
   })
 })
+
+describe('MapView: no entity ever shows in the dock as well as its column', () => {
+  const mountDm = (width: number, kind: 'party' | 'npc' | 'caravan' | 'ship') => {
+    setWidth(width)
+    const store = useHexMapStore()
+    store.setTiles(flatField(6))
+    const party = store.entities[0]
+    let id = party.id
+    let name = party.name
+    if (kind !== 'party') {
+      name = { npc: 'Old Ferris', caravan: 'Saltwind', ship: 'Gull' }[kind]
+      id = store.addEntity(name, kind)!.id
+    }
+    if (kind === 'caravan') {
+      store.selectEntity(id)
+      store.select({ q: 0, r: 0 })
+      store.selectEntity(party.id)
+      store.select({ q: 2, r: 0 })
+      store.select({ q: 0, r: 0 })
+      store.advanceTurn()
+      store.advanceTurn()
+      expect(store.carrierOf(party.id)).toBe(id)
+    }
+    if (kind === 'caravan' || kind === 'ship') {
+      store.setSupply(id, 'food', 40)
+      store.setSupply(id, 'gold', 120)
+    }
+    if (kind === 'caravan') store.addMerchant(id, 'smith', 'Brann')
+    store.selectEntity('')
+    const stubs = STUBS.filter((one) => one !== 'CaravanPanel' && one !== 'InventoryList')
+    wrapper = mount(MapView, {
+      global: { stubs: Object.fromEntries(stubs.map((one) => [one, true])) },
+      attachTo: document.body,
+    })
+    return { view: wrapper, store, id, name }
+  }
+
+  const expectDockClear = (view: VueWrapper, name: string): void => {
+    const dock = view.find('.panels')
+    expect(dock.find('.panel.caravan').exists()).toBe(false)
+    expect(dock.find('#panel-caravan-head').exists()).toBe(false)
+    expect(dock.find('.inventory').exists()).toBe(false)
+    expect(dock.find('.bust-row').exists()).toBe(false)
+    const names = dock.findAll('.psec-name').map((one) => one.text())
+    for (const section of ['supplies', 'inventory', 'riders', 'merchants', name]) {
+      expect(names).not.toContain(section)
+    }
+    expect(dock.findAll('h2').filter((one) => one.text().includes(name))).toEqual([])
+    expect(dock.findAll('.title').filter((one) => one.text().includes(name))).toEqual([])
+  }
+
+  const expectOnce = (view: VueWrapper, name: string): void => {
+    const titles = view.findAll('h2').filter((one) => one.text().includes(name))
+    expect(titles.map((one) => one.attributes('id'))).toEqual(['col-1-title'])
+  }
+
+  const KINDS = ['party', 'npc', 'caravan', 'ship'] as const
+
+  describe.each(KINDS)('a %s, as DM at 1600px', (kind) => {
+    it('selected from the map leaves the dock without its sheet', async () => {
+      const { view, store, id, name } = mountDm(1600, kind)
+      store.selectEntity(id)
+      await nextTick()
+      expectDockClear(view, name)
+    })
+
+    it('opened by its list row shows once, in the column', async () => {
+      const { view, id, name, store } = mountDm(1600, kind)
+      await row(view, name).trigger('click')
+      await nextTick()
+      expect(store.selectedId).toBe(id)
+      expectDockClear(view, name)
+      expectOnce(view, name)
+    })
+
+    it('opened by the › button shows once, in the column', async () => {
+      const { view, id, name, store } = mountDm(1600, kind)
+      await openButton(view, name).trigger('click')
+      await nextTick()
+      expect(store.selectedId).toBe(id)
+      expectDockClear(view, name)
+      expectOnce(view, name)
+    })
+  })
+
+  it.each(KINDS)(
+    'a %s selected from the map, stacked, has no caravan panel in the dock',
+    async (kind) => {
+      const { view, store, id, name } = mountDm(1024, kind)
+      store.selectEntity(id)
+      await nextTick()
+      expectDockClear(view, name)
+    },
+  )
+
+  it('a party riding the caravan, selected from the map, leaves the dock clear', async () => {
+    const { view, store } = mountDm(1600, 'caravan')
+    const party = store.entities[0]
+    expect(store.carrierOf(party.id)).not.toBeNull()
+    store.selectEntity(party.id)
+    await nextTick()
+    expectDockClear(view, party.name)
+    expectDockClear(view, 'Saltwind')
+  })
+})
