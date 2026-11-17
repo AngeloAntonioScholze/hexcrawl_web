@@ -6,7 +6,28 @@ import type { Session, SessionHandlers } from '../session/peer'
 import { projectForPlayers } from '../session/projection'
 import { crawlStore } from '../session/snapshotFixture'
 import { useHexMapStore } from './hexMap'
-import { parseLastRoom, REOPEN_WINDOW_MS, reasonFor, roomLink, useSessionStore } from './session'
+import {
+  parseLastRoom,
+  REOPEN_WINDOW_MS,
+  reasonFor,
+  roomLink,
+  useSessionStore as sessionStoreOf,
+} from './session'
+
+/**
+ * Every session store a test made, with the pinia it lives in. A room left
+ * open outlives its test: its broadcasts wait on a timer, real or fake, and
+ * land in the shared outbox below, addressed to a guest of whichever test is
+ * running by then.
+ */
+const stores = new Map<ReturnType<typeof sessionStoreOf>, Pinia>()
+
+const useSessionStore = (): ReturnType<typeof sessionStoreOf> => {
+  const pinia = getActivePinia()!
+  const store = sessionStoreOf(pinia)
+  stores.set(store, pinia)
+  return store
+}
 
 const opened = vi.hoisted(() => ({
   handlers: null as SessionHandlers | null,
@@ -20,7 +41,7 @@ const opened = vi.hoisted(() => ({
 
 vi.mock('../session/peer', async (importOriginal) => {
   const actual = await importOriginal<typeof import('../session/peer')>()
-  const fake = (role: Session['role'], code: string): Session => ({
+  const fake = (role: Session['role'], code: string, handlers: SessionHandlers): Session => ({
     role,
     code,
     send: (message, to) => opened.sent.push({ message, to }),
@@ -32,8 +53,8 @@ vi.mock('../session/peer', async (importOriginal) => {
     }),
     close: () => {
       opened.closed++
-      // As the real one does, closing reports back through the handlers.
-      opened.handlers?.status?.('closed')
+      // As the real one does, closing reports back through its own handlers.
+      handlers.status?.('closed')
     },
   })
   return {
@@ -43,13 +64,13 @@ vi.mock('../session/peer', async (importOriginal) => {
       opened.options = options
       if (opened.refuse) throw new actual.SessionError(opened.refuse, 'refused')
       handlers.status?.('open')
-      return fake('host', options.code ?? 'hexcrawl-abcdef')
+      return fake('host', options.code ?? 'hexcrawl-abcdef', handlers)
     },
     joinRoom: async (input: string, handlers: SessionHandlers) => {
       opened.handlers = handlers
       opened.joins.push(input)
       handlers.status?.('connecting')
-      return fake('guest', input.startsWith('hexcrawl-') ? input : `hexcrawl-${input}`)
+      return fake('guest', input.startsWith('hexcrawl-') ? input : `hexcrawl-${input}`, handlers)
     },
   }
 })
@@ -68,6 +89,13 @@ beforeEach(() => {
     getItem: (key: string) => stored.get(key) ?? null,
     setItem: (key: string, value: string) => stored.set(key, value),
   })
+  return () => {
+    for (const [store, pinia] of stores) {
+      setActivePinia(pinia)
+      store.leave()
+    }
+    stores.clear()
+  }
 })
 
 describe('reasons', () => {
