@@ -8,7 +8,7 @@ Builds on:
 
 Later work that touches this panel (not built here):
 - ped.5 + ped.6 (ship together): replace the player's entities panel with the character panel. This panel's rules do not change when they land; see "Dock".
-- tdj.4: mounts `CharacterCard` in this panel's card slot. See "Card slot".
+- ped.6 (was tdj.4): mounts `EntityCard` in this panel's card slot. See "Card slot".
 
 **The DM's CaravanPanel behaviour is unchanged**: rendered only while a caravan is shown, with the same content and the same edits.
 
@@ -53,7 +53,7 @@ Until tdj.4 lands, the header is the panel's only identity for the caravan: pip 
 ## Body, player view, top to bottom
 | # | block | foldKey | title | meta | contents | player can edit? |
 |---|---|---|---|---|---|---|
-| 0 | **card slot: empty until tdj.4** | none | none | none | Nothing rendered today: no element, no placeholder, no reserved height. See "Card slot" | no |
+| 0 | **card slot: empty until ped.6** | none | none | none | Nothing rendered today: no element, no placeholder, no reserved height. See "Card slot" | no |
 | 1 | summary `dl` (new, never folds) | none | none | none | `standing` = the caravan's hex (`player.scene.states.get(id).at`, `—` when off the map). `headed` = the last hex of `orderOf(player.scene, id)`, or `—`. `pace` = `{pacePerTurn} hex a turn`. Same `dl` markup and style as the entities summary | no |
 | 2 | supplies | `caravan.supplies` | supplies | none | `CaravanSupplies` as today: food and gold. Its inputs are DM-only (`may('supplies')`), so players see values | no |
 | 3 | inventory | `caravan.inventory` | inventory | as 0zz | `InventoryList` as today. Edits and transfers follow `may()`: a player may transfer items between their own character and the caravan, and edit only if they own the caravan | only what `may()` already allows |
@@ -64,11 +64,11 @@ Until tdj.4 lands, the header is the panel's only identity for the caravan: pip 
 - The DM's portrait picker row (`.portrait-row`, gated by `mayPick` = `may('entitySettings')`) is never shown to players. Leave it as is for the DM; tdj.4 decides its fate.
 - With the slot empty, the summary `dl` is the first thing in the body, with the body's normal top padding. No spacing value changes when the card arrives later; the card brings its own margin.
 
-### Card slot (for tdj.4, not built here)
+### Card slot (for ped.6, not built here)
 - Position: first child of the player-view body, above the summary `dl`.
-- Content when tdj.4 lands: `<CharacterCard :entity="infoCaravan">` in its carrier form (portrait and name, no stats), as respecified by the cards epic (hexcrawl_web-tdj). Read only for players.
+- Content: ped.6 owns this mount (2026-11-16; tdj.4 mounts DM cards in columns only). It is a read-only `<EntityCard :entity="infoCaravan">`; see `design/hexcrawl_web-ped.6.md` "Mount 2".
 - Omitted when the subject is this caravan (a player seated at a caravan): their card shows in the character panel instead (ped.6).
-- This bead adds no wrapper element or empty `div` for it. tdj.4 inserts the mount at that position.
+- This bead adds no wrapper element or empty `div` for it. ped.6 inserts the mount at that position.
 
 ### Rider row states (player view)
 | state | own rider (button) | other rider (row) |
