@@ -21,9 +21,12 @@ Run from `hexcrawl_web/`. Run lint and tests in parallel, then the build.
 
 **Typecheck alone**: `bunx vue-tsc --noEmit`.
 
+**CI**: `.github/workflows/ci.yml` runs lint, tests and build on every pull request to `main` (ubuntu, setup-bun, `bun install --frozen-lockfile`). No deploy; `pages.yml` is separate.
+
 **Known noise, not failures**:
 - `prettier --check src` flags about 51 CRLF files that predate current work. Only check files you touched: `bunx prettier --check <files>`.
 - git "LF will be replaced by CRLF" warnings.
+- `src/stores/session.test.ts` wire-sync tests are flaky on Linux: a red CI on that file may need a re-run (projects-0iy).
 
 ## Architecture
 ```
@@ -147,6 +150,9 @@ Grouped by area, newest first within each group. Bead IDs are in the root beads 
 - 2026-10-13: Keep several maps and switch between them (`stores/mapLibrary.ts`, `persistence/mapIndex.ts`).
 - 2026-10-12: Undo/redo for orders and edits (`stores/history.ts`). Export and import maps as JSON (`persistence/mapFile.ts`).
 
+**CI** (`projects-cox.4`)
+- 2026-11-18: Pull-request CI (`.github/workflows/ci.yml`): `bunx eslint src`, `bunx vitest run`, `bun run build` on every PR to `main`. No deploy step.
+
 ## Decisions
 - 2026-11-06: Tasks and memories moved to the root beads DB (`repo:hexcrawl_web`). This file replaces the per-repo CLAUDE.md/AGENTS.md and the local skills.
 - 2026-11-14: Player caravan panel is read-only, and its dock slot is always present. It shows player-allowed fields only. The tdj.4 caravan card repeating gold and the merchants is deliberate (tdj.11/12): the card lists merchant name, type and level, and the priced catalog stays in the section.
@@ -157,3 +163,4 @@ Grouped by area, newest first within each group. Bead IDs are in the root beads 
 - 2026-11-15: Card frame is the supplied raster art (webp frame + png window mask per tone), not generated SVG. Why: the user rejected the hand-built SVG look (2026-11-14). Consequence: fixed aspect, 1x resolution (soft on HiDPI); window mask coordinates are coupled to `CharacterCard.vue` CSS and `FRAME_ART` regions; record provenance in `src/assets/frames/SOURCE.md` and `docs/ASSETS.md` when a frame changes.
 - Known gap: the default entity name can repeat after a delete (tdj.44).
 - Beads stays local-only: no Dolt remote.
+- 2026-11-18: Merge flow is one PR per bead; CI is the pre-merge check and the user merges.
