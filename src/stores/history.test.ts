@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest'
 import { ref } from 'vue'
-import { createHistory, slotOf } from './history'
+import { createHistory, slotOf, type Step } from './history'
 
 const setup = (options: { limit?: number } = {}) => {
   const count = ref(0)
@@ -174,5 +174,180 @@ describe('history', () => {
 
     expect(history.canUndo.value).toBe(false)
     expect(history.canRedo.value).toBe(false)
+  })
+})
+
+describe('history steps', () => {
+  const listen = (history: ReturnType<typeof setup>['history']): Step[] => {
+    const steps: Step[] = []
+    history.onStep((step) => steps.push(step))
+    return steps
+  }
+
+  it('tells only the slots a step changed, with what they held before and after', () => {
+    const { history, bump } = setup()
+    const steps = listen(history)
+    bump(2)
+
+    expect(steps).toEqual([
+      {
+        slots: ['count'],
+        before: { count: 0 },
+        after: { count: 2 },
+        key: null,
+        cause: 'action',
+        merged: false,
+      },
+    ])
+  })
+
+  it('tells nothing for an action that changed nothing', () => {
+    const { history, bump } = setup()
+    const steps = listen(history)
+    bump(0)
+    expect(steps).toEqual([])
+  })
+
+  it('tells a merged edit as standing for the whole burst', () => {
+    const { history, tick, rename } = setup()
+    const steps = listen(history)
+    rename('b')
+    tick(50)
+    rename('c')
+
+    expect(steps[1]).toMatchObject({
+      before: { label: 'a' },
+      after: { label: 'c' },
+      key: 'label',
+      merged: true,
+    })
+  })
+
+  it('tells undo and redo with the state they left', () => {
+    const { history, bump } = setup()
+    bump(3)
+    const steps = listen(history)
+    history.undo()
+    history.redo()
+
+    expect(steps.map(({ cause, before, after }) => ({ cause, before, after }))).toEqual([
+      { cause: 'undo', before: { count: 3 }, after: { count: 0 } },
+      { cause: 'redo', before: { count: 0 }, after: { count: 3 } },
+    ])
+  })
+
+  it('tells a stroke once when it ends', () => {
+    const { history, bump } = setup()
+    const steps = listen(history)
+    history.begin()
+    bump(1)
+    bump(1)
+    expect(steps).toEqual([])
+    history.end()
+
+    expect(steps).toHaveLength(1)
+    expect(steps[0]).toMatchObject({ before: { count: 0 }, after: { count: 2 } })
+  })
+
+  it('stops telling a listener once it unsubscribes', () => {
+    const { history, bump } = setup()
+    const steps: Step[] = []
+    const stop = history.onStep((step) => steps.push(step))
+    stop()
+    bump(1)
+    expect(steps).toEqual([])
+  })
+
+  it('tells an observed action without leaving a step to undo', () => {
+    const { count, history } = setup()
+    const steps = listen(history)
+    const advance = history.observe(() => {
+      count.value += 1
+    })
+    advance()
+
+    expect(history.canUndo.value).toBe(false)
+    expect(steps).toEqual([
+      {
+        slots: ['count'],
+        before: { count: 0 },
+        after: { count: 1 },
+        key: null,
+        cause: 'action',
+        merged: false,
+      },
+    ])
+  })
+
+  it('tells an observed action that changed nothing as nothing', () => {
+    const { history } = setup()
+    const steps = listen(history)
+    history.observe(() => undefined)()
+    expect(steps).toEqual([])
+  })
+
+  it('takes tracked actions inside an observed one into its step', () => {
+    const { history, bump } = setup()
+    const steps = listen(history)
+    history.observe(() => {
+      bump(1)
+      bump(1)
+    })()
+
+    expect(history.canUndo.value).toBe(false)
+    expect(steps).toHaveLength(1)
+    expect(steps[0]!.after).toEqual({ count: 2 })
+  })
+
+  it('keeps the next edit out of the step before an observed action', () => {
+    const { label, history, rename } = setup()
+    rename('b')
+    history.observe(() => undefined)()
+    history.observe((to: number) => {
+      label.value = `${label.value}${to}`
+    })(1)
+    rename('c')
+
+    history.undo()
+    expect(label.value).toBe('b1')
+  })
+
+  it('folds observed actions under one key in quick succession', () => {
+    const { count, history, tick } = setup()
+    const steps = listen(history)
+    const set = history.observe(
+      (to: number) => {
+        count.value = to
+      },
+      () => 'count',
+    )
+    set(1)
+    tick(50)
+    set(2)
+    tick(500)
+    set(3)
+
+    expect(steps.map(({ before, after, merged }) => ({ before, after, merged }))).toEqual([
+      { before: { count: 0 }, after: { count: 1 }, merged: false },
+      { before: { count: 0 }, after: { count: 2 }, merged: true },
+      { before: { count: 2 }, after: { count: 3 }, merged: false },
+    ])
+  })
+
+  it('does not fold an observed action into one from before an undo', () => {
+    const { count, history, bump } = setup()
+    const steps = listen(history)
+    const set = history.observe(
+      (to: number) => {
+        count.value = to
+      },
+      () => 'count',
+    )
+    set(5)
+    bump(1)
+    history.undo()
+    set(7)
+
+    expect(steps.at(-1)).toMatchObject({ before: { count: 5 }, merged: false })
   })
 })

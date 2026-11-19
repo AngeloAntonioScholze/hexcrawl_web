@@ -19,8 +19,11 @@ import {
 } from '../entities/merchant'
 import { SUPPLY_LIMITS, type Supply } from '../entities/supplies'
 import type { HexKey } from '../hex/coords'
+import type { Viewer } from '../session/permissions'
 import type { Seat } from '../session/seats'
 import type { TerrainControls } from '../stores/hexMap'
+import type { StepCause } from '../stores/history'
+import type { Json, JournalChange, JournalEntry } from '../stores/journal'
 import { MAP_STYLES, type MapStyle } from '../terrain/mapStyles'
 import { isRiverEdge, type RiverEdge } from '../terrain/rivers'
 import { isRoadEdge, type RoadEdge } from '../terrain/roads'
@@ -214,6 +217,32 @@ const isCharacters: Guard<readonly SavedCharacter[]> = (
     }),
   )(value) && new Set(value.map((one) => one.entityId)).size === value.length
 
+const isJson: Guard<Json> = (value): value is Json =>
+  value === null ||
+  isString(value) ||
+  isBoolean(value) ||
+  isNumber(value) ||
+  (Array.isArray(value) && value.every(isJson)) ||
+  (isObject(value) && Object.values(value).every(isJson))
+
+const optional =
+  <T>(guard: Guard<T>): Guard<T | undefined> =>
+  (value): value is T | undefined =>
+    value === undefined || guard(value)
+
+const isJournalChange = shape<JournalChange>({
+  target: isString,
+  key: optional(isString),
+  field: optional(isString),
+  at: optional(isTurn),
+  old: isJson,
+  new: isJson,
+})
+
+const isViewer: Guard<Viewer> = (value): value is Viewer =>
+  isObject(value) &&
+  (value.role === 'dm' || (value.role === 'player' && optional(listOf(isString))(value.plays)))
+
 /** One check per snapshot field; a new field is one line here and one in ADDED_FIELD_DEFAULTS. */
 export const SNAPSHOT_FIELDS: { [K in keyof MapSnapshot]-?: Guard<MapSnapshot[K]> } = {
   terrain: shape<TerrainControls>({
@@ -363,6 +392,16 @@ export const SNAPSHOT_FIELDS: { [K in keyof MapSnapshot]-?: Guard<MapSnapshot[K]
   ),
   seats: listOf(shape<Seat>({ name: isString, entityId: isString })),
   characters: isCharacters,
+  journal: listOf(
+    shape<JournalEntry>({
+      id: isString,
+      who: isViewer,
+      cause: oneOf<StepCause>('action', 'undo', 'redo'),
+      turn: isTurn,
+      at: isNumber,
+      changes: listOf(isJournalChange),
+    }),
+  ),
 }
 
 /** The fields every version 1 file has carried since the first export. */
@@ -409,6 +448,7 @@ const ADDED_FIELD_DEFAULTS: {
   items: () => [],
   seats: () => [],
   characters: () => [],
+  journal: () => [],
 }
 
 const withDefault = (key: string, value: unknown): unknown => {

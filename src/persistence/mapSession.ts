@@ -66,6 +66,8 @@ const plain = (snapshot: MapSnapshot): MapSnapshot => ({
   terrainOverrides: snapshot.terrainOverrides.map((one) => ({ ...one })),
   seats: snapshot.seats.map((one) => ({ ...one })),
   characters: snapshot.characters.map((one) => ({ ...one })),
+  // Entries are plain JSON from the moment they are written, and never changed after.
+  journal: [...snapshot.journal],
 })
 
 interface Pending {

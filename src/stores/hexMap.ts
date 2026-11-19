@@ -141,6 +141,7 @@ import {
 } from '../session/permissions'
 import { assignSeat, seatAt, seatOf, seatsOf, withSeat, type Seat } from '../session/seats'
 import { createHistory, slotOf } from './history'
+import { createRecorder, type JournalEntry } from './journal'
 
 const NOTHING_IN_SIGHT: PartySight = { radius: 0, visible: new Set(), blocked: new Set() }
 
@@ -427,10 +428,14 @@ export const useHexMapStore = defineStore('hexMap', () => {
   /**
    * What undo can take back: the DM's edits and the orders being given. An
    * action opts in by being wrapped in history.track where the store hands it
-   * out; state it writes that is not listed here is left where it is. The turn
-   * is not in it, and moving the clock forgets every step.
+   * out; state it writes that is not listed here is left where it is. Moving
+   * the clock, the seating and the world are only observed: they leave no step
+   * and forget every step, but the journal still hears them.
    */
   const history = createHistory({
+    turn: slotOf(turn),
+    terrain: slotOf(terrain),
+    worldRadius: slotOf(worldRadius),
     entities: slotOf(entities),
     selectedId: slotOf(selectedId),
     origins: slotOf(origins),
@@ -458,6 +463,18 @@ export const useHexMapStore = defineStore('hexMap', () => {
     seats: slotOf(seats),
     characters: slotOf(characters),
   })
+
+  /** Every change to the game, oldest first: saved with the map, never sent to players. */
+  const journal = shallowRef<readonly JournalEntry[]>([])
+  history.onStep(
+    createRecorder(
+      () => journal.value,
+      (next) => {
+        journal.value = next
+      },
+      () => ({ who: actingFor ?? viewer.value, turn: turn.value }),
+    ),
+  )
 
   /**
    * Whoever the map is currently listening to, or nobody at all: a map can be
@@ -2043,6 +2060,7 @@ export const useHexMapStore = defineStore('hexMap', () => {
     })),
     seats: seats.value,
     characters: [...characters.value].map(([entityId, one]) => ({ entityId, ...one })),
+    journal: journal.value,
   }))
 
   // Terrain goes in first: laying down a new world is what wipes the map, so
@@ -2124,6 +2142,7 @@ export const useHexMapStore = defineStore('hexMap', () => {
     terrainOverrides.value = new Map(
       saved.terrainOverrides.map(({ hex, terrain: id }) => [hex, id]),
     )
+    journal.value = [...saved.journal]
     history.clear()
   }
 
@@ -2196,8 +2215,8 @@ export const useHexMapStore = defineStore('hexMap', () => {
     seats,
     seatedIds,
     seatPlayer: history.track(seatPlayer),
-    assignEntity,
-    setEntityOwner,
+    assignEntity: history.observe(assignEntity),
+    setEntityOwner: history.observe(setEntityOwner),
     setEntityHidden: history.track(setEntityHidden),
     setEntityHostile: history.track(setEntityHostile),
     playerOf,
@@ -2223,7 +2242,7 @@ export const useHexMapStore = defineStore('hexMap', () => {
     pathHexes,
     paths,
     showAllPaths,
-    clearHistory,
+    clearHistory: history.observe(clearHistory),
     hoveredTile,
     hoverFootprint,
     turn,
@@ -2232,10 +2251,10 @@ export const useHexMapStore = defineStore('hexMap', () => {
     frames,
     queue,
     queueAction: history.track(queueAction),
-    advanceTurn,
-    rewindTurn,
-    goToTurn,
-    skipPhase,
+    advanceTurn: history.observe(advanceTurn),
+    rewindTurn: history.observe(rewindTurn),
+    goToTurn: history.observe(goToTurn),
+    skipPhase: history.observe(skipPhase),
     canRewind,
     journey,
     adventureLog,
@@ -2248,12 +2267,12 @@ export const useHexMapStore = defineStore('hexMap', () => {
     hexesWalkedFor,
     travelledKm,
     terrain,
-    setTerrain,
-    reseed,
+    setTerrain: history.observe(setTerrain, () => 'terrain'),
+    reseed: history.observe(reseed),
     worldRadius,
     worldSize,
-    setWorldRadius,
-    setWorldSize,
+    setWorldRadius: history.observe(setWorldRadius, () => 'world'),
+    setWorldSize: history.observe(setWorldSize, () => 'world'),
     fog,
     revealed,
     setRevealed: history.track(setRevealed),
@@ -2309,6 +2328,7 @@ export const useHexMapStore = defineStore('hexMap', () => {
     endStroke,
     clear: history.track(clear),
     snapshot,
+    journal: computed(() => journal.value),
     restore,
     notes,
     setNote: history.track(setNote, (hex) => `note:${hex}`),

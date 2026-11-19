@@ -235,6 +235,16 @@ const snapshot = (): MapSnapshot => ({
     { entityId: 'spy', purse: 777, level: 11 },
     { entityId: 'party', purse: 12, level: 3 },
   ],
+  journal: [
+    {
+      id: 'journal-1',
+      who: { role: 'dm' },
+      cause: 'action',
+      turn: 0,
+      at: 1700000000000,
+      changes: [{ target: 'notes', key: '0,0', old: null, new: 'a secret door' }],
+    },
+  ],
 })
 
 const project = (map: MapSnapshot = snapshot()): PlayerProjection => projectForPlayers(map, field)
@@ -403,6 +413,14 @@ describe('what the players never get', () => {
 
   it('leaves out who is seated at which token', () => {
     expect(JSON.stringify(project())).not.toContain('Mira')
+  })
+
+  it('leaves out the change journal', () => {
+    const view = project()
+    expect(view).not.toHaveProperty('journal')
+    const text = JSON.stringify(view)
+    expect(text).not.toContain('journal-1')
+    expect(text).not.toContain('a secret door')
   })
 })
 
