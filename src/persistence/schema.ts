@@ -281,6 +281,18 @@ const MIGRATIONS: readonly string[] = [
   `
   ALTER TABLE entity ADD COLUMN hostile INTEGER NOT NULL DEFAULT 0;
   `,
+  `
+  CREATE TABLE journal (
+    ord INTEGER PRIMARY KEY,
+    id TEXT NOT NULL,
+    role TEXT NOT NULL,
+    plays TEXT,
+    cause TEXT NOT NULL,
+    turn INTEGER NOT NULL,
+    at INTEGER NOT NULL,
+    changes TEXT NOT NULL
+  );
+  `,
 ]
 
 export const SCHEMA_VERSION = MIGRATIONS.length

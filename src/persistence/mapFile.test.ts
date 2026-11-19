@@ -169,6 +169,27 @@ const snapshot = (): MapSnapshot => ({
   terrainOverrides: [{ hex: '1,0' as HexKey, terrain: 'mountains' }],
   seats: [{ name: 'Mira', entityId: 'party-1' }],
   characters: [{ entityId: 'party-1', purse: 120, level: 3 }],
+  journal: [
+    {
+      id: 'j1',
+      who: { role: 'dm' },
+      cause: 'action',
+      turn: 0,
+      at: 1700000000000,
+      changes: [{ target: 'notes', key: '0,0', old: null, new: 'a well' }],
+    },
+    {
+      id: 'j2',
+      who: { role: 'player', plays: ['party-1'] },
+      cause: 'undo',
+      turn: 1,
+      at: 1700000001000,
+      changes: [
+        { target: 'entities', key: 'party-1', field: 'name', old: 'a', new: 'b' },
+        { target: 'frames', at: 1, old: [{ records: [], states: {} }], new: 0 },
+      ],
+    },
+  ],
 })
 
 // Breaking the file in every way it can be broken is the point, so the edits
@@ -353,6 +374,20 @@ describe('parseMapFile', () => {
       (map) => map.characters.push({ entityId: 'party-1', purse: 0, level: 1 }),
       'characters',
     ],
+    ['a journal entry with no id', (map) => delete map.journal[0].id, 'journal'],
+    ['a journal entry by nobody', (map) => (map.journal[0].who = { role: 'ghost' }), 'journal'],
+    ['an unknown journal cause', (map) => (map.journal[0].cause = 'magic'), 'journal'],
+    [
+      'a journal change with no target',
+      (map) => delete map.journal[1].changes[0].target,
+      'journal',
+    ],
+    ['a journal change at half a place', (map) => (map.journal[1].changes[1].at = 0.5), 'journal'],
+    [
+      'a journal change with no old value',
+      (map) => delete map.journal[0].changes[0].old,
+      'journal',
+    ],
   ])('turns away %s, naming the field', (_, edit, field) => {
     expect(rejected(tampered((file) => edit(file.map)))).toContain(`"${field}"`)
   })
@@ -394,6 +429,7 @@ describe('parseMapFile', () => {
     ['seats', []],
     ['playerReachCapped', true],
     ['characters', []],
+    ['journal', []],
   ])('opens a file from before %s existed with the default', (field, fallback) => {
     const result = parseMapFile(tampered((file) => delete file.map[field]))
     expect(result).toEqual({ ok: true, snapshot: { ...snapshot(), [field]: fallback } })

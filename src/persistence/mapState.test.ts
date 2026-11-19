@@ -2,6 +2,8 @@ import type { Database } from '@sqlite.org/sqlite-wasm'
 import { beforeEach, describe, expect, it } from 'vitest'
 import type { Entity } from '../entities/entity'
 import type { HexKey } from '../hex/coords'
+import type { Viewer } from '../session/permissions'
+import type { JournalEntry } from '../stores/journal'
 import { DEFAULT_RESOURCE_SPACING, defaultResourceChances } from '../terrain/resources'
 import { loadSnapshot, saveSnapshot, type MapSnapshot } from './mapState'
 import { migrate, schemaVersion, SCHEMA_VERSION } from './schema'
@@ -33,6 +35,23 @@ const caravan: Entity = {
   hostile: true,
   portrait: 'dusk-road',
 }
+
+const entry = (id: string, who: Viewer = { role: 'dm' }): JournalEntry => ({
+  id,
+  who,
+  cause: 'action',
+  turn: 1,
+  at: 1700000000000,
+  changes: [
+    { target: 'notes', key: '0,0', old: null, new: id },
+    {
+      target: 'frames',
+      at: 0,
+      old: [{ records: [], states: { 'party-1': { at: '0,0' } } }],
+      new: 1,
+    },
+  ],
+})
 
 const snapshot = (patch: Partial<MapSnapshot> = {}): MapSnapshot => ({
   terrain: { seed: 4242, scale: 65, seaLevel: -0.15, relief: 9.5, style: 'pangaea' },
@@ -196,6 +215,7 @@ const snapshot = (patch: Partial<MapSnapshot> = {}): MapSnapshot => ({
     { name: 'Mira', entityId: 'party-1' },
   ],
   characters: [{ entityId: 'party-1', purse: 45, level: 2 }],
+  journal: [entry('j1', { role: 'dm' }), entry('j2', { role: 'player', plays: ['party-1'] })],
   ...patch,
 })
 
@@ -254,6 +274,7 @@ describe('schema', () => {
     expect(loaded.seats).toEqual([])
     expect(loaded.playerReachCapped).toBe(true)
     expect(loaded.characters).toEqual([])
+    expect(loaded.journal).toEqual([])
 
     saveSnapshot(old, snapshot())
     expect(loadSnapshot(old)!.turn).toBe(2)
@@ -273,7 +294,8 @@ describe('schema', () => {
     saveSnapshot(db, snapshot({ entities: [] }))
     db.exec(`
       ALTER TABLE entity DROP COLUMN hostile;
-      PRAGMA user_version = ${SCHEMA_VERSION - 1};
+      DROP TABLE journal;
+      PRAGMA user_version = ${SCHEMA_VERSION - 2};
       INSERT INTO entity (id, ord, name, kind, owner, color, pace, sight, hidden, darkvision)
       VALUES ('caravan-1', 0, 'the caravan', 'caravan', 'dm', '#6fa8dc', 1, 5, 0, 0)
     `)
@@ -282,6 +304,19 @@ describe('schema', () => {
 
     expect(schemaVersion(db)).toBe(SCHEMA_VERSION)
     expect(loadSnapshot(db)!.entities[0].hostile).toBe(false)
+  })
+
+  it('opens a database saved before the journal with an empty one', () => {
+    saveSnapshot(db, snapshot())
+    db.exec(`
+      DROP TABLE journal;
+      PRAGMA user_version = ${SCHEMA_VERSION - 1};
+    `)
+
+    migrate(db)
+
+    expect(schemaVersion(db)).toBe(SCHEMA_VERSION)
+    expect(loadSnapshot(db)!.journal).toEqual([])
   })
 
   it('leaves an already current database alone', () => {
@@ -547,6 +582,30 @@ describe('map state', () => {
 
     saveSnapshot(db, snapshot({ characters: [] }))
     expect(loadSnapshot(db)!.characters).toEqual([])
+  })
+
+  it('round-trips the journal, who made each change included', () => {
+    const saved = snapshot()
+    saveSnapshot(db, saved)
+
+    expect(loadSnapshot(db)!.journal).toEqual(saved.journal)
+  })
+
+  it('writes only the journal rows past the last save, keeping the earlier ones', () => {
+    saveSnapshot(db, snapshot({ journal: [entry('a'), entry('b')] }))
+    db.exec("UPDATE journal SET cause = 'redo' WHERE id = 'a'")
+
+    saveSnapshot(db, snapshot({ journal: [entry('a'), entry('c'), entry('d')] }))
+
+    const loaded = loadSnapshot(db)!.journal
+    expect(loaded.map((one) => one.id)).toEqual(['a', 'c', 'd'])
+    expect(loaded[0].cause).toBe('redo')
+  })
+
+  it('lets the journal be emptied', () => {
+    saveSnapshot(db, snapshot())
+    saveSnapshot(db, snapshot({ journal: [] }))
+    expect(loadSnapshot(db)!.journal).toEqual([])
   })
 
   it('keeps the record in the order the turns were spent', () => {

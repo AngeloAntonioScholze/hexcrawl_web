@@ -37,7 +37,7 @@ src/
   time/         clock (day/night, turns)
   encounters/   random tables, journey log
   engine/       Babylon scene: hexGrid (thin instances), hexWindow, fog (lids/wave/stepper), sky, tokens, markers, minimap, camera/controls
-  stores/       Pinia: hexMap (core map state + actions), history (undo/redo), mapLibrary, session
+  stores/       Pinia: hexMap (core map state + actions), history (undo/redo), journal (change log), mapLibrary, session
   session/      WebRTC: peer, admission, seats, permissions, projection, snapshot codec/diff, stateSync, messages
   persistence/  SQLite worker: schema (migrations), mapState, mapFile (JSON import/export), mapSession, mapIndex
   composables/  view glue: useHexWindow, usePlayerView, useViewMode, useZoomLimit, useUndoKeys
@@ -147,6 +147,7 @@ Grouped by area, newest first within each group. Bead IDs are in the root beads 
 - 2026-09-10: First fog of war, player token, sight bonus for mountains and peaks.
 
 **Persistence and maps** (`hexcrawl_web-9tn`)
+- 2026-11-18: Change journal of game-state changes (`projects-8y3.1`, awaiting user validation). `stores/journal.ts` (pure) records one entry per committed change: `id`, `who {role, plays?}`, `cause` (action|undo|redo), `turn` (before the step), `at`, `changes {target, key?, field?, at?, old, new}`. A map change with `at` is a splice, without it a whole value. World changes record the full old values of wiped slots, including dropped frames (big but rare; needed for rewind, `projects-8y3.2`). Hooked at `stores/history.ts` `onStep`/`observe`. `hexMap` exposes the journal as a read-only `shallowRef`. A merged history step replaces the last entry; undo and redo append inverse entries (append-only). Excluded: selection, roadTail, camera, panels, hover. Saved with the map and in the map JSON: schema migration (journal table), `MapSnapshot.journal`, `mapFile` guard plus `ADDED_FIELD_DEFAULTS` `journal: []`, `mapSession` `plain()`. Old maps load with an empty journal. Players never get it: the projection uses a fixed field list (test in `session/projection.test.ts`). Size, bounded by tests in `stores/hexMap.journal.test.ts`: orders plus turns 62,082 bytes per 100 turns (201 entries, ~310 B each); supply-heavy 45,519 bytes per 100 turns (~245 B per supply entry, constant). Autosave posts the full journal until `projects-8y3.3`.
 - 2026-10-13: Keep several maps and switch between them (`stores/mapLibrary.ts`, `persistence/mapIndex.ts`).
 - 2026-10-12: Undo/redo for orders and edits (`stores/history.ts`). Export and import maps as JSON (`persistence/mapFile.ts`).
 
@@ -164,3 +165,4 @@ Grouped by area, newest first within each group. Bead IDs are in the root beads 
 - Known gap: the default entity name can repeat after a delete (tdj.44).
 - Beads stays local-only: no Dolt remote.
 - 2026-11-18: Merge flow is one PR per bead; CI is the pre-merge check and the user merges.
+- 2026-11-18: The journal and `stores/history.ts` share one capture point (history `onStep`/`observe`); no duplicate tracking. Undo stays a ref-swap and session-only; the journal is append-only and not the undo source. Non-undoable game actions (turn clock, assign/owner, terrain/world) go through `observe()`, which emits without pushing an undo step.

@@ -12,6 +12,7 @@ import type { HexEvent, HexLocation } from '../hex/content'
 import type { HexKey } from '../hex/coords'
 import type { Seat } from '../session/seats'
 import type { Origin, TerrainControls } from '../stores/hexMap'
+import type { JournalChange, JournalEntry } from '../stores/journal'
 import type { MapStyle } from '../terrain/mapStyles'
 import type { RiverEdge } from '../terrain/rivers'
 import type { RoadEdge } from '../terrain/roads'
@@ -114,6 +115,8 @@ export interface MapSnapshot {
   seats: readonly Seat[]
   /** The purse and level of every party and npc edited off the defaults, in the order first edited. */
   characters: readonly SavedCharacter[]
+  /** Every change made to the game, oldest first. DM-only: never projected to players. */
+  journal: readonly JournalEntry[]
 }
 
 const SAVE_MAP = `
@@ -473,8 +476,53 @@ export function saveSnapshot(db: Database, snapshot: MapSnapshot): void {
     } finally {
       character.finalize()
     }
+
+    // The journal only grows, bar its last entry being replaced, so the rows up
+    // to the first one that differs are left alone rather than written again.
+    const written = db.selectValues('SELECT id FROM journal ORDER BY ord')
+    let kept = 0
+    while (kept < written.length && written[kept] === snapshot.journal[kept]?.id) kept += 1
+    db.exec({ sql: 'DELETE FROM journal WHERE ord >= ?', bind: [kept] })
+    const entry = db.prepare(
+      'INSERT INTO journal (ord, id, role, plays, cause, turn, at, changes) VALUES (?, ?, ?, ?, ?, ?, ?, ?)',
+    )
+    try {
+      snapshot.journal.slice(kept).forEach((one, index) => {
+        entry
+          .bind([
+            kept + index,
+            one.id,
+            one.who.role,
+            one.who.role === 'player' && one.who.plays ? JSON.stringify(one.who.plays) : null,
+            one.cause,
+            one.turn,
+            one.at,
+            JSON.stringify(one.changes),
+          ])
+          .stepReset()
+      })
+    } finally {
+      entry.finalize()
+    }
   })
 }
+
+const journalEntry = (row: Record<string, unknown>): JournalEntry => ({
+  id: String(row.id),
+  who:
+    row.role === 'dm'
+      ? { role: 'dm' }
+      : {
+          role: 'player',
+          ...(typeof row.plays === 'string'
+            ? { plays: JSON.parse(row.plays) as readonly string[] }
+            : {}),
+        },
+  cause: String(row.cause) as JournalEntry['cause'],
+  turn: Number(row.turn),
+  at: Number(row.at),
+  changes: JSON.parse(String(row.changes)) as readonly JournalChange[],
+})
 
 export function loadSnapshot(db: Database): MapSnapshot | null {
   const row = db.selectObject('SELECT * FROM map WHERE id = 1')
@@ -646,5 +694,6 @@ export function loadSnapshot(db: Database): MapSnapshot | null {
       purse: Number(one.purse),
       level: Number(one.level),
     })),
+    journal: db.selectObjects('SELECT * FROM journal ORDER BY ord').map(journalEntry),
   }
 }
