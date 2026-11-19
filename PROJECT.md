@@ -44,6 +44,7 @@ src/
   components/   panels: Caravan*, HexDetails/*, DmToolbar, MiniMap, SessionBar, Enter/Host/Join
   views/        MapView.vue
   analytics/    the only module that imports posthog-js (consent-gated)
+  csp.ts        pure buildCsp: the meta Content-Security-Policy (injected at build only)
 docs/reference/ art references
 ```
 - **Windowed world**: the grid draws only a viewport-sized window of a large world (`engine/hexWindow.ts`, `composables/useHexWindow.ts`).
@@ -72,6 +73,7 @@ docs/reference/ art references
 - `session.test.ts` runs every fake session through one shared outbox, so every session store a test creates must come from the file's `useSessionStore` wrapper, which the root `beforeEach` teardown leaves. A store left hosting keeps its 100 ms broadcast coalescer (`stateSync.ts` `createCoalescer`) on a real timer, which later drops a stray patch into another test's outbox (seen as flaky "the map over the wire" tests, projects-jww).
 - **UI copy and titles are sentence case** ("Usage stats", "Share stats" / "Don't share").
 - **Analytics**: capture only through `src/analytics`, never import `posthog-js` elsewhere. Event props are controlled enums: no PII, no free text, no map content. Never add per-frame capture.
+- **CSP**: the built page carries a meta CSP from `src/csp.ts` (`buildCsp`), injected by the `hexcrawl-csp` vite plugin at build only, so dev has no CSP. A new external origin (fetch, websocket, script, font or image) must be added in `src/csp.ts` and checked in `bun run build` + `vite preview`, or the browser blocks it in production only.
 - More gotchas are in bd memories with the `hexcrawl-web-` prefix (thin instances, Vite on Windows, scoped styles, perf tools).
 
 ## Hot spots
@@ -150,6 +152,9 @@ Grouped by area, newest first within each group. Bead IDs are in the root beads 
 - 2026-11-18: Change journal of game-state changes (`projects-8y3.1`, awaiting user validation). `stores/journal.ts` (pure) records one entry per committed change: `id`, `who {role, plays?}`, `cause` (action|undo|redo), `turn` (before the step), `at`, `changes {target, key?, field?, at?, old, new}`. A map change with `at` is a splice, without it a whole value. World changes record the full old values of wiped slots, including dropped frames (big but rare; needed for rewind, `projects-8y3.2`). Hooked at `stores/history.ts` `onStep`/`observe`. `hexMap` exposes the journal as a read-only `shallowRef`. A merged history step replaces the last entry; undo and redo append inverse entries (append-only). Excluded: selection, roadTail, camera, panels, hover. Saved with the map and in the map JSON: schema migration (journal table), `MapSnapshot.journal`, `mapFile` guard plus `ADDED_FIELD_DEFAULTS` `journal: []`, `mapSession` `plain()`. Old maps load with an empty journal. Players never get it: the projection uses a fixed field list (test in `session/projection.test.ts`). Size, bounded by tests in `stores/hexMap.journal.test.ts`: orders plus turns 62,082 bytes per 100 turns (201 entries, ~310 B each); supply-heavy 45,519 bytes per 100 turns (~245 B per supply entry, constant). Autosave posts the full journal until `projects-8y3.3`.
 - 2026-10-13: Keep several maps and switch between them (`stores/mapLibrary.ts`, `persistence/mapIndex.ts`).
 - 2026-10-12: Undo/redo for orders and edits (`stores/history.ts`). Export and import maps as JSON (`persistence/mapFile.ts`).
+
+**Security** (`projects-i0t.3.11`)
+- 2026-11-19: Meta Content-Security-Policy on the built page. Vite plugin `hexcrawl-csp` (`apply: 'build'`, `transformIndexHtml`) injects it as the first child of `<head>`; the dev server has none, so HMR works. `src/csp.ts` `buildCsp` (pure, tested in `src/csp.test.ts`) gives: `default-src 'self'`; `script-src 'self' 'wasm-unsafe-eval'`; `worker-src 'self' blob:`; `connect-src 'self'` plus PeerJS (`https://0.peerjs.com`, `wss://0.peerjs.com`) and the PostHog origin from `VITE_POSTHOG_HOST`; `img-src 'self' data: blob:`; `font-src 'self' data:`; `style-src 'self' 'unsafe-inline'`; `object-src 'none'`; `base-uri 'self'`. `VITE_POSTHOG_HOST` must be a plain http(s) origin or the build fails naming the variable; unset adds no PostHog source. `frame-ancestors` cannot be set in a meta tag. WebRTC data channels are not governed by `connect-src`. Checked in `vite preview`: enter screen, map render (Babylon, SQLite worker), PostHog consent, PeerJS signalling, no violations. The live Pages build gets the PostHog source only once `projects-qrk.22` adds `VITE_POSTHOG_HOST` to its variables.
 
 **CI** (`projects-cox.4`)
 - 2026-11-18: Pull-request CI (`.github/workflows/ci.yml`): `bunx eslint src`, `bunx vitest run`, `bun run build` on every PR to `main`. No deploy step.
