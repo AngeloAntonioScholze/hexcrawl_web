@@ -21,7 +21,7 @@ Run from `hexcrawl_web/`. Run lint and tests in parallel, then the build.
 
 **Typecheck alone**: `bunx vue-tsc --noEmit`.
 
-**CI**: `.github/workflows/ci.yml` runs lint, tests and build on every pull request to `main` (ubuntu, setup-bun, `bun install --frozen-lockfile`). No deploy; `pages.yml` is separate.
+**CI**: `.github/workflows/ci.yml` runs lint, tests and build on every pull request to `main` (ubuntu, setup-bun 1.4.2, `bun install --frozen-lockfile`). No deploy; `pages.yml` is separate. Both workflows default to `contents: read`; only the `pages.yml` deploy job gets `pages: write` and `id-token: write`. Actions are pinned to commit SHAs (tag in a trailing comment), checkout uses `persist-credentials: false`, and Dependabot bumps them weekly (`.github/dependabot.yml`).
 
 **Known noise, not failures**:
 - `prettier --check src` flags about 51 CRLF files that predate current work. Only check files you touched: `bunx prettier --check <files>`.
@@ -51,6 +51,7 @@ docs/reference/ art references
 - **Player view**: DM state is projected down to a player view (`session/projection.ts`) before being sent or rendered for players.
 
 ## Rules
+- **GitHub workflows**: every `uses:` is pinned to a full commit SHA with the tag in a comment (Dependabot updates both). Keep workflow-level permissions at `contents: read` and grant extra scopes per job. Checkout sets `persist-credentials: false`. Pass `${{ }}` values to `run:` through `env:`, never inline.
 - **Git**: root policy applies. Agents may commit once the work is validated; ask before `git push`, tags and PRs.
 - Every new store action needs:
   - a `may()` guard
@@ -153,6 +154,7 @@ Grouped by area, newest first within each group. Bead IDs are in the root beads 
 
 **CI** (`projects-cox.4`)
 - 2026-11-18: Pull-request CI (`.github/workflows/ci.yml`): `bunx eslint src`, `bunx vitest run`, `bun run build` on every PR to `main`. No deploy step.
+- 2026-11-19: Workflows hardened (`projects-i0t.3.10`). Workflow-level `contents: read`; `pages: write` and `id-token: write` on the `pages.yml` deploy job only. Actions pinned to SHAs (checkout v4.4.0, setup-bun v2.2.0, configure-pages v5.0.0, upload-pages-artifact v3.0.1, deploy-pages v4.0.5), `persist-credentials: false`, `bun-version: 1.4.2`, Pages `base_path` passed via env `BASE_PATH`. Dependabot `github-actions` weekly.
 
 ## Decisions
 - 2026-11-06: Tasks and memories moved to the root beads DB (`repo:hexcrawl_web`). This file replaces the per-repo CLAUDE.md/AGENTS.md and the local skills.
