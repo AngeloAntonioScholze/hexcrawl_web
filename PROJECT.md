@@ -21,7 +21,7 @@ Run from `hexcrawl_web/`. Run lint and tests in parallel, then the build.
 
 **Typecheck alone**: `bunx vue-tsc --noEmit`.
 
-**CI**: `.github/workflows/ci.yml` runs lint, tests and build on every pull request to `main` (ubuntu, setup-bun, `bun install --frozen-lockfile`). No deploy; `pages.yml` is separate.
+**CI**: `.github/workflows/ci.yml` runs lint, tests and build on every pull request to `main` (ubuntu, setup-bun 1.4.2, `bun install --frozen-lockfile`). No deploy; `pages.yml` is separate. Both workflows default to `contents: read`; only the `pages.yml` deploy job gets `pages: write` and `id-token: write`. Actions are pinned to commit SHAs (tag in a trailing comment), checkout uses `persist-credentials: false`, and Dependabot bumps them weekly (`.github/dependabot.yml`).
 
 **Known noise, not failures**:
 - `prettier --check src` flags about 51 CRLF files that predate current work. Only check files you touched: `bunx prettier --check <files>`.
@@ -44,6 +44,7 @@ src/
   components/   panels: Caravan*, HexDetails/*, DmToolbar, MiniMap, SessionBar, Enter/Host/Join
   views/        MapView.vue
   analytics/    the only module that imports posthog-js (consent-gated)
+  csp.ts        pure buildCsp: the meta Content-Security-Policy (injected at build only)
 docs/reference/ art references
 ```
 - **Windowed world**: the grid draws only a viewport-sized window of a large world (`engine/hexWindow.ts`, `composables/useHexWindow.ts`).
@@ -51,6 +52,7 @@ docs/reference/ art references
 - **Player view**: DM state is projected down to a player view (`session/projection.ts`) before being sent or rendered for players.
 
 ## Rules
+- **GitHub workflows**: every `uses:` is pinned to a full commit SHA with the tag in a comment (Dependabot updates both). Keep workflow-level permissions at `contents: read` and grant extra scopes per job. Checkout sets `persist-credentials: false`. Pass `${{ }}` values to `run:` through `env:`, never inline.
 - **Git**: root policy applies. Agents may commit once the work is validated; ask before `git push`, tags and PRs.
 - Every new store action needs:
   - a `may()` guard
@@ -72,6 +74,7 @@ docs/reference/ art references
 - `session.test.ts` runs every fake session through one shared outbox, so every session store a test creates must come from the file's `useSessionStore` wrapper, which the root `beforeEach` teardown leaves. A store left hosting keeps its 100 ms broadcast coalescer (`stateSync.ts` `createCoalescer`) on a real timer, which later drops a stray patch into another test's outbox (seen as flaky "the map over the wire" tests, projects-jww).
 - **UI copy and titles are sentence case** ("Usage stats", "Share stats" / "Don't share").
 - **Analytics**: capture only through `src/analytics`, never import `posthog-js` elsewhere. Event props are controlled enums: no PII, no free text, no map content. Never add per-frame capture.
+- **CSP**: the built page carries a meta CSP from `src/csp.ts` (`buildCsp`), injected by the `hexcrawl-csp` vite plugin at build only, so dev has no CSP. A new external origin (fetch, websocket, script, font or image) must be added in `src/csp.ts` and checked in `bun run build` + `vite preview`, or the browser blocks it in production only.
 - More gotchas are in bd memories with the `hexcrawl-web-` prefix (thin instances, Vite on Windows, scoped styles, perf tools).
 
 ## Hot spots
@@ -90,7 +93,8 @@ Grouped by area, newest first within each group. Bead IDs are in the root beads 
 **Analytics and consent** (`projects-qrk.7`, spec `design/projects-qrk.7.md`)
 - 2026-11-17: PostHog analytics behind a consent prompt (awaiting user validation). Single module `src/analytics`; `posthog-js` is dynamically imported only after consent. Decline is kept in localStorage `hexcrawl.analytics=declined` and strips `ph_*`. Session replay and autocapture off. No-op unless `VITE_POSTHOG_PROJECT_TOKEN` and `VITE_POSTHOG_HOST` are set (`.env.local`). Events: `map_created{source}`, `map_loaded{source}`, `map_exported`, `resources_generated`, `view_switched{to}` (user toggle only), `tool_used{tool}` (on selection only), `entity_added{kind}`, `turn_advanced{advance_type}`, `encounter_accepted`, `session_hosted`, `session_joined`, `session_left{role}`, `session_join_decided{decision}`, `render_init_failed{reason}`, `$exception` via `app.config.errorHandler`, one `$pageview`. Super props `app='hexcrawl_web'`, `view` (dm|player). `ConsentPrompt` is a strip at <=1023px wide or <=640px tall, else a 312px (19.5rem) card. "Share usage stats" switch on `EnterScreen`. Shared analytics service doc: bead `projects-qrk.5` (not written yet).
 
-**Session and permissions** (`hexcrawl_web-xp2`, `hexcrawl_web-05c`)
+**Session and permissions** (`hexcrawl_web-xp2`, `hexcrawl_web-05c`, `projects-i0t.3.8`)
+- 2026-11-19: Guest resync rate limit (`projects-i0t.3.8`, `session/stateSync.ts`). The host serves at most one resync snapshot per guest per `RESYNC_COOLDOWN` (5 s), counted from when the snapshot finishes sending. A resync during an in-flight snapshot or the cooldown is held (one `resyncPending` flag per guest) and served when the snapshot ends or by a per-guest timer at cooldown expiry, so an honest guest always converges. A guest's first resync is served at once. The timer is cleared on remove and on failed delivery.
 - 2026-10-18: The player view reads the player projection. Players own entities and are assigned to them. Player snapshots and diffs stream to guests (`session/projection.ts`, `snapshotDiff.ts`, `stateSync.ts`, `composables/usePlayerView.ts`).
 - 2026-10-17: Players reconnect when the DM drops. Player orders are capped at one turn of movement, and the DM can lift the cap. Joining players are seated at their own token (`session/seats.ts`, `retry.ts`).
 - 2026-10-15:
@@ -151,9 +155,13 @@ Grouped by area, newest first within each group. Bead IDs are in the root beads 
 - 2026-10-13: Keep several maps and switch between them (`stores/mapLibrary.ts`, `persistence/mapIndex.ts`).
 - 2026-10-12: Undo/redo for orders and edits (`stores/history.ts`). Export and import maps as JSON (`persistence/mapFile.ts`).
 
+**Security** (`projects-i0t.3.11`)
+- 2026-11-19: Meta Content-Security-Policy on the built page. Vite plugin `hexcrawl-csp` (`apply: 'build'`, `transformIndexHtml`) injects it as the first child of `<head>`; the dev server has none, so HMR works. `src/csp.ts` `buildCsp` (pure, tested in `src/csp.test.ts`) gives: `default-src 'self'`; `script-src 'self' 'wasm-unsafe-eval'`; `worker-src 'self' blob:`; `connect-src 'self'` plus PeerJS (`https://0.peerjs.com`, `wss://0.peerjs.com`) and the PostHog origin from `VITE_POSTHOG_HOST`; `img-src 'self' data: blob:`; `font-src 'self' data:`; `style-src 'self' 'unsafe-inline'`; `object-src 'none'`; `base-uri 'self'`. `VITE_POSTHOG_HOST` must be a plain http(s) origin or the build fails naming the variable; unset adds no PostHog source. `frame-ancestors` cannot be set in a meta tag. WebRTC data channels are not governed by `connect-src`. Checked in `vite preview`: enter screen, map render (Babylon, SQLite worker), PostHog consent, PeerJS signalling, no violations. The live Pages build gets the PostHog source only once `projects-qrk.22` adds `VITE_POSTHOG_HOST` to its variables.
+
 **CI** (`projects-cox.4`)
 - 2026-11-18: Pull-request CI (`.github/workflows/ci.yml`): `bunx eslint src`, `bunx vitest run`, `bun run build` on every PR to `main`. No deploy step.
 - 2026-11-19: Security audit dep bump (`projects-i0t.3.12`): vite 8.2.2 to 8.3.8, vitest and `@vitest/*` 5.0.0 to 5.1.1 (ranges `^8.3.8`, `^5.1.1`, `bun.lock` regenerated). `bun audit` went from 14 findings (4 high, 9 moderate, 1 low) to 2 moderate, dev-only (glob 13.0.7, minimatch 10.2.6), blocked by `@vue/test-utils` > js-beautify (needs glob ^13, editorconfig ^3); follow-up `projects-i0t.3.16`.
+- 2026-11-19: Workflows hardened (`projects-i0t.3.10`). Workflow-level `contents: read`; `pages: write` and `id-token: write` on the `pages.yml` deploy job only. Actions pinned to SHAs (checkout v4.4.0, setup-bun v2.2.0, configure-pages v5.0.0, upload-pages-artifact v3.0.1, deploy-pages v4.0.5), `persist-credentials: false`, `bun-version: 1.4.2`, Pages `base_path` passed via env `BASE_PATH`. Dependabot `github-actions` weekly.
 
 ## Decisions
 - 2026-11-06: Tasks and memories moved to the root beads DB (`repo:hexcrawl_web`). This file replaces the per-repo CLAUDE.md/AGENTS.md and the local skills.
