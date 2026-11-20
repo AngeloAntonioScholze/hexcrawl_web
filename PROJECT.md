@@ -153,6 +153,7 @@ Grouped by area, newest first within each group. Bead IDs are in the root beads 
 
 **CI** (`projects-cox.4`)
 - 2026-11-18: Pull-request CI (`.github/workflows/ci.yml`): `bunx eslint src`, `bunx vitest run`, `bun run build` on every PR to `main`. No deploy step.
+- 2026-11-19: Security audit dep bump (`projects-i0t.3.12`): vite 8.2.2 to 8.3.8, vitest and `@vitest/*` 5.0.0 to 5.1.1 (ranges `^8.3.8`, `^5.1.1`, `bun.lock` regenerated). `bun audit` went from 14 findings (4 high, 9 moderate, 1 low) to 2 moderate, dev-only (glob 13.0.7, minimatch 10.2.6), blocked by `@vue/test-utils` > js-beautify (needs glob ^13, editorconfig ^3); follow-up `projects-i0t.3.16`.
 
 ## Decisions
 - 2026-11-06: Tasks and memories moved to the root beads DB (`repo:hexcrawl_web`). This file replaces the per-repo CLAUDE.md/AGENTS.md and the local skills.
