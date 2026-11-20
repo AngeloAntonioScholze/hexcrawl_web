@@ -20,6 +20,12 @@ export const BUFFER_HIGH_WATER = 1024 * 1024
  */
 export const BUFFER_LOW_WATER = 256 * 1024
 
+/**
+ * A guest that floods resync would make the host re-send the whole state over
+ * and over, starving everyone else; one is served per this many ms per guest.
+ */
+export const RESYNC_COOLDOWN = 5_000
+
 /** One guest's end of the pipe, as the host sees it. A data channel is all it takes. */
 export interface StateChannel {
   send(message: SessionMessage): void
@@ -70,6 +76,12 @@ interface Guest {
   sent: Version | null
   wantsSnapshot: boolean
   sending: Promise<void> | null
+  snapshotInFlight: boolean
+  /** When the guest's last resync was served or, once it has gone out, finished sending. */
+  resyncedAt: number | null
+  /** A resync that came too soon, kept (however many came) until it may be served. */
+  resyncPending: boolean
+  resyncTimer: ReturnType<typeof setTimeout> | null
 }
 
 /**
@@ -152,13 +164,48 @@ export function createStateHost({
       if (guest.wantsSnapshot || !guest.sent) messages = snapshotMessages(target)
       else if (guest.sent.seq !== target.seq) messages = patchMessages(guest.sent, target)
       else return
+      const wholeState = guest.wantsSnapshot || !guest.sent
+      guest.snapshotInFlight = wholeState
       guest.sent = target
       guest.wantsSnapshot = false
-      if (!(await deliver(peerId, guest, messages))) {
-        if (guests.get(peerId) === guest) guests.delete(peerId)
+      const delivered = await deliver(peerId, guest, messages)
+      guest.snapshotInFlight = false
+      if (!delivered) {
+        if (guests.get(peerId) === guest) removeGuest(peerId)
         return
       }
+      // Counted from the end, so a snapshot slower than the cooldown still leaves it idle.
+      if (wholeState && guest.resyncedAt !== null) guest.resyncedAt = Date.now()
+      serveResync(peerId, guest)
     }
+  }
+
+  /**
+   * Serves a resync that was held back as soon as the guest has no snapshot
+   * going out and the cooldown is over; until then it waits, so a guest that
+   * floods costs one more snapshot per cooldown and one that is merely behind
+   * is still caught up.
+   */
+  const serveResync = (peerId: string, guest: Guest): void => {
+    if (!guest.resyncPending || guest.snapshotInFlight || guest.resyncTimer) return
+    const wait = guest.resyncedAt === null ? 0 : guest.resyncedAt + RESYNC_COOLDOWN - Date.now()
+    if (wait > 0) {
+      guest.resyncTimer = setTimeout(() => {
+        guest.resyncTimer = null
+        if (guests.get(peerId) === guest) serveResync(peerId, guest)
+      }, wait)
+      return
+    }
+    guest.resyncPending = false
+    guest.resyncedAt = Date.now()
+    guest.wantsSnapshot = true
+    pump(peerId)
+  }
+
+  const removeGuest = (peerId: string): void => {
+    const guest = guests.get(peerId)
+    if (guest?.resyncTimer) clearTimeout(guest.resyncTimer)
+    guests.delete(peerId)
   }
 
   const pump = (peerId: string): void => {
@@ -195,18 +242,28 @@ export function createStateHost({
       if (projection && projection !== latest?.projection) broadcast(projection)
       const guest = guests.get(peerId)
       if (guest) guest.wantsSnapshot = true
-      else guests.set(peerId, { sent: null, wantsSnapshot: true, sending: null })
+      else {
+        guests.set(peerId, {
+          sent: null,
+          wantsSnapshot: true,
+          sending: null,
+          snapshotInFlight: false,
+          resyncedAt: null,
+          resyncPending: false,
+          resyncTimer: null,
+        })
+      }
       pump(peerId)
     },
     remove(peerId) {
-      guests.delete(peerId)
+      removeGuest(peerId)
     },
     receive(message, from) {
       if (message.type !== 'resync') return false
       const guest = guests.get(from)
       if (guest) {
-        guest.wantsSnapshot = true
-        pump(from)
+        guest.resyncPending = true
+        serveResync(from, guest)
       }
       return true
     },
