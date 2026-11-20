@@ -161,6 +161,7 @@ Grouped by area, newest first within each group. Bead IDs are in the root beads 
 
 **CI** (`projects-cox.4`)
 - 2026-11-18: Pull-request CI (`.github/workflows/ci.yml`): `bunx eslint src`, `bunx vitest run`, `bun run build` on every PR to `main`. No deploy step.
+- 2026-11-19: Security audit dep bump (`projects-i0t.3.12`): vite 8.2.2 to 8.3.8, vitest and `@vitest/*` 5.0.0 to 5.1.1 (ranges `^8.3.8`, `^5.1.1`, `bun.lock` regenerated). `bun audit` went from 14 findings (4 high, 9 moderate, 1 low) to 2 moderate, dev-only (glob 13.0.7, minimatch 10.2.6), blocked by `@vue/test-utils` > js-beautify (needs glob ^13, editorconfig ^3); follow-up `projects-i0t.3.16`.
 - 2026-11-19: Workflows hardened (`projects-i0t.3.10`). Workflow-level `contents: read`; `pages: write` and `id-token: write` on the `pages.yml` deploy job only. Actions pinned to SHAs (checkout v4.4.0, setup-bun v2.2.0, configure-pages v5.0.0, upload-pages-artifact v3.0.1, deploy-pages v4.0.5), `persist-credentials: false`, `bun-version: 1.4.2`, Pages `base_path` passed via env `BASE_PATH`. Dependabot `github-actions` weekly.
 
 ## Decisions
