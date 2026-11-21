@@ -1,6 +1,6 @@
 # hexcrawl_web
 
-Project definition and rules for agents. Features, decisions and ideas live in the root vault: `vault/hexcrawl_web/_index.md` (`/feature-doc`). Tasks live in the root beads DB under label `repo:hexcrawl_web`.
+Project definition and rules for agents. Features, decisions and ideas live in the root vault: `vault/hexcrawl_web/Hexcrawl Web.md` (`/feature-doc`). Tasks live in the root beads DB under label `repo:hexcrawl_web`.
 
 ## Purpose
 3D hexcrawl sandbox in the browser. A DM and players run hexcrawl-style tabletop RPG maps together: 3D hex terrain, party movement, fog of war, day/night clock, caravans and merchants, encounters, live sessions over WebRTC.
@@ -52,7 +52,7 @@ docs/reference/ art references
 - **Player view**: DM state is projected down to a player view (`session/projection.ts`) before being sent or rendered for players.
 
 ## Rules
-- **UI**: dialogs and panels take gameuidatabase.com as the base guide (`vault/_shared/game-ui-reference.md`).
+- **UI**: dialogs and panels take gameuidatabase.com as the base guide (`vault/_shared/Game UI Reference.md`).
 - **GitHub workflows**: every `uses:` is pinned to a full commit SHA with the tag in a comment (Dependabot updates both). Keep workflow-level permissions at `contents: read` and grant extra scopes per job. Checkout sets `persist-credentials: false`. Pass `${{ }}` values to `run:` through `env:`, never inline.
 - **Git**: root policy applies. Agents may commit once the work is validated; ask before `git push`, tags and PRs.
 - Every new store action needs:
