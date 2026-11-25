@@ -8,6 +8,7 @@ import {
   createCoalescer,
   createStateGuest,
   createStateHost,
+  RESYNC_COOLDOWN,
   type StateChannel,
   type StateGuest,
   type StateHost,
@@ -343,6 +344,244 @@ describe('pacing', () => {
     release()
     await host.idle()
     expect(sent).toHaveLength(1)
+  })
+})
+
+describe('resync requests from a guest', () => {
+  afterEach(() => vi.useRealTimers())
+
+  const resync: SessionMessage = { type: 'resync' }
+
+  /** Distinct whole-state transfers sent to each guest. */
+  const transfers = (sent: Map<string, SessionMessage[]>, peerId: string): number =>
+    new Set(
+      (sent.get(peerId) ?? [])
+        .filter((message) => message.type === 'state')
+        .map((message) => (message as { chunk: { id: number } }).chunk.id),
+    ).size
+
+  const setup = (held = false) => {
+    const hold = { on: held }
+    vi.useFakeTimers()
+    const sent = new Map<string, SessionMessage[]>()
+    const releases: (() => void)[] = []
+    const host = createStateHost({
+      highWater: 0,
+      channelFor: (peerId) => ({
+        get bufferedAmount() {
+          return hold.on ? 1 : 0
+        },
+        drained: () => new Promise<void>((resolve) => releases.push(resolve)),
+        send(message) {
+          const list = sent.get(peerId) ?? []
+          list.push(message)
+          sent.set(peerId, list)
+        },
+      }),
+    })
+    return { host, sent, releases, hold }
+  }
+
+  it('serves one snapshot out of a flood', async () => {
+    const { host, sent } = setup()
+    host.sendSnapshot('mira', view(walking()))
+    await host.idle()
+    expect(transfers(sent, 'mira')).toBe(1)
+
+    for (let i = 0; i < 50; i++) host.receive(resync, 'mira')
+    await host.idle()
+    expect(transfers(sent, 'mira')).toBe(2)
+  })
+
+  it('holds a resync that comes mid-snapshot and serves it once, after', async () => {
+    const { host, sent, releases, hold } = setup(true)
+    const store = walking()
+    store.setEntitySight(store.selectedId, 12)
+    host.sendSnapshot('mira', view(store))
+    await vi.waitFor(() => expect(releases).toHaveLength(1))
+
+    for (let i = 0; i < 20; i++) host.receive(resync, 'mira')
+    hold.on = false
+    releases.splice(0).forEach((release) => release())
+    await host.idle()
+    expect(transfers(sent, 'mira')).toBe(2)
+
+    for (let i = 0; i < 20; i++) host.receive(resync, 'mira')
+    await host.idle()
+    expect(transfers(sent, 'mira')).toBe(2)
+  })
+
+  it('serves a resync that came too soon once the cooldown has passed', async () => {
+    const { host, sent } = setup()
+    host.sendSnapshot('mira', view(walking()))
+    await host.idle()
+
+    host.receive(resync, 'mira')
+    await host.idle()
+    expect(transfers(sent, 'mira')).toBe(2)
+
+    vi.advanceTimersByTime(RESYNC_COOLDOWN - 1)
+    for (let i = 0; i < 20; i++) host.receive(resync, 'mira')
+    await host.idle()
+    expect(transfers(sent, 'mira')).toBe(2)
+
+    await vi.advanceTimersByTimeAsync(1)
+    await host.idle()
+    expect(transfers(sent, 'mira')).toBe(3)
+
+    await vi.advanceTimersByTimeAsync(RESYNC_COOLDOWN * 3)
+    await host.idle()
+    expect(transfers(sent, 'mira')).toBe(3)
+  })
+
+  it('brings a guest that asked once and was held back into step', async () => {
+    const { host, sent } = setup()
+    const guest = createStateGuest({ send: (message) => host.receive(message, 'mira') })
+    const pipe = async (keep = true): Promise<void> => {
+      await host.idle()
+      const messages = sent.get('mira') ?? []
+      sent.set('mira', [])
+      if (keep) messages.forEach((message) => guest.receive(message))
+    }
+    const store = walking()
+    const change = async (keep: boolean): Promise<void> => {
+      store.advanceTurn()
+      host.broadcast(view(store))
+      await pipe(keep)
+    }
+
+    host.sendSnapshot('mira', view(store))
+    await pipe()
+    // Spends the cooldown on a first resync, as a guest that asked a moment ago.
+    host.receive(resync, 'mira')
+    await pipe()
+
+    await change(false)
+    await change(true)
+    expect(guest.seq).toBeLessThan(host.seq)
+
+    await vi.advanceTimersByTimeAsync(RESYNC_COOLDOWN)
+    await pipe()
+    expect(guest.seq).toBe(host.seq)
+  })
+
+  it('leaves the cooldown idle after a snapshot slower than the cooldown', async () => {
+    const times = new Map<number, number[]>()
+    const releases: (() => void)[] = []
+    vi.useFakeTimers()
+    const host = createStateHost({
+      highWater: 0,
+      channelFor: () => ({
+        bufferedAmount: 1,
+        drained: () => new Promise<void>((resolve) => releases.push(resolve)),
+        send(message) {
+          if (message.type !== 'state') return
+          const list = times.get(message.chunk.id) ?? []
+          list.push(Date.now())
+          times.set(message.chunk.id, list)
+        },
+      }),
+    })
+    const store = walking()
+    store.setEntitySight(store.selectedId, 12)
+    host.sendSnapshot('mira', view(store))
+
+    // Each snapshot takes until the next multiple of 8 s to go out; the guest floods throughout.
+    for (let second = 1; second <= 60; second++) {
+      host.receive(resync, 'mira')
+      await vi.advanceTimersByTimeAsync(1000)
+      if (second % 8 === 0) {
+        for (let round = 0; round < 500 && releases.length > 0; round++) {
+          releases.splice(0).forEach((release) => release())
+          await vi.advanceTimersByTimeAsync(0)
+        }
+      }
+    }
+
+    const spans = [...times.values()].map((list) => ({ start: list[0]!, end: list.at(-1)! }))
+    expect(spans.length).toBeGreaterThanOrEqual(3)
+    for (let i = 2; i < spans.length; i++) {
+      expect(spans[i]!.start - spans[i - 1]!.end).toBeGreaterThanOrEqual(RESYNC_COOLDOWN)
+    }
+  })
+
+  it('drops a held resync when the guest is removed', async () => {
+    const { host, sent } = setup()
+    host.sendSnapshot('mira', view(walking()))
+    await host.idle()
+    host.receive(resync, 'mira')
+    await host.idle()
+    host.receive(resync, 'mira')
+    expect(vi.getTimerCount()).toBe(1)
+
+    host.remove('mira')
+    expect(vi.getTimerCount()).toBe(0)
+    const before = sent.get('mira')?.length
+    await vi.advanceTimersByTimeAsync(RESYNC_COOLDOWN)
+    await host.idle()
+    expect(sent.get('mira')?.length).toBe(before)
+  })
+
+  it('drops a held resync when a delivery fails because the channel is gone', async () => {
+    const live = { on: true }
+    const sent: SessionMessage[] = []
+    vi.useFakeTimers()
+    const host = createStateHost({
+      highWater: Infinity,
+      channelFor: () =>
+        live.on
+          ? { bufferedAmount: 0, drained: async () => {}, send: (m) => void sent.push(m) }
+          : undefined,
+    })
+    const store = walking()
+    host.sendSnapshot('mira', view(store))
+    await host.idle()
+    host.receive(resync, 'mira')
+    await host.idle()
+    host.receive(resync, 'mira')
+    expect(vi.getTimerCount()).toBe(1)
+
+    live.on = false
+    store.advanceTurn()
+    host.broadcast(view(store))
+    await host.idle()
+    expect(vi.getTimerCount()).toBe(0)
+
+    const before = sent.length
+    await vi.advanceTimersByTimeAsync(RESYNC_COOLDOWN)
+    await host.idle()
+    expect(sent.length).toBe(before)
+  })
+
+  it('limits each guest on its own', async () => {
+    const { host, sent } = setup()
+    const projection = view(walking())
+    host.sendSnapshot('mira', projection)
+    host.sendSnapshot('tomas', projection)
+    await host.idle()
+
+    host.receive(resync, 'mira')
+    host.receive(resync, 'mira')
+    host.receive(resync, 'tomas')
+    await host.idle()
+    expect(transfers(sent, 'mira')).toBe(2)
+    expect(transfers(sent, 'tomas')).toBe(2)
+  })
+
+  it('starts a guest that is removed and let back in with a clean slate', async () => {
+    const { host, sent } = setup()
+    const projection = view(walking())
+    host.sendSnapshot('mira', projection)
+    await host.idle()
+    host.receive(resync, 'mira')
+    await host.idle()
+
+    host.remove('mira')
+    host.sendSnapshot('mira', projection)
+    await host.idle()
+    host.receive(resync, 'mira')
+    await host.idle()
+    expect(transfers(sent, 'mira')).toBe(4)
   })
 })
 
