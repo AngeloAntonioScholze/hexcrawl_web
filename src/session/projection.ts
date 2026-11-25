@@ -176,20 +176,31 @@ const emptyCache = (): ProjectorCache => ({
  * two snapshots giving the same key give the same ground. Later turns are left
  * out, so a turn spent leaves the key of the turns before it as it was.
  */
-function sightKey(snapshot: MapSnapshot, shown: readonly Entity[], upTo: number): string {
+function sightKey(
+  snapshot: MapSnapshot,
+  shown: readonly Entity[],
+  upTo: number,
+  hidden: ReadonlySet<HexKey>,
+): string {
   const ids = new Set(shown.map((one) => one.id))
-  const parts = [shown.map((one) => `${one.id}:${one.sight}:${one.darkvision}`).join(',')]
+  const parts = [
+    shown.map((one) => `${one.id}:${one.owner}:${one.sight}:${one.darkvision}`).join(','),
+  ]
+  const dmOwned = new Set(shown.filter((one) => one.owner !== 'player').map((one) => one.id))
+  const hiddenUnder = (id: string, hexes: readonly (HexKey | null)[]): string =>
+    dmOwned.has(id) ? hexes.filter((hex) => hex !== null && hidden.has(hex)).join(' ') : ''
   for (const one of snapshot.origins) {
     if (ids.has(one.entityId) && one.turn <= upTo)
-      parts.push(`o${one.entityId}@${one.turn}:${one.hex}`)
+      parts.push(`o${one.entityId}@${one.turn}:${one.hex}:${hiddenUnder(one.entityId, [one.hex])}`)
   }
   for (const row of snapshot.states) {
     if (ids.has(row.entityId) && row.turn < upTo)
-      parts.push(`s${row.turn}:${row.entityId}:${row.at}`)
+      parts.push(`s${row.turn}:${row.entityId}:${row.at}:${hiddenUnder(row.entityId, [row.at])}`)
   }
   for (const row of snapshot.record) {
     if (ids.has(row.entityId) && row.turn <= upTo) {
-      parts.push(`r${row.turn}:${row.entityId}:${row.entered.join(' ')}`)
+      const under = hiddenUnder(row.entityId, [row.from, row.to, ...row.entered])
+      parts.push(`r${row.turn}:${row.entityId}:${row.entered.join(' ')}:${under}`)
     }
   }
   return parts.join('|')
@@ -207,6 +218,7 @@ function playerSight(
   field: TerrainField,
   shown: readonly Entity[],
   record: RecordReader,
+  hidden: ReadonlySet<HexKey>,
   cache: ProjectorCache,
 ): { seen: ReadonlySet<HexKey>; inSight: Set<HexKey> } {
   const memo = cache.sight
@@ -220,10 +232,17 @@ function playerSight(
     return seen
   }
 
+  // A DM-owned entity on a hex hidden by hand sees nothing for the players: its
+  // sight disc would ring the hidden hex.
+  const mayLook = (entity: Entity, hex: HexKey): boolean =>
+    entity.owner === 'player' || !hidden.has(hex)
+
   const turn = snapshot.turn
   const carried = cache.rolling
   const from =
-    carried && carried.turn <= turn && carried.key === sightKey(snapshot, shown, carried.turn)
+    carried &&
+    carried.turn <= turn &&
+    carried.key === sightKey(snapshot, shown, carried.turn, hidden)
       ? carried
       : null
 
@@ -232,9 +251,9 @@ function playerSight(
     seen = from.seen
   } else {
     const growing = new Set<HexKey>(from?.seen)
-    seenBetween(from ? from.turn + 1 : 0, turn, shown, record, seenFrom, growing)
+    seenBetween(from ? from.turn + 1 : 0, turn, shown, record, seenFrom, mayLook, growing)
     seen = growing
-    cache.rolling = { key: sightKey(snapshot, shown, turn), turn, seen }
+    cache.rolling = { key: sightKey(snapshot, shown, turn, hidden), turn, seen }
   }
 
   // Every visible entity's sight, not just the one the DM has selected: the
@@ -242,7 +261,7 @@ function playerSight(
   const inSight = new Set<HexKey>()
   for (const entity of shown) {
     const hex = record.stateAt(entity.id, turn).at
-    if (!hex) continue
+    if (!hex || !mayLook(entity, hex)) continue
     for (const key of seenFrom(hex, sightAt(entity, turn))) inSight.add(key)
   }
   return { seen, inSight }
@@ -255,20 +274,29 @@ function seenBetween(
   shown: readonly Entity[],
   record: RecordReader,
   seenFrom: (hex: HexKey, radius: number) => ReadonlySet<HexKey>,
+  mayLook: (entity: Entity, hex: HexKey) => boolean,
   seen: Set<HexKey>,
 ): void {
   for (let at = first; at <= last; at++) {
     for (const entity of shown) {
       const hex = record.stateAt(entity.id, at).at
-      if (!hex) continue
+      if (!hex || !mayLook(entity, hex)) continue
       const radius = sightAt(entity, at)
       for (const key of seenFrom(hex, radius)) seen.add(key)
       for (const crossed of record.enteredOn(entity.id, at)) {
+        if (!mayLook(entity, crossed)) continue
         for (const key of seenFrom(crossed, radius)) seen.add(key)
       }
     }
   }
 }
+
+/**
+ * Whether players may read an entity's queued, pending and waypoint routes.
+ * Only their own entities' for now. If DM-owned routes are ever sent, their
+ * hexes must also pass mayKnow.
+ */
+const playersSeeRoutesOf = (entity: Entity): boolean => entity.owner === 'player'
 
 const tileOf = (field: TerrainField, hex: HexKey): PlayerTile[] => {
   const tile = field.at(parseKey(hex))
@@ -331,7 +359,7 @@ function project(
     hidden: new Set(snapshot.fogEdits.filter((one) => !one.revealed).map((one) => one.hex)),
   }
   const record = readRecord(snapshot)
-  const { seen, inSight } = playerSight(snapshot, field, shown, record, cache)
+  const { seen, inSight } = playerSight(snapshot, field, shown, record, edits.hidden, cache)
 
   // A revealed map is the player view with the fog off: every hex of the world,
   // which range already lists in the order the projection keeps.
@@ -387,14 +415,23 @@ function project(
 
   const scores = new Map(snapshot.abilities.map(({ entityId, ...one }) => [entityId, one]))
 
+  // A DM-owned entity may be shown while its hex is one the players do not know
+  // (off the fog, or hidden by hand): its position and journey are clipped to
+  // what they know. Player-owned entities keep their own, whatever the fog says.
+  const clipped = new Set(shown.filter((one) => one.owner !== 'player').map((one) => one.id))
+  const mayKnow = (id: string, hex: HexKey | null): boolean =>
+    hex === null || !clipped.has(id) || known.has(hex)
+  const routeHidden = new Set(shown.filter((one) => !playersSeeRoutesOf(one)).map((one) => one.id))
+
   const states = shown.map((entity): PlayerState => {
     const state = record.stateAt(entity.id, turn)
+    const routed = !routeHidden.has(entity.id)
     return {
       entityId: entity.id,
-      at: state.at,
+      at: state.at && mayKnow(entity.id, state.at) ? state.at : null,
       carry: state.carry,
-      pending: [...state.pending],
-      waypoints: [...state.waypoints],
+      pending: routed ? [...state.pending] : [],
+      waypoints: routed ? [...state.waypoints] : [],
       // Riding something the players cannot see would name it.
       riding: state.riding && shownIds.has(state.riding) ? state.riding : null,
     }
@@ -411,17 +448,30 @@ function project(
     tiles,
     entities: shown.map((one) => ({ ...one })),
     states,
-    origins: snapshot.origins.filter(isShown).map((one) => ({ ...one })),
+    origins: snapshot.origins
+      .filter((one) => isShown(one) && mayKnow(one.entityId, one.hex))
+      .map((one) => ({ ...one })),
     record: snapshot.record
-      .filter((row) => isShown(row) && row.turn < turn)
-      .map((row) => ({ ...row, entered: [...row.entered] })),
-    queue: snapshot.queue.filter(isShown).map(({ entityId, action }) => ({
-      entityId,
-      action:
-        action.kind === 'move'
-          ? { kind: 'move', route: [...action.route], waypoints: [...action.waypoints] }
-          : { kind: action.kind },
-    })),
+      .filter(
+        (row) =>
+          isShown(row) &&
+          row.turn < turn &&
+          mayKnow(row.entityId, row.from) &&
+          mayKnow(row.entityId, row.to),
+      )
+      .map((row) => ({
+        ...row,
+        entered: row.entered.filter((hex) => mayKnow(row.entityId, hex)),
+      })),
+    queue: snapshot.queue
+      .filter((row) => isShown(row) && !routeHidden.has(row.entityId))
+      .map(({ entityId, action }) => ({
+        entityId,
+        action:
+          action.kind === 'move'
+            ? { kind: 'move', route: [...action.route], waypoints: [...action.waypoints] }
+            : { kind: action.kind },
+      })),
     supplies: shown
       .filter((one) => carriesSupplies(one.kind))
       .map((one) => ({ entityId: one.id, ...suppliesAt(ledger, one.id, turn) })),

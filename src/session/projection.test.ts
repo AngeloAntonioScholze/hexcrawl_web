@@ -670,3 +670,136 @@ describe('a projector', () => {
     expect(view.entities.some((one) => map.entities.includes(one))).toBe(false)
   })
 })
+
+describe('what a visible DM-owned entity gives away', () => {
+  const dmEntity = (id: string): Entity => ({ ...entity(id, 'npc', true), hidden: false })
+  const row = (
+    entityId: string,
+    from: HexKey,
+    to: HexKey,
+    entered: HexKey[],
+  ): MapSnapshot['record'][number] => ({
+    turn: 0,
+    entityId,
+    kind: 'move',
+    from,
+    to,
+    entered,
+    spent: 1,
+    carry: 0,
+  })
+
+  const withNpcs = (): MapSnapshot => {
+    const map = snapshot()
+    map.entities = [...map.entities, dmEntity('guard'), dmEntity('lurker')]
+    map.origins = [
+      ...map.origins,
+      { entityId: 'guard', turn: 0, hex: '2,0' },
+      { entityId: 'lurker', turn: 0, hex: '-7,0' },
+    ]
+    map.states = [
+      ...map.states,
+      { turn: 0, entityId: 'guard', ...still, at: '2,0', pending: ['3,0'], waypoints: ['3,0'] },
+      { turn: 0, entityId: 'lurker', ...still, at: '-7,0', pending: ['-7,1'], waypoints: ['-7,1'] },
+    ]
+    map.queue = [
+      ...map.queue,
+      { entityId: 'guard', action: { kind: 'move', route: ['3,0'], waypoints: ['3,0'] } },
+      { entityId: 'lurker', action: { kind: 'wait' } },
+    ]
+    return map
+  }
+
+  it('sends no queued, pending or waypoint route of it, and keeps the players own', () => {
+    const view = project(withNpcs())
+    expect(view.entities.map((one) => one.id)).toContain('guard')
+    expect(view.queue.map((one) => one.entityId)).toEqual(['party'])
+    expect(view.states.find((one) => one.entityId === 'guard')).toMatchObject({
+      at: '2,0',
+      pending: [],
+      waypoints: [],
+    })
+    expect(JSON.stringify(view)).not.toContain('"3,0"]')
+
+    const map = withNpcs()
+    map.states = map.states.map((one) =>
+      one.entityId === 'party' ? { ...one, pending: ['2,0'], waypoints: ['2,0'] } : one,
+    )
+    expect(project(map).states.find((one) => one.entityId === 'party')).toMatchObject({
+      pending: ['2,0'],
+      waypoints: ['2,0'],
+    })
+  })
+
+  it('sends no origin of it placed in a later turn', () => {
+    const map = withNpcs()
+    map.origins = map.origins.map((one) => (one.entityId === 'lurker' ? { ...one, turn: 5 } : one))
+    map.states = map.states.filter((one) => one.entityId !== 'lurker')
+    const view = project(map)
+    expect(view.explored).not.toContain('-7,0')
+    expect(view.origins.some((one) => one.entityId === 'lurker')).toBe(false)
+    expect(view.origins.some((one) => one.entityId === 'guard')).toBe(true)
+  })
+
+  it('gives players no sight from a hex the DM hid by hand', () => {
+    const map = withNpcs()
+    map.entities = map.entities.map((one) => (one.id === 'lurker' ? { ...one, sight: 2 } : one))
+    const open = project(map)
+    expect(open.visible).toContain('-7,0')
+    map.fogEdits = [{ hex: '-7,0', revealed: false }]
+    const view = project(map)
+    for (const hex of ['-7,0', '-6,0', '-8,0', '-7,1', '-7,-1'])
+      expect(view.visible).not.toContain(hex)
+    expect(view.explored).not.toContain('-7,0')
+    expect(view.tiles.some((one) => one.hex === '-7,0')).toBe(false)
+  })
+
+  it('keeps a projector right when an owner flips on a hex hidden by hand', () => {
+    const map = withNpcs()
+    map.fogEdits = [{ hex: '-7,0', revealed: false }]
+    map.entities = map.entities.map((one) =>
+      one.id === 'lurker' ? { ...one, owner: 'player', sight: 2 } : one,
+    )
+    const projector = createProjector()
+    expect(projector(map, field).explored).toContain('-6,0')
+    map.entities = map.entities.map((one) => (one.id === 'lurker' ? { ...one, owner: 'dm' } : one))
+    expect(projector(map, field).explored).toEqual(project(map).explored)
+    expect(projector(map, field).explored).not.toContain('-6,0')
+    map.entities = map.entities.map((one) =>
+      one.id === 'lurker' ? { ...one, owner: 'player' } : one,
+    )
+    expect(projector(map, field).explored).toEqual(project(map).explored)
+  })
+
+  it('sends no position of it inside a hex the DM hid by hand', () => {
+    const map = withNpcs()
+    map.fogEdits = [{ hex: '2,0', revealed: false }]
+    map.record = [
+      ...map.record,
+      row('guard', '1,0', '2,0', ['2,0']),
+      row('guard', '2,0', '1,0', ['1,0']),
+      row('guard', '1,0', '1,1', ['2,0', '1,1']),
+    ]
+    const view = project(map)
+    expect(view.explored).not.toContain('2,0')
+    expect(view.states.find((one) => one.entityId === 'guard')?.at).toBeNull()
+    expect(view.origins.some((one) => one.entityId === 'guard')).toBe(false)
+    const rows = view.record.filter((one) => one.entityId === 'guard')
+    expect(rows.map((one) => one.entered)).toEqual([['1,1']])
+    expect(rows.every((one) => one.from !== '2,0' && one.to !== '2,0')).toBe(true)
+  })
+
+  it('leaves a player-owned entity as it is, hand-hidden hex or not', () => {
+    const map = withNpcs()
+    map.fogEdits = [{ hex: '1,0', revealed: false }]
+    const before = project(withNpcs())
+    const view = project(map)
+    const mine = <T extends { entityId: string }>(rows: T[]): T[] =>
+      rows.filter((one) => one.entityId === 'party')
+    expect(mine(view.states)).toEqual(mine(before.states))
+    expect(mine(view.origins)).toEqual(mine(before.origins))
+    expect(mine(view.record)).toEqual(mine(before.record))
+    expect(mine(view.queue)).toEqual(mine(before.queue))
+    expect(view.states.find((one) => one.entityId === 'party')?.at).toBe('1,0')
+  })
+})
