@@ -1,5 +1,6 @@
 import { readonly, shallowRef } from 'vue'
 import type { PostHog, PostHogConfig } from 'posthog-js'
+import { scrubEvent } from './scrub'
 
 type Consent = 'granted' | 'declined'
 export type View = 'dm' | 'player'
@@ -68,6 +69,7 @@ const CONFIG: Partial<PostHogConfig> = {
   disable_external_dependency_loading: true,
   advanced_disable_flags: true,
   person_profiles: 'identified_only',
+  before_send: scrubEvent,
 }
 
 const readConsent = (): Consent | null => {

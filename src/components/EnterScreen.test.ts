@@ -3,6 +3,7 @@ import { mount } from '@vue/test-utils'
 import { createPinia, setActivePinia } from 'pinia'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 import { shallowRef } from 'vue'
+import JoinForm from './JoinForm.vue'
 
 const analytics = vi.hoisted(() => ({
   configured: true,
@@ -62,5 +63,15 @@ describe('EnterScreen usage stats switch', () => {
     expect(analytics.grant).toHaveBeenCalledTimes(1)
     expect(analytics.decline).not.toHaveBeenCalled()
     expect(toggle.attributes('aria-checked')).toBe('true')
+  })
+})
+
+describe('EnterScreen join link', () => {
+  it('prefills the code and takes the room param out of the address bar', () => {
+    window.history.replaceState({ keep: 1 }, '', '/?room=abc234&debug=1')
+    const wrapper = mountScreen()
+    expect(wrapper.findComponent(JoinForm).props('code')).toBe('abc234')
+    expect(window.location.search).toBe('?debug=1')
+    expect(window.history.state).toEqual({ keep: 1 })
   })
 })
