@@ -74,7 +74,7 @@ docs/reference/ art references
 - Component tests use `@vue/test-utils` + happy-dom (devDeps), enabled per file with `// @vitest-environment happy-dom`.
 - `session.test.ts` runs every fake session through one shared outbox, so every session store a test creates must come from the file's `useSessionStore` wrapper, which the root `beforeEach` teardown leaves. A store left hosting keeps its 100 ms broadcast coalescer (`stateSync.ts` `createCoalescer`) on a real timer, which later drops a stray patch into another test's outbox (seen as flaky "the map over the wire" tests, projects-jww).
 - **UI copy and titles are sentence case** ("Usage stats", "Share stats" / "Don't share").
-- **Analytics**: capture only through `src/analytics`, never import `posthog-js` elsewhere. Event props are controlled enums: no PII, no free text, no map content. Never add per-frame capture.
+- **Analytics**: capture only through `src/analytics`, never import `posthog-js` elsewhere. Event props are controlled enums: no PII, no free text, no map content. Never add per-frame capture. Every event passes `scrubEvent` (`before_send`): no room code in URLs, no exception text; keep it wired.
 - **CSP**: the built page carries a meta CSP from `src/csp.ts` (`buildCsp`), injected by the `hexcrawl-csp` vite plugin at build only, so dev has no CSP. A new external origin (fetch, websocket, script, font or image) must be added in `src/csp.ts` and checked in `bun run build` + `vite preview`, or the browser blocks it in production only.
 - More gotchas are in bd memories with the `hexcrawl-web-` prefix (thin instances, Vite on Windows, scoped styles, perf tools).
 
