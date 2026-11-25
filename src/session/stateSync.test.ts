@@ -701,7 +701,7 @@ describe('a guest on its own', () => {
 
   it('leaves other messages alone', () => {
     const { guest } = guestWith()
-    expect(guest.receive({ type: 'welcome', secret: '0'.repeat(32) })).toBe(false)
+    expect(guest.receive({ type: 'welcome' })).toBe(false)
   })
 })
 

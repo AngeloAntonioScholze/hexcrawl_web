@@ -46,15 +46,15 @@ const TABLE = 'fedcba9876543210fedcba9876543210'
 const OTHER_TABLE = '00112233445566778899aabbccddeeff'
 const NONCE = 'aaaaaaaaaaaaaaaabbbbbbbbbbbbbbbb'
 
-/** The seat secret the host last handed a peer. */
 const secretTo = (peerId: string): string => {
   const sent = [...opened.sent]
     .reverse()
     .find(({ message, to }) => to === peerId && message.type === 'welcome')
-  return sent?.message.type === 'welcome' ? sent.message.secret : ''
+  return sent?.message.type === 'welcome' ? (sent.message.secret ?? '') : ''
 }
 
-/** The nonce the host last challenged a peer with. */
+const hostCode = (): string => sessionStoreOf(getActivePinia()!).code ?? ''
+
 const nonceTo = (peerId: string): string => {
   const sent = [...opened.sent]
     .reverse()
@@ -78,12 +78,19 @@ const answered = async (peerId: string, after: number): Promise<SessionMessage> 
 
 /**
  * A guest connecting to the host and saying hello, with a proof of `secret`
- * made for the nonce it was challenged with when it holds one, and the answer it gets.
+ * made for the nonce it was challenged with and the room it dialled (this
+ * one, unless given) when it holds one, and the answer it gets.
  */
-const comeIn = async (peerId: string, name: string, secret?: string): Promise<SessionMessage> => {
+const comeIn = async (
+  peerId: string,
+  name: string,
+  secret?: string,
+  dialled = hostCode(),
+): Promise<SessionMessage> => {
   opened.handlers?.peer?.(peerId, true)
   const after = opened.sent.length
-  const proof = secret === undefined ? undefined : await seatProof(secret, nonceTo(peerId), name)
+  const proof =
+    secret === undefined ? undefined : await seatProof(secret, nonceTo(peerId), dialled, name)
   opened.handlers?.message?.(
     proof === undefined ? { type: 'hello', name } : { type: 'hello', name, proof },
     peerId,
@@ -95,7 +102,6 @@ const comeIn = async (peerId: string, name: string, secret?: string): Promise<Se
 const lastSeat = (peerId: string) =>
   opened.sent.filter(({ message, to }) => to === peerId && message.type === 'seat').at(-1)
 
-/** The hello a guest last sent. */
 const lastHello = (): SessionMessage | undefined =>
   [...opened.sent].reverse().find(({ message }) => message.type === 'hello')?.message
 
@@ -317,8 +323,9 @@ describe('the session store', () => {
     session.setLocked(true)
 
     const secret = secretTo('guest-1')
-    expect(await comeIn('guest-2', 'tobin ', secret)).toEqual({ type: 'welcome', secret })
+    expect(await comeIn('guest-2', 'tobin ', secret)).toEqual({ type: 'welcome' })
     expect(session.players).toEqual([{ name: 'Tobin', peerId: 'guest-2' }])
+    expect(JSON.stringify(opened.sent.filter(({ to }) => to === 'guest-2'))).not.toContain(secret)
   })
 
   it('ignores a second hello on the same connection', async () => {
@@ -429,7 +436,7 @@ describe('the session store', () => {
 
     // A proof seen on one connection, played back on the next.
     opened.handlers?.peer?.('guest-2', true)
-    const seen = await seatProof(secret, nonceTo('guest-2'), 'Tobin')
+    const seen = await seatProof(secret, nonceTo('guest-2'), hostCode(), 'Tobin')
     opened.handlers?.peer?.('guest-3', true)
     const after = opened.sent.length
     opened.handlers?.message?.({ type: 'hello', name: 'Tobin', proof: seen }, 'guest-3')
@@ -438,12 +445,71 @@ describe('the session store', () => {
     // Nor the same connection's proof twice: a hello is answered once.
     const before = opened.sent.length
     opened.handlers?.message?.({ type: 'hello', name: 'Tobin', proof: seen }, 'guest-2')
-    expect(await answered('guest-2', before)).toEqual({ type: 'welcome', secret })
+    expect(await answered('guest-2', before)).toEqual({ type: 'welcome' })
     const again = opened.sent.length
     opened.handlers?.message?.({ type: 'hello', name: 'Tobin', proof: seen }, 'guest-2')
     await new Promise((done) => setTimeout(done, 20))
     expect(answerTo('guest-2', again)).toBeUndefined()
     expect(session.players).toEqual([{ name: 'Tobin', peerId: 'guest-2' }])
+  })
+
+  it("takes no proof made for another room, relayed with this room's own nonce", async () => {
+    const session = useSessionStore()
+    await session.host('Mara')
+    await comeIn('guest-1', 'Tobin')
+    const secret = secretTo('guest-1')
+    opened.handlers?.peer?.('guest-1', false)
+    session.setLocked(true)
+
+    expect(await comeIn('guest-2', 'Tobin', secret, 'hexcrawl-zzzzzz')).toEqual({
+      type: 'refused',
+      reason: 'locked',
+    })
+    expect(await comeIn('guest-3', 'Tobin', secret)).toEqual({ type: 'welcome' })
+  })
+
+  it("lets a seat's owner in past a stranger waiting under its name, and turns the stranger away", async () => {
+    const session = useSessionStore()
+    const map = useHexMapStore()
+    await session.host('Mara')
+    await comeIn('guest-1', 'Tobin')
+    const secret = secretTo('guest-1')
+    opened.handlers?.peer?.('guest-1', false)
+    session.setApproval(true)
+    const count = map.entities.length
+
+    expect(await comeIn('guest-2', 'Tobin')).toEqual({ type: 'pending' })
+    expect(session.pending).toEqual([{ peerId: 'guest-2', name: 'Tobin', claimsHeldSeat: true }])
+
+    expect(await comeIn('guest-3', 'tobin', secret)).toEqual({ type: 'welcome' })
+    expect(opened.sent.filter(({ to }) => to === 'guest-2').at(-1)).toEqual({
+      message: { type: 'refused', reason: 'name-taken' },
+      to: 'guest-2',
+    })
+    expect(opened.dropped).toContain('guest-2')
+    expect(session.pending).toEqual([])
+    expect(session.players).toEqual([{ name: 'Tobin', peerId: 'guest-3' }])
+    expect(map.entities).toHaveLength(count)
+  })
+
+  it('forgets the secrets of the last map when the room goes on with another', async () => {
+    const session = useSessionStore()
+    const map = useHexMapStore()
+    await session.host('Mara')
+    await comeIn('guest-1', 'Tobin')
+    const secret = secretTo('guest-1')
+    opened.handlers?.peer?.('guest-1', false)
+    session.setLocked(true)
+
+    map.restore({
+      ...map.snapshot,
+      tableId: OTHER_TABLE,
+      seatSecrets: [{ name: 'Tobin', secret: SECRET }],
+    })
+    await nextTick()
+
+    expect(await comeIn('guest-2', 'Tobin', secret)).toEqual({ type: 'refused', reason: 'locked' })
+    expect(await comeIn('guest-3', 'Tobin', SECRET)).toEqual({ type: 'welcome' })
   })
 
   it('drops the answer to a proof whose connection went while it was checked', async () => {
@@ -454,7 +520,7 @@ describe('the session store', () => {
     opened.handlers?.peer?.('guest-1', false)
 
     opened.handlers?.peer?.('guest-2', true)
-    const proof = await seatProof(secret, nonceTo('guest-2'), 'Tobin')
+    const proof = await seatProof(secret, nonceTo('guest-2'), hostCode(), 'Tobin')
     const after = opened.sent.length
     opened.handlers?.message?.({ type: 'hello', name: 'Tobin', proof }, 'guest-2')
     opened.handlers?.peer?.('guest-2', false)
@@ -528,8 +594,8 @@ describe('the session store', () => {
 
     expect(opened.sent.at(-1)).toEqual({ message: { type: 'pending' }, to: 'guest-2' })
     expect(session.pending).toEqual([
-      { peerId: 'guest-1', name: 'Tobin' },
-      { peerId: 'guest-2', name: 'Ilse' },
+      { peerId: 'guest-1', name: 'Tobin', claimsHeldSeat: false },
+      { peerId: 'guest-2', name: 'Ilse', claimsHeldSeat: false },
     ])
     expect(session.players).toEqual([])
 
@@ -635,9 +701,10 @@ describe('the session store', () => {
 
   /**
    * A guest browser joining a room on the host's map: challenged at `table`,
-   * let in under `secret`. Gone again afterwards, as after a reload.
+   * let in under `secret`, or with none for a seat it proved. Gone again
+   * afterwards, as after a reload.
    */
-  const visit = async (code: string, name: string, table: string, secret: string) => {
+  const visit = async (code: string, name: string, table: string, secret?: string) => {
     setActivePinia(createPinia())
     const session = useSessionStore()
     await session.join(name, code)
@@ -645,7 +712,10 @@ describe('the session store', () => {
     const after = opened.sent.length
     opened.handlers?.message?.({ type: 'challenge', nonce: NONCE, table }, code)
     const hello = await helloSent(after)
-    opened.handlers?.message?.({ type: 'welcome', secret }, code)
+    opened.handlers?.message?.(
+      secret === undefined ? { type: 'welcome' } : { type: 'welcome', secret },
+      code,
+    )
     session.leave()
     return hello
   }
@@ -659,14 +729,45 @@ describe('the session store', () => {
 
     const hello = await visit('hexcrawl-zzzzzz', 'Tobin', TABLE, other)
     expect(hello).toEqual({ type: 'hello', name: 'Tobin', proof: expect.any(String) })
-    expect(hello.type === 'hello' && (await proves(hello.proof!, SECRET, NONCE, 'Tobin'))).toBe(
-      true,
-    )
+    const proof = hello.type === 'hello' ? hello.proof! : ''
+    expect(await proves(proof, SECRET, NONCE, 'hexcrawl-zzzzzz', 'Tobin')).toBe(true)
+    expect(await proves(proof, SECRET, NONCE, 'hexcrawl-abcdef', 'Tobin')).toBe(false)
     expect(JSON.stringify(opened.sent)).not.toContain(`"${SECRET}"`)
 
     // The secret given last is the one proved next.
     const next = await visit('hexcrawl-abcdef', 'tobin', TABLE, SECRET)
-    expect(next.type === 'hello' && (await proves(next.proof!, other, NONCE, 'Tobin'))).toBe(true)
+    expect(
+      next.type === 'hello' &&
+        (await proves(next.proof!, other, NONCE, 'hexcrawl-abcdef', 'Tobin')),
+    ).toBe(true)
+  })
+
+  it('keeps the secret it has when let back in without a new one', async () => {
+    await visit('hexcrawl-abcdef', 'Tobin', TABLE, SECRET)
+    await visit('hexcrawl-abcdef', 'Tobin', TABLE)
+
+    const again = await visit('hexcrawl-abcdef', 'Tobin', TABLE)
+    expect(
+      again.type === 'hello' &&
+        (await proves(again.proof!, SECRET, NONCE, 'hexcrawl-abcdef', 'Tobin')),
+    ).toBe(true)
+  })
+
+  it('proves its seat for the room it dialled, even before that room has finished opening', async () => {
+    await visit('hexcrawl-abcdef', 'Tobin', TABLE, SECRET)
+    setActivePinia(createPinia())
+    const session = useSessionStore()
+    const joining = session.join('Tobin', 'ZZZZZZ')
+    expect(session.code).toBeNull()
+    opened.handlers?.peer?.('hexcrawl-zzzzzz', true)
+    const after = opened.sent.length
+    opened.handlers?.message?.({ type: 'challenge', nonce: NONCE, table: TABLE }, 'hexcrawl-zzzzzz')
+    const hello = await helloSent(after)
+    await joining
+    expect(
+      hello.type === 'hello' &&
+        (await proves(hello.proof!, SECRET, NONCE, 'hexcrawl-zzzzzz', 'Tobin')),
+    ).toBe(true)
   })
 
   it('proves nothing at another map, whatever the room', async () => {
@@ -684,10 +785,14 @@ describe('the session store', () => {
 
     const tobin = await visit('hexcrawl-abcdef', 'Tobin', TABLE, SECRET)
     const again = await visit('hexcrawl-abcdef', 'Ilse', TABLE, ilse)
-    expect(tobin.type === 'hello' && (await proves(tobin.proof!, SECRET, NONCE, 'Tobin'))).toBe(
-      true,
-    )
-    expect(again.type === 'hello' && (await proves(again.proof!, ilse, NONCE, 'Ilse'))).toBe(true)
+    expect(
+      tobin.type === 'hello' &&
+        (await proves(tobin.proof!, SECRET, NONCE, 'hexcrawl-abcdef', 'Tobin')),
+    ).toBe(true)
+    expect(
+      again.type === 'hello' &&
+        (await proves(again.proof!, ilse, NONCE, 'hexcrawl-abcdef', 'Ilse')),
+    ).toBe(true)
     expect(await visit('hexcrawl-abcdef', 'Ash', TABLE, SECRET)).toEqual({
       type: 'hello',
       name: 'Ash',
@@ -859,9 +964,9 @@ describe('drops and resumes', () => {
     const hello = await helloSent(0)
     expect(opened.sent).toHaveLength(1)
     expect(opened.sent[0].to).toBe(HOST)
-    expect(hello.type === 'hello' && (await proves(hello.proof!, SECRET, nonce, 'Tobin'))).toBe(
-      true,
-    )
+    expect(
+      hello.type === 'hello' && (await proves(hello.proof!, SECRET, nonce, HOST, 'Tobin')),
+    ).toBe(true)
     opened.handlers?.message?.({ type: 'welcome', secret: SECRET }, HOST)
     opened.handlers?.message?.({ type: 'seat', entityIds: ['e-tobin'] }, HOST)
 
@@ -1018,7 +1123,8 @@ describe('drops and resumes', () => {
     await comeIn('guest-2', 'tobin', secret)
 
     const told = opened.sent.filter(({ message }) => ['welcome', 'seat'].includes(message.type))
-    expect(told.map(({ message }) => message)).toEqual([{ type: 'welcome', secret }, seat])
+    expect(told.map(({ message }) => message)).toEqual([{ type: 'welcome' }, seat])
+    expect(JSON.stringify(opened.sent)).not.toContain(secret)
     expect(map.entities).toHaveLength(count)
     expect(session.players).toEqual([{ name: 'Tobin', peerId: 'guest-2' }])
   })

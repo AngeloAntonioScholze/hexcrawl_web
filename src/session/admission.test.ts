@@ -4,6 +4,7 @@ import {
   decide,
   decline,
   disconnect,
+  forgetSecrets,
   kick,
   nameKey,
   newSecret,
@@ -18,6 +19,9 @@ import {
 
 const welcome = { type: 'welcome', secret: expect.stringMatching(/^[0-9a-f]{32}$/) }
 
+/** A proven seat's welcome: its secret is the guest's already and stays off the wire. */
+const rejoined = { type: 'welcome' }
+
 const SAVED = '0123456789abcdef0123456789abcdef'
 
 const joined = (state: Admission, name: string, peerId: string): Admission => {
@@ -26,7 +30,6 @@ const joined = (state: Admission, name: string, peerId: string): Admission => {
   return next
 }
 
-/** The secret the room handed out under a name. */
 const secretOf = (state: Admission, name: string): string => state.secrets.get(nameKey(name))!
 
 /** Mira let in, then gone again: the room still knows her and her secret. */
@@ -60,20 +63,28 @@ describe('newSecret', () => {
 describe('seatProof and proves', () => {
   const NONCE = 'fedcba9876543210fedcba9876543210'
 
-  it('is HMAC-SHA256 in hex, the same for the same secret, nonce and name', async () => {
-    const proof = await seatProof(SAVED, NONCE, 'Mira')
+  const ROOM = 'hexcrawl-abcdef'
+
+  it('is HMAC-SHA256 in hex, the same for the same secret, nonce, room and name', async () => {
+    const proof = await seatProof(SAVED, NONCE, ROOM, 'Mira')
     expect(proof).toMatch(/^[0-9a-f]{64}$/)
     expect(proof).not.toContain(SAVED)
-    expect(await seatProof(SAVED, NONCE, ' MI​RA')).toBe(proof)
+    expect(await seatProof(SAVED, NONCE, ROOM, ' MI​RA')).toBe(proof)
   })
 
-  it('proves the secret it was made with, for its nonce and name only', async () => {
-    const proof = await seatProof(SAVED, NONCE, 'Mira')
-    expect(await proves(proof, SAVED, NONCE, 'mira')).toBe(true)
-    expect(await proves(proof, newSecret(), NONCE, 'Mira')).toBe(false)
-    expect(await proves(proof, SAVED, newSecret(), 'Mira')).toBe(false)
-    expect(await proves(proof, SAVED, NONCE, 'Tobin')).toBe(false)
-    expect(await proves(proof.slice(0, 63), SAVED, NONCE, 'Mira')).toBe(false)
+  it('proves the secret it was made with, for its nonce, room and name only', async () => {
+    const proof = await seatProof(SAVED, NONCE, ROOM, 'Mira')
+    expect(await proves(proof, SAVED, NONCE, ROOM, 'mira')).toBe(true)
+    expect(await proves(proof, newSecret(), NONCE, ROOM, 'Mira')).toBe(false)
+    expect(await proves(proof, SAVED, newSecret(), ROOM, 'Mira')).toBe(false)
+    expect(await proves(proof, SAVED, NONCE, ROOM, 'Tobin')).toBe(false)
+    expect(await proves(proof.slice(0, 63), SAVED, NONCE, ROOM, 'Mira')).toBe(false)
+  })
+
+  it('makes a proof for one room that another room refuses, same nonce and all', async () => {
+    const forA = await seatProof(SAVED, NONCE, 'hexcrawl-aaaaaa', 'Mira')
+    expect(await proves(forA, SAVED, NONCE, 'hexcrawl-aaaaaa', 'Mira')).toBe(true)
+    expect(await proves(forA, SAVED, NONCE, 'hexcrawl-bbbbbb', 'Mira')).toBe(false)
   })
 })
 
@@ -164,17 +175,23 @@ describe('decide', () => {
     const room = setLocked(away(), true)
     const secret = secretOf(room, 'Mira')
     const { state, reply } = decide(room, 'mira', 'p2', { proven: secret })
-    expect(reply).toEqual({ type: 'welcome', secret })
+    expect(reply).toEqual(rejoined)
     expect(state.online.get('mira')).toBe('p2')
+    expect(secretOf(state, 'Mira')).toBe(secret)
   })
 
   it('lets a known name back in without approval, with its secret', () => {
     const room = setApproval(away(), true)
     const secret = secretOf(room, 'Mira')
-    expect(decide(room, 'Mira', 'p2', { proven: secret }).reply).toEqual({
-      type: 'welcome',
-      secret,
-    })
+    expect(decide(room, 'Mira', 'p2', { proven: secret }).reply).toEqual(rejoined)
+  })
+
+  it('sends a proven seat no secret, so nothing of it crosses the wire again', () => {
+    const room = away()
+    const secret = secretOf(room, 'Mira')
+    const { reply } = decide(room, 'Mira', 'p2', { proven: secret })
+    expect(reply).toEqual({ type: 'welcome' })
+    expect(JSON.stringify(reply)).not.toContain(secret)
   })
 
   it('keeps a known name typed without its secret out of a locked room', () => {
@@ -216,7 +233,7 @@ describe('decide', () => {
   it('lets a name seated before this room in past the lock and approval with its secret', () => {
     const room = openRoom({ locked: true, approval: true })
     const { state, reply } = decide(room, ' Mira', 'p1', { held: SAVED, proven: SAVED })
-    expect(reply).toEqual({ type: 'welcome', secret: SAVED })
+    expect(reply).toEqual(rejoined)
     expect(state.known.get('mira')).toBe('Mira')
     expect(state.online.get('mira')).toBe('p1')
     expect(state.secrets.get('mira')).toBe(SAVED)
@@ -273,6 +290,39 @@ describe('decide', () => {
     expect(decide(room, 'MIRA', 'p2', { proven }).state.known.get('mira')).toBe('Mira')
   })
 
+  it('marks a stranger waiting under a held seat as claiming it, and nobody else', () => {
+    const approval = setApproval(openRoom(), true)
+    const stranger = decide(approval, 'Mira', 'p1', { held: SAVED }).state
+    expect(stranger.claimsHeld.has('p1')).toBe(true)
+    const wrong = decide(setApproval(away(), true), 'Mira', 'p2', { proven: SAVED }).state
+    expect(wrong.claimsHeld.has('p2')).toBe(true)
+    const newcomer = decide(approval, 'Tobin', 'p3').state
+    expect(newcomer.claimsHeld.size).toBe(0)
+  })
+
+  it("lets a seat's owner in past a stranger waiting under its name, and puts the stranger out", () => {
+    const waiting = decide(setApproval(openRoom(), true), 'Mira', 'p1', { held: SAVED }).state
+    const decision = decide(waiting, 'mira', 'p2', { held: SAVED, proven: SAVED })
+    expect(decision.reply).toEqual(rejoined)
+    expect(decision.displaced).toBe('p1')
+    expect(decision.state.online.get('mira')).toBe('p2')
+    expect(decision.state.pending.size).toBe(0)
+    expect(decision.state.claimsHeld.size).toBe(0)
+    expect(accept(decision.state, 'p1')).toBeNull()
+  })
+
+  it('displaces nobody when no one waits under the name', () => {
+    const room = away()
+    expect(decide(room, 'Mira', 'p2', { proven: secretOf(room, 'Mira') }).displaced).toBeUndefined()
+  })
+
+  it('still refuses a proven name while it is online now', () => {
+    const online = joined(openRoom(), 'Mira', 'p1')
+    const decision = decide(online, 'Mira', 'p2', { proven: secretOf(online, 'Mira') })
+    expect(decision.reply).toEqual({ type: 'refused', reason: 'name-taken' })
+    expect(decision.displaced).toBeUndefined()
+  })
+
   it('refuses a kicked name even when known and the room is open', () => {
     const room = kick(joined(openRoom(), 'Mira', 'p1'), 'Mira').state
     expect(decide(room, ' mira', 'p2').reply).toEqual({ type: 'refused', reason: 'kicked' })
@@ -304,10 +354,7 @@ describe('accept', () => {
     const waiting = decide(setApproval(openRoom(), true), 'Mira', 'p1').state
     const room = disconnect(accept(waiting, 'p1')!.state, 'p1')
     const proven = secretOf(room, 'Mira')
-    expect(decide(room, 'Mira', 'p2', { proven }).reply).toEqual({
-      type: 'welcome',
-      secret: proven,
-    })
+    expect(decide(room, 'Mira', 'p2', { proven }).reply).toEqual(rejoined)
   })
 
   it('hands a seat the DM gives to a stranger a fresh secret', () => {
@@ -316,6 +363,7 @@ describe('accept', () => {
     expect(decision.reply).toEqual(welcome)
     expect(decision.reply).not.toEqual({ type: 'welcome', secret: SAVED })
     expect(secretOf(decision.state, 'Mira')).not.toBe(SAVED)
+    expect(decision.state.claimsHeld.size).toBe(0)
   })
 
   it('is null for a peer that is not waiting', () => {
@@ -332,6 +380,11 @@ describe('decline', () => {
     expect(decision?.state.pending.size).toBe(0)
     expect(decision?.state.known.size).toBe(0)
     expect(decision?.state.kicked.size).toBe(0)
+  })
+
+  it('clears the mark of a declined peer that claimed a held seat', () => {
+    const waiting = decide(setApproval(openRoom(), true), 'Mira', 'p1', { held: SAVED }).state
+    expect(decline(waiting, 'p1')!.state.claimsHeld.size).toBe(0)
   })
 
   it('lets a declined name ask again', () => {
@@ -358,7 +411,7 @@ describe('disconnect', () => {
     const room = joined(openRoom(), 'Mira', 'p1')
     expect(decide(room, 'Mira', 'p2').reply).toEqual({ type: 'refused', reason: 'name-taken' })
     const back = decide(disconnect(room, 'p1'), 'Mira', 'p2', { proven: secretOf(room, 'Mira') })
-    expect(back.reply).toEqual(welcome)
+    expect(back.reply).toEqual(rejoined)
     expect(back.state.online.get('mira')).toBe('p2')
   })
 
@@ -367,6 +420,11 @@ describe('disconnect', () => {
     const room = disconnect(waiting, 'p1')
     expect(room.pending.size).toBe(0)
     expect(room.known.size).toBe(0)
+  })
+
+  it('clears the mark of a peer that claimed a held seat and left', () => {
+    const waiting = decide(setApproval(openRoom(), true), 'Mira', 'p1', { held: SAVED }).state
+    expect(disconnect(waiting, 'p1').claimsHeld.size).toBe(0)
   })
 
   it('ignores a stale peer whose name was reclaimed', () => {
@@ -398,6 +456,11 @@ describe('kick', () => {
     expect(state.kicked.has('mira')).toBe(true)
   })
 
+  it('clears the mark of a kicked peer that claimed a held seat', () => {
+    const waiting = decide(setApproval(openRoom(), true), 'Mira', 'p1', { held: SAVED }).state
+    expect(kick(waiting, 'Mira').state.claimsHeld.size).toBe(0)
+  })
+
   it('bans a known-offline name with nobody to close', () => {
     const { state, peerId } = kick(disconnect(joined(openRoom(), 'Mira', 'p1'), 'p1'), 'Mira')
     expect(peerId).toBeUndefined()
@@ -410,6 +473,26 @@ describe('kick', () => {
     const { state } = kick(room, 'Mira')
     expect(state.online.get('tobin')).toBe('p2')
     expect(state.known.get('tobin')).toBe('Tobin')
+  })
+})
+
+describe('forgetSecrets', () => {
+  it('forgets the secrets handed out, so a seat is proven against what the map kept', () => {
+    const room = setLocked(away(), true)
+    const old = secretOf(room, 'Mira')
+    const fresh = forgetSecrets(room)
+    expect(fresh.secrets.size).toBe(0)
+    expect(fresh.known.get('mira')).toBe('Mira')
+    expect(decide(fresh, 'Mira', 'p2', { proven: old }).reply).toEqual({
+      type: 'refused',
+      reason: 'locked',
+    })
+    expect(decide(fresh, 'Mira', 'p2', { held: SAVED, proven: SAVED }).reply).toEqual(rejoined)
+  })
+
+  it('leaves a room with no secrets as it was', () => {
+    const room = openRoom()
+    expect(forgetSecrets(room)).toBe(room)
   })
 })
 

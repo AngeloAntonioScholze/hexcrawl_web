@@ -27,8 +27,12 @@ export type SessionMessage =
   | { type: 'hello'; name: string; proof?: string }
   | { type: 'ping'; at: number }
   | { type: 'pong'; at: number }
-  /** `secret` is the guest's claim to its seat at this table, to prove in its next hellos. */
-  | { type: 'welcome'; secret: string }
+  /**
+   * `secret` is the guest's claim to its seat at this table, to prove in its
+   * next hellos. Only a seat handed out fresh brings one: a guest that proved
+   * its secret keeps the one it has.
+   */
+  | { type: 'welcome'; secret?: string }
   /**
    * The tokens that are the guest's to play, sent once it is in and again
    * whenever the DM hands it more or takes some away.
@@ -91,6 +95,7 @@ const parseMessage = (msg: unknown): SessionMessage | null => {
     }
     case 'welcome': {
       const { secret } = msg
+      if (hasExactly(msg, ['type'])) return { type: 'welcome' }
       if (!hasExactly(msg, ['type', 'secret']) || !isHex128(secret)) return null
       return { type: 'welcome', secret }
     }

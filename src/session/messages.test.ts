@@ -19,6 +19,7 @@ describe('parseEnvelope', () => {
       { type: 'ping', at: 1234.5 },
       { type: 'pong', at: 0 },
       { type: 'welcome', secret: SECRET },
+      { type: 'welcome' },
       { type: 'seat', entityIds: ['e-1', 'e-2'] },
       { type: 'seat', entityIds: [] },
       { type: 'pending' },
@@ -106,7 +107,14 @@ describe('parseEnvelope', () => {
       'a hello with an extra key',
       { v: PROTOCOL_VERSION, msg: { type: 'hello', name: 'Mira', seat: 'e-1' } },
     ],
-    ['a welcome without a secret', { v: PROTOCOL_VERSION, msg: { type: 'welcome' } }],
+    [
+      'a welcome with a secret of nothing',
+      { v: PROTOCOL_VERSION, msg: { type: 'welcome', secret: null } },
+    ],
+    [
+      'a welcome with a name but no secret',
+      { v: PROTOCOL_VERSION, msg: { type: 'welcome', name: 'Mira' } },
+    ],
     [
       'a welcome with a bad secret',
       { v: PROTOCOL_VERSION, msg: { type: 'welcome', secret: `${SECRET}0` } },
