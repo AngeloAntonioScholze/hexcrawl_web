@@ -54,6 +54,7 @@ const entry = (id: string, who: Viewer = { role: 'dm' }): JournalEntry => ({
 })
 
 const snapshot = (patch: Partial<MapSnapshot> = {}): MapSnapshot => ({
+  tableId: 'a1b2c3d4e5f60718293a4b5c6d7e8f90',
   terrain: { seed: 4242, scale: 65, seaLevel: -0.15, relief: 9.5, style: 'pangaea' },
   worldRadius: 150,
   fog: false,
@@ -214,6 +215,10 @@ const snapshot = (patch: Partial<MapSnapshot> = {}): MapSnapshot => ({
     { name: 'Tom', entityId: 'caravan-1' },
     { name: 'Mira', entityId: 'party-1' },
   ],
+  seatSecrets: [
+    { name: 'Tom', secret: '0123456789abcdef0123456789abcdef' },
+    { name: 'Mira', secret: 'fedcba9876543210fedcba9876543210' },
+  ],
   characters: [{ entityId: 'party-1', purse: 45, level: 2 }],
   journal: [entry('j1', { role: 'dm' }), entry('j2', { role: 'player', plays: ['party-1'] })],
   ...patch,
@@ -272,6 +277,8 @@ describe('schema', () => {
     expect(loaded.rivers).toEqual([])
     expect(loaded.terrainOverrides).toEqual([])
     expect(loaded.seats).toEqual([])
+    expect(loaded.seatSecrets).toEqual([])
+    expect(loaded.tableId).toMatch(/^[0-9a-f]{32}$/)
     expect(loaded.playerReachCapped).toBe(true)
     expect(loaded.characters).toEqual([])
     expect(loaded.journal).toEqual([])
@@ -295,7 +302,9 @@ describe('schema', () => {
     db.exec(`
       ALTER TABLE entity DROP COLUMN hostile;
       DROP TABLE journal;
-      PRAGMA user_version = ${SCHEMA_VERSION - 2};
+      DROP TABLE seat_secret;
+      ALTER TABLE map DROP COLUMN table_id;
+      PRAGMA user_version = ${SCHEMA_VERSION - 3};
       INSERT INTO entity (id, ord, name, kind, owner, color, pace, sight, hidden, darkvision)
       VALUES ('caravan-1', 0, 'the caravan', 'caravan', 'dm', '#6fa8dc', 1, 5, 0, 0)
     `)
@@ -310,13 +319,34 @@ describe('schema', () => {
     saveSnapshot(db, snapshot())
     db.exec(`
       DROP TABLE journal;
-      PRAGMA user_version = ${SCHEMA_VERSION - 1};
+      DROP TABLE seat_secret;
+      ALTER TABLE map DROP COLUMN table_id;
+      PRAGMA user_version = ${SCHEMA_VERSION - 2};
     `)
 
     migrate(db)
 
     expect(schemaVersion(db)).toBe(SCHEMA_VERSION)
     expect(loadSnapshot(db)!.journal).toEqual([])
+  })
+
+  it('opens a database saved before seat secrets as a table of its own, its seats kept', () => {
+    saveSnapshot(db, snapshot())
+    db.exec(`
+      DROP TABLE seat_secret;
+      ALTER TABLE map DROP COLUMN table_id;
+      PRAGMA user_version = ${SCHEMA_VERSION - 1};
+    `)
+
+    migrate(db)
+
+    expect(schemaVersion(db)).toBe(SCHEMA_VERSION)
+    const loaded = loadSnapshot(db)!
+    expect(loaded.seatSecrets).toEqual([])
+    expect(loaded.seats).toEqual(snapshot().seats)
+    expect(loaded.tableId).toMatch(/^[0-9a-f]{32}$/)
+    expect(loaded.tableId).not.toBe(snapshot().tableId)
+    expect(loadSnapshot(db)!.tableId).toBe(loaded.tableId)
   })
 
   it('leaves an already current database alone', () => {
@@ -569,6 +599,16 @@ describe('map state', () => {
 
     saveSnapshot(db, snapshot({ seats: [] }))
     expect(loadSnapshot(db)!.seats).toEqual([])
+  })
+
+  it('round-trips the seat secrets in the order handed out', () => {
+    const saved = snapshot()
+    saveSnapshot(db, saved)
+
+    expect(loadSnapshot(db)!.seatSecrets).toEqual(saved.seatSecrets)
+
+    saveSnapshot(db, snapshot({ seatSecrets: [] }))
+    expect(loadSnapshot(db)!.seatSecrets).toEqual([])
   })
 
   it('round-trips every purse and level in the order first edited', () => {

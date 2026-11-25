@@ -16,6 +16,7 @@ import { roadHexes, type Roads } from '../terrain/roads'
 import { TERRAIN_DEFAULTS, type TerrainId, type TerrainTile } from '../terrain/terrain'
 import { TURNS_PER_PHASE } from '../time/clock'
 import { DM, PLAYER } from '../session/permissions'
+import { secretOf } from '../session/seats'
 import { fieldFromTiles } from '../terrain/field'
 import { BRUSH_LIMITS, MAX_SIGHT, TERRAIN_LIMITS, useHexMapStore, type SidePanel } from './hexMap'
 
@@ -1139,6 +1140,53 @@ describe('players seated at the table', () => {
 
     expect(fresh.seats).toEqual([{ name: 'Mira', entityId: token.id }])
     expect(fresh.seatPlayer('Mira')?.id).toBe(token.id)
+  })
+
+  it('keeps the secret a seated name was given with the map, out of undo', () => {
+    const store = setup()
+    store.seatPlayer(' Mira ', 'secret-1')
+    store.seatPlayer('Tobin', 'secret-2')
+    store.seatPlayer('MIRA', 'secret-3')
+    store.undo()
+
+    expect(secretOf(store.snapshot.seatSecrets, 'mira')).toBe('secret-3')
+    expect(store.snapshot.seatSecrets).toEqual([
+      { name: 'Tobin', secret: 'secret-2' },
+      { name: 'MIRA', secret: 'secret-3' },
+    ])
+
+    const saved = store.snapshot
+    setActivePinia(createPinia())
+    const fresh = setup()
+    fresh.restore(saved)
+    expect(secretOf(fresh.snapshot.seatSecrets, 'Mira')).toBe('secret-3')
+    expect(secretOf(fresh.snapshot.seatSecrets, 'Tobin')).toBe('secret-2')
+    expect(secretOf(fresh.snapshot.seatSecrets, 'Ash')).toBeUndefined()
+  })
+
+  it('keeps a seat secret out of the change journal', () => {
+    const store = setup()
+    store.seatPlayer('Mira', 'secret-1')
+    expect(JSON.stringify(store.journal)).not.toContain('secret-1')
+  })
+
+  it('gives no player a say over the seat secrets', () => {
+    const store = setup()
+    store.seatPlayer('Mira', 'secret-1')
+    store.actAs(PLAYER, () => store.seatPlayer('Mira', 'stolen'))
+    expect(secretOf(store.snapshot.seatSecrets, 'Mira')).toBe('secret-1')
+  })
+
+  it('keeps its table id with the map, and a new store makes one of its own', () => {
+    const store = setup()
+    expect(store.snapshot.tableId).toMatch(/^[0-9a-f]{32}$/)
+    const saved = store.snapshot
+
+    setActivePinia(createPinia())
+    const fresh = setup()
+    expect(fresh.snapshot.tableId).not.toBe(saved.tableId)
+    fresh.restore(saved)
+    expect(fresh.snapshot.tableId).toBe(saved.tableId)
   })
 
   it('lets the player set their token down once, then only order it', () => {

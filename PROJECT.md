@@ -50,6 +50,7 @@ docs/reference/ art references
 - **Windowed world**: the grid draws only a viewport-sized window of a large world (`engine/hexWindow.ts`, `composables/useHexWindow.ts`).
 - **Permissions**: every store action is gated by `may()` against `HEX_MAP_RULES` in `src/session/permissions.ts`.
 - **Player view**: DM state is projected down to a player view (`session/projection.ts`) before being sent or rendered for players.
+- **Seat admission**: a typed name never claims a seat on its own. Returning players prove a per-seat secret (HMAC over the host's nonce, room code and name; `session/admission.ts`, `seats.ts`). Name keys go through `session/names.ts` (NFKC, control/format chars stripped). Detail: `vault/hexcrawl_web/features/Session and Permissions.md`.
 
 ## Rules
 - **UI**: dialogs and panels take gameuidatabase.com as the base guide (`vault/_shared/Game UI Reference.md`).
@@ -69,6 +70,7 @@ docs/reference/ art references
   - a projection test that DM view state isn't sent
 
   List these places in the bead description.
+- **Seat secrets**: they are DM-only. Never project them to players, never write them to a map export, never log them. Bump `PROTOCOL_VERSION` when the hello/challenge/welcome shape changes. `crypto.subtle` needs HTTPS or localhost, so test session admission over localhost.
 - **Babylon render loop**: anything that throws inside `scene.onBeforeRenderObservable` kills rendering for good. Keep window/grid capacity in sync with the zoom limit (see bead `hexcrawl_web-z5s`).
 - Test files live next to their source. Match the surrounding code and comment style.
 - Component tests use `@vue/test-utils` + happy-dom (devDeps), enabled per file with `// @vitest-environment happy-dom`.

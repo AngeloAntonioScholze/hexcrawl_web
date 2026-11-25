@@ -10,6 +10,32 @@ export interface Seat {
   entityId: string
 }
 
+/**
+ * What a player brings back to claim their seats: the host hands it out the
+ * first time a name is let in and keeps it with the map, DM-only, so it is
+ * still asked for after a reload. Never sent to anyone but that player.
+ */
+export interface SeatSecret {
+  name: string
+  secret: string
+}
+
+/** The secret a name holds, matched as the door matches names. */
+export const secretOf = (secrets: readonly SeatSecret[], name: string): string | undefined => {
+  const key = nameKey(name)
+  return secrets.find((one) => nameKey(one.name) === key)?.secret
+}
+
+/** Gives a name its secret, in place of any it held before. */
+export const withSecret = (
+  secrets: readonly SeatSecret[],
+  name: string,
+  secret: string,
+): SeatSecret[] => {
+  const key = nameKey(name)
+  return [...secrets.filter((one) => nameKey(one.name) !== key), { name: name.trim(), secret }]
+}
+
 /** The seat a name already has, while its token is still on the map. */
 export const seatOf = (
   seats: readonly Seat[],

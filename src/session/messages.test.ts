@@ -4,6 +4,9 @@ import { CHUNK_BYTES, chunk } from './wireChunks'
 
 const piece = { id: 2, index: 0, count: 1, data: '{"turn":1}' }
 
+const SECRET = '0123456789abcdef0123456789abcdef'
+const PROOF = SECRET.repeat(2)
+
 /** PeerJS turns away a JSON message of this many bytes or more. */
 const PEERJS_LIMIT = 16_300
 
@@ -11,8 +14,11 @@ describe('parseEnvelope', () => {
   it('round-trips every message through JSON', () => {
     for (const msg of [
       { type: 'hello', name: 'Mira' },
+      { type: 'hello', name: 'Mira', proof: PROOF },
+      { type: 'challenge', nonce: SECRET, table: 'fedcba9876543210fedcba9876543210' },
       { type: 'ping', at: 1234.5 },
       { type: 'pong', at: 0 },
+      { type: 'welcome', secret: SECRET },
       { type: 'welcome' },
       { type: 'seat', entityIds: ['e-1', 'e-2'] },
       { type: 'seat', entityIds: [] },
@@ -29,6 +35,13 @@ describe('parseEnvelope', () => {
 
   it('trims a hello name', () => {
     expect(parseEnvelope(wrap({ type: 'hello', name: '  Mira ' }))).toEqual({
+      type: 'hello',
+      name: 'Mira',
+    })
+  })
+
+  it('folds a hello name to its plain form, so the DM sees what it matches as', () => {
+    expect(parseEnvelope(wrap({ type: 'hello', name: '‮Ｍｉ​ra‬' }))).toEqual({
       type: 'hello',
       name: 'Mira',
     })
@@ -54,7 +67,62 @@ describe('parseEnvelope', () => {
       { v: PROTOCOL_VERSION, msg: { type: 'hello', name: 'x'.repeat(MAX_NAME_LENGTH + 1) } },
     ],
     ['a numeric name', { v: PROTOCOL_VERSION, msg: { type: 'hello', name: 7 } }],
-    ['a welcome with a name', { v: PROTOCOL_VERSION, msg: { type: 'welcome', name: 'Mira' } }],
+    [
+      'a name of nothing but format marks',
+      { v: PROTOCOL_VERSION, msg: { type: 'hello', name: '​‮⁦' } },
+    ],
+    [
+      'a hello with a short proof',
+      { v: PROTOCOL_VERSION, msg: { type: 'hello', name: 'Mira', proof: SECRET } },
+    ],
+    [
+      'a hello with an upper-case proof',
+      { v: PROTOCOL_VERSION, msg: { type: 'hello', name: 'Mira', proof: PROOF.toUpperCase() } },
+    ],
+    [
+      'a hello with a numeric proof',
+      { v: PROTOCOL_VERSION, msg: { type: 'hello', name: 'Mira', proof: 7 } },
+    ],
+    [
+      'a hello that sends a secret in the clear',
+      { v: PROTOCOL_VERSION, msg: { type: 'hello', name: 'Mira', secret: SECRET } },
+    ],
+    [
+      'a challenge without a table',
+      { v: PROTOCOL_VERSION, msg: { type: 'challenge', nonce: SECRET } },
+    ],
+    [
+      'a challenge with a short nonce',
+      { v: PROTOCOL_VERSION, msg: { type: 'challenge', nonce: 'abc', table: SECRET } },
+    ],
+    [
+      'a challenge with a numeric table',
+      { v: PROTOCOL_VERSION, msg: { type: 'challenge', nonce: SECRET, table: 7 } },
+    ],
+    [
+      'a challenge with an extra key',
+      { v: PROTOCOL_VERSION, msg: { type: 'challenge', nonce: SECRET, table: SECRET, at: 1 } },
+    ],
+    [
+      'a hello with an extra key',
+      { v: PROTOCOL_VERSION, msg: { type: 'hello', name: 'Mira', seat: 'e-1' } },
+    ],
+    [
+      'a welcome with a secret of nothing',
+      { v: PROTOCOL_VERSION, msg: { type: 'welcome', secret: null } },
+    ],
+    [
+      'a welcome with a name but no secret',
+      { v: PROTOCOL_VERSION, msg: { type: 'welcome', name: 'Mira' } },
+    ],
+    [
+      'a welcome with a bad secret',
+      { v: PROTOCOL_VERSION, msg: { type: 'welcome', secret: `${SECRET}0` } },
+    ],
+    [
+      'a welcome with a name',
+      { v: PROTOCOL_VERSION, msg: { type: 'welcome', secret: SECRET, name: 'Mira' } },
+    ],
     ['a seat with a blank token', { v: PROTOCOL_VERSION, msg: { type: 'seat', entityIds: [''] } }],
     ['a seat with a numeric token', { v: PROTOCOL_VERSION, msg: { type: 'seat', entityIds: [7] } }],
     ['a seat with one token', { v: PROTOCOL_VERSION, msg: { type: 'seat', entityIds: 'e-1' } }],

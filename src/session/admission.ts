@@ -1,13 +1,16 @@
 import type { RefusalReason, SessionMessage } from './messages'
+import { plainName } from './names'
 
 /**
- * Who may sit at the host's table. Names are matched by their key (trimmed,
- * lower case), so "Mira" and " mira" are one player; `known` keeps the form
- * they were first admitted under, for display. Every function returns a new
- * state and leaves the one it was given alone.
+ * Who may sit at the host's table. Names are matched by their key (see
+ * nameKey), so "Mira" and " mira" are one player; `known` keeps the form
+ * they were first admitted under, for display. Names are not secret: every
+ * guest sees the tokens named after them. A name that holds a seat comes back
+ * past the lock only by proving the secret the host gave it when it was first
+ * let in. Every function returns a new state and leaves the one it was given alone.
  */
 export interface Admission {
-  /** No new names; known ones still come back. */
+  /** No new names; names that prove their seat's secret still come back. */
   locked: boolean
   /** New names wait for the DM to accept them. */
   approval: boolean
@@ -19,6 +22,10 @@ export interface Admission {
   kicked: ReadonlySet<string>
   /** Peer id to the name it is waiting under. */
   pending: ReadonlyMap<string, string>
+  /** Name key to the seat secret handed out under it this session. */
+  secrets: ReadonlyMap<string, string>
+  /** Waiting peers that asked under a name holding a seat secret, but did not prove it. */
+  claimsHeld: ReadonlySet<string>
 }
 
 export type Reply = Extract<SessionMessage, { type: 'welcome' | 'pending' | 'refused' }>
@@ -26,11 +33,71 @@ export type Reply = Extract<SessionMessage, { type: 'welcome' | 'pending' | 'ref
 export interface Decision {
   state: Admission
   reply: Reply
+  /** A peer waiting under the same name, put out by the owner proving the seat: refuse it 'name-taken'. */
+  displaced?: string
 }
 
-export const nameKey = (name: string): string => name.trim().toLowerCase()
+/**
+ * What a hello brings besides its name: `held` is the secret the map keeps
+ * for that name from an earlier session, `proven` the secret the hello's
+ * proof was checked against and matched (see proves).
+ */
+export interface Claim {
+  held?: string
+  proven?: string
+}
 
-/** A room before anyone says hello; `known` are the names to let back in, as display names. */
+/** One key for every way of typing a name: its plain form (see plainName), lower-cased. */
+export const nameKey = (name: string): string => plainName(name).toLowerCase()
+
+const SECRET_BYTES = 16
+
+const toHex = (bytes: Uint8Array): string =>
+  Array.from(bytes, (byte) => byte.toString(16).padStart(2, '0')).join('')
+
+/** 128 random bits, as hex: a seat secret, a challenge nonce or a table id. */
+export const newSecret = (): string => toHex(crypto.getRandomValues(new Uint8Array(SECRET_BYTES)))
+
+const sameText = (a: string, b: string): boolean => {
+  if (a.length !== b.length) return false
+  let diff = 0
+  for (let i = 0; i < a.length; i++) diff |= a.charCodeAt(i) ^ b.charCodeAt(i)
+  return diff === 0
+}
+
+/**
+ * What a guest sends for a seat instead of its secret: HMAC-SHA256 under the
+ * secret of the host's nonce, the room code the guest dialled and the name, so
+ * it is good for one connection, one room and one name only. A room that
+ * passes on another room's challenge gets a proof its own room will not take.
+ */
+export async function seatProof(
+  secret: string,
+  nonce: string,
+  roomCode: string,
+  name: string,
+): Promise<string> {
+  const raw = Uint8Array.from(secret.match(/../g) ?? [], (pair) => parseInt(pair, 16))
+  const key = await crypto.subtle.importKey('raw', raw, { name: 'HMAC', hash: 'SHA-256' }, false, [
+    'sign',
+  ])
+  const message = new TextEncoder().encode(`${nonce}|${roomCode}|${nameKey(name)}`)
+  return toHex(new Uint8Array(await crypto.subtle.sign('HMAC', key, message)))
+}
+
+export const proves = async (
+  proof: string,
+  secret: string,
+  nonce: string,
+  roomCode: string,
+  name: string,
+): Promise<boolean> => sameText(proof, await seatProof(secret, nonce, roomCode, name))
+
+/** The secret a name must prove: the one this room handed out, else the one the map kept. */
+export const secretToProve = (state: Admission, name: string, saved?: string): string | undefined =>
+  state.secrets.get(nameKey(name)) ?? saved
+
+/** A room before anyone says hello; `known` are names to list as players, as display names. */
 export const openRoom = (
   options: { locked?: boolean; approval?: boolean; known?: Iterable<string> } = {},
 ): Admission => ({
@@ -40,6 +107,8 @@ export const openRoom = (
   online: new Map(),
   kicked: new Set(),
   pending: new Map(),
+  secrets: new Map(),
+  claimsHeld: new Set(),
 })
 
 const without = <K, V>(map: ReadonlyMap<K, V>, key: K): Map<K, V> => {
@@ -48,62 +117,102 @@ const without = <K, V>(map: ReadonlyMap<K, V>, key: K): Map<K, V> => {
   return next
 }
 
+const withoutPeer = (set: ReadonlySet<string>, peerId: string | undefined): ReadonlySet<string> => {
+  if (peerId === undefined || !set.has(peerId)) return set
+  const next = new Set(set)
+  next.delete(peerId)
+  return next
+}
+
 const pendingPeer = (state: Admission, key: string): string | undefined =>
   [...state.pending].find(([, name]) => nameKey(name) === key)?.[0]
 
-const admit = (state: Admission, name: string, peerId: string): Decision => {
+/**
+ * Seats `peerId` under `name`. A secret handed out `fresh` goes to the guest
+ * in the welcome; a proven one it already holds stays off the wire.
+ */
+const admit = (
+  state: Admission,
+  name: string,
+  peerId: string,
+  secret: string,
+  fresh: boolean,
+): Decision => {
   const key = nameKey(name)
-  return {
+  const displaced = pendingPeer(state, key)
+  const gone = displaced !== undefined && displaced !== peerId ? displaced : undefined
+  const pending = without(state.pending, peerId)
+  if (gone !== undefined) pending.delete(gone)
+  const decision: Decision = {
     state: {
       ...state,
       known: state.known.has(key) ? state.known : new Map(state.known).set(key, name.trim()),
       online: new Map(state.online).set(key, peerId),
-      pending: without(state.pending, peerId),
+      pending,
+      secrets: new Map(state.secrets).set(key, secret),
+      claimsHeld: withoutPeer(withoutPeer(state.claimsHeld, peerId), gone),
     },
-    reply: { type: 'welcome' },
+    reply: fresh ? { type: 'welcome', secret } : { type: 'welcome' },
   }
+  return gone === undefined ? decision : { ...decision, displaced: gone }
 }
 
 /**
- * The answer to a peer's hello. A `returning` name, one that already has a
- * seat at this table from before the room was opened, is let back in like a
- * known one: a DM who reloads and reopens finds the door forgot everyone.
+ * The answer to a peer's hello. A name that holds a seat, from this session
+ * or one saved with the map, is let back in past the lock and approval only
+ * with a proof of that seat's secret, and takes its name back from anyone
+ * waiting under it. Without one the hello is a stranger's: the lock and
+ * approval apply, and with neither in the way it is still refused, since the
+ * seat is somebody else's. Only the DM accepting it hands the seat over, under
+ * a fresh secret; it is marked as claiming a held seat so the DM can tell.
  */
 export function decide(
   state: Admission,
   name: string,
   peerId: string,
-  returning = false,
+  claim: Claim = {},
 ): Decision {
   const key = nameKey(name)
   const refuse = (reason: RefusalReason): Decision => ({
     state,
     reply: { type: 'refused', reason },
   })
+  const held = secretToProve(state, name, claim.held)
 
   if (state.kicked.has(key)) return refuse('kicked')
-  if (state.online.has(key) || pendingPeer(state, key) !== undefined) return refuse('name-taken')
-  if (state.known.has(key) || returning) return admit(state, name, peerId)
+  if (state.online.has(key)) return refuse('name-taken')
+  if (held !== undefined && claim.proven !== undefined && sameText(held, claim.proven))
+    return admit(state, name, peerId, held, false)
+  if (pendingPeer(state, key) !== undefined) return refuse('name-taken')
   if (state.locked) return refuse('locked')
   if (state.approval)
     return {
-      state: { ...state, pending: new Map(state.pending).set(peerId, name.trim()) },
+      state: {
+        ...state,
+        pending: new Map(state.pending).set(peerId, name.trim()),
+        claimsHeld: held === undefined ? state.claimsHeld : new Set(state.claimsHeld).add(peerId),
+      },
       reply: { type: 'pending' },
     }
-  return admit(state, name, peerId)
+  if (held !== undefined) return refuse('name-taken')
+  return admit(state, name, peerId, newSecret(), true)
 }
 
 /** The DM lets a waiting peer in; null when that peer is not waiting. */
 export function accept(state: Admission, peerId: string): Decision | null {
   const name = state.pending.get(peerId)
-  return name === undefined ? null : admit(state, name, peerId)
+  return name === undefined ? null : admit(state, name, peerId, newSecret(), true)
 }
 
 /** The DM turns a waiting peer away; it may ask again. Null when that peer is not waiting. */
 export function decline(state: Admission, peerId: string): Decision | null {
   if (!state.pending.has(peerId)) return null
   return {
-    state: { ...state, pending: without(state.pending, peerId) },
+    state: {
+      ...state,
+      pending: without(state.pending, peerId),
+      claimsHeld: withoutPeer(state.claimsHeld, peerId),
+    },
     reply: { type: 'refused', reason: 'declined' },
   }
 }
@@ -116,8 +225,16 @@ export function disconnect(state: Admission, peerId: string): Admission {
     ...state,
     online: key === undefined ? state.online : without(state.online, key),
     pending: without(state.pending, peerId),
+    claimsHeld: withoutPeer(state.claimsHeld, peerId),
   }
 }
+
+/**
+ * The map the room is hosting changed: the secrets handed out at the last one
+ * are not this one's, so seats here are proven against what this map kept.
+ */
+export const forgetSecrets = (state: Admission): Admission =>
+  state.secrets.size === 0 ? state : { ...state, secrets: new Map() }
 
 /**
  * Turns a name away for the rest of the session, whether it is online, waiting
@@ -132,6 +249,7 @@ export function kick(state: Admission, name: string): { state: Admission; peerId
     online: without(state.online, key),
     kicked: new Set(state.kicked).add(key),
     pending: peerId === undefined ? state.pending : without(state.pending, peerId),
+    claimsHeld: withoutPeer(state.claimsHeld, peerId),
   }
   return peerId === undefined ? { state: next } : { state: next, peerId }
 }

@@ -10,7 +10,7 @@ import type { Merchant, MerchantType } from '../entities/merchant'
 import type { SupplyEntry } from '../entities/supplies'
 import type { HexEvent, HexLocation } from '../hex/content'
 import type { HexKey } from '../hex/coords'
-import type { Seat } from '../session/seats'
+import type { Seat, SeatSecret } from '../session/seats'
 import type { Origin, TerrainControls } from '../stores/hexMap'
 import type { JournalChange, JournalEntry } from '../stores/journal'
 import type { MapStyle } from '../terrain/mapStyles'
@@ -59,6 +59,8 @@ export interface SavedAction {
  * explored set, which is read out of the record rather than piled up beside it.
  */
 export interface MapSnapshot {
+  /** Random, made with the map: what guests file the seat secrets it gave them under. */
+  tableId: string
   terrain: TerrainControls
   /** How far the world runs from the middle, in hexes. */
   worldRadius: number
@@ -113,6 +115,8 @@ export interface MapSnapshot {
   terrainOverrides: readonly { hex: HexKey; terrain: TerrainId }[]
   /** Which token each player who has joined a session on this map is tied to. */
   seats: readonly Seat[]
+  /** The secret each seated name must bring back to sit down again. DM-only: never projected. */
+  seatSecrets: readonly SeatSecret[]
   /** The purse and level of every party and npc edited off the defaults, in the order first edited. */
   characters: readonly SavedCharacter[]
   /** Every change made to the game, oldest first. DM-only: never projected to players. */
@@ -123,8 +127,8 @@ const SAVE_MAP = `
   INSERT OR REPLACE INTO map
     (id, seed, scale, sea_level, relief, world_radius, fog, show_sight,
      show_history, turn, selected_id, resource_spacing, revealed,
-     fog_see_through, style, player_reach_capped)
-  VALUES (1, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+     fog_see_through, style, player_reach_capped, table_id)
+  VALUES (1, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
 `
 
 const flag = (value: boolean): number => (value ? 1 : 0)
@@ -164,6 +168,7 @@ export function saveSnapshot(db: Database, snapshot: MapSnapshot): void {
         flag(snapshot.fogSeeThrough),
         snapshot.terrain.style,
         flag(snapshot.playerReachCapped),
+        snapshot.tableId,
       ],
     })
 
@@ -465,6 +470,16 @@ export function saveSnapshot(db: Database, snapshot: MapSnapshot): void {
       seat.finalize()
     }
 
+    db.exec('DELETE FROM seat_secret')
+    const seatSecret = db.prepare('INSERT INTO seat_secret (name, ord, secret) VALUES (?, ?, ?)')
+    try {
+      snapshot.seatSecrets.forEach((one, index) => {
+        seatSecret.bind([one.name, index, one.secret]).stepReset()
+      })
+    } finally {
+      seatSecret.finalize()
+    }
+
     db.exec('DELETE FROM character')
     const character = db.prepare(
       'INSERT INTO character (entity_id, ord, purse, level) VALUES (?, ?, ?, ?)',
@@ -543,6 +558,7 @@ export function loadSnapshot(db: Database): MapSnapshot | null {
   }))
 
   return {
+    tableId: String(row.table_id),
     terrain: {
       seed: Number(row.seed),
       scale: Number(row.scale),
@@ -688,6 +704,10 @@ export function loadSnapshot(db: Database): MapSnapshot | null {
     seats: db.selectObjects('SELECT * FROM seat ORDER BY ord').map((one) => ({
       name: String(one.name),
       entityId: String(one.entity_id),
+    })),
+    seatSecrets: db.selectObjects('SELECT * FROM seat_secret ORDER BY ord').map((one) => ({
+      name: String(one.name),
+      secret: String(one.secret),
     })),
     characters: db.selectObjects('SELECT * FROM character ORDER BY ord').map((one) => ({
       entityId: String(one.entity_id),

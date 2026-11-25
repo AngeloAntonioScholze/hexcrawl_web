@@ -293,6 +293,15 @@ const MIGRATIONS: readonly string[] = [
     changes TEXT NOT NULL
   );
   `,
+  `
+  CREATE TABLE seat_secret (
+    name TEXT NOT NULL,
+    ord INTEGER NOT NULL,
+    secret TEXT NOT NULL
+  );
+  ALTER TABLE map ADD COLUMN table_id TEXT NOT NULL DEFAULT '';
+  UPDATE map SET table_id = lower(hex(randomblob(16)));
+  `,
 ]
 
 export const SCHEMA_VERSION = MIGRATIONS.length
