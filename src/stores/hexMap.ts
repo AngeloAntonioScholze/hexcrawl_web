@@ -139,7 +139,18 @@ import {
   type Target,
   type Viewer,
 } from '../session/permissions'
-import { assignSeat, seatAt, seatOf, seatsOf, withSeat, type Seat } from '../session/seats'
+import { newSecret } from '../session/admission'
+import {
+  assignSeat,
+  seatAt,
+  seatOf,
+  seatsOf,
+  secretOf,
+  withSeat,
+  withSecret,
+  type Seat,
+  type SeatSecret,
+} from '../session/seats'
 import { createHistory, slotOf } from './history'
 import { createRecorder, type JournalEntry } from './journal'
 
@@ -269,6 +280,15 @@ export const useHexMapStore = defineStore('hexMap', () => {
 
   /** Which token each player who has joined a session on this map plays, by name. */
   const seats = shallowRef<readonly Seat[]>([])
+
+  /**
+   * The secret each seated name must prove to sit down again. Saved with the
+   * map, never projected or exported, and kept out of undo and the journal.
+   */
+  const seatSecrets = shallowRef<readonly SeatSecret[]>([])
+
+  /** The id guests find this map's seat secrets under, whatever room it is hosted in. */
+  const tableId = shallowRef(newSecret())
 
   /**
    * The entities a joined player's browser plays; null everywhere else. While
@@ -612,10 +632,14 @@ export const useHexMapStore = defineStore('hexMap', () => {
    * The token a player who joins the session plays: their own party, named
    * after them and off the map until they set it down, made the first time
    * their name sits at this map. A name coming back takes up the token it had,
-   * so long as the DM has not removed it since.
+   * so long as the DM has not removed it since. `secret` is what the name must
+   * bring back next time.
    */
-  const seatPlayer = (name: string): Entity | null => {
+  const seatPlayer = (name: string, secret?: string): Entity | null => {
     if (!may('addEntity')) return null
+    if (secret !== undefined && secretOf(seatSecrets.value, name) !== secret) {
+      seatSecrets.value = withSecret(seatSecrets.value, name, secret)
+    }
     const seated = seatOf(seats.value, name, (id) => entityOf(id) !== undefined)
     if (seated) return entityOf(seated.entityId) ?? null
     const made = newEntity(name.trim(), entities.value.length, 'party', 'player')
@@ -2017,6 +2041,7 @@ export const useHexMapStore = defineStore('hexMap', () => {
 
   /** Everything a saved session is made of, ready for the persistence layer. */
   const snapshot = computed<MapSnapshot>(() => ({
+    tableId: tableId.value,
     terrain: terrain.value,
     worldRadius: worldRadius.value,
     fog: fog.value,
@@ -2059,6 +2084,7 @@ export const useHexMapStore = defineStore('hexMap', () => {
       terrain: terrainId,
     })),
     seats: seats.value,
+    seatSecrets: seatSecrets.value,
     characters: [...characters.value].map(([entityId, one]) => ({ entityId, ...one })),
     journal: journal.value,
   }))
@@ -2106,6 +2132,8 @@ export const useHexMapStore = defineStore('hexMap', () => {
     turn.value = Math.max(0, Math.min(frames.value.length, saved.turn))
     queue.value = new Map(saved.queue.map(({ entityId, action }) => [entityId, action]))
     seats.value = saved.seats.map((one) => ({ ...one }))
+    seatSecrets.value = saved.seatSecrets.map((one) => ({ ...one }))
+    tableId.value = saved.tableId
 
     notes.value = new Map(saved.notes.map(({ hex, text }) => [hex, text]))
     const grouped = <T>(rows: readonly ({ hex: HexKey } & T)[]): Map<HexKey, T[]> => {

@@ -2,7 +2,7 @@ import { defineStore } from 'pinia'
 import { computed, ref, shallowRef, watch, type WatchHandle } from 'vue'
 import { capture } from '../analytics/analytics'
 import * as room from '../session/admission'
-import { MAX_NAME_LENGTH, type SessionMessage } from '../session/messages'
+import { HEX_128, MAX_NAME_LENGTH, type SessionMessage } from '../session/messages'
 import {
   hostRoom,
   joinRoom,
@@ -16,7 +16,7 @@ import { DM } from '../session/permissions'
 import { projectForPlayers, type PlayerProjection } from '../session/projection'
 import { createRetry, type Retry } from '../session/retry'
 import { normaliseRoomCode, ROOM_PREFIX } from '../session/roomCode'
-import { seatOf, type Seat } from '../session/seats'
+import { seatOf, secretOf, type Seat } from '../session/seats'
 import {
   createCoalescer,
   createStateGuest,
@@ -40,6 +40,7 @@ export type SessionReason =
   | 'declined'
   | 'kicked'
   | 'dm-gone'
+  | 'no-answer'
   | 'unknown'
 
 export const REASON_TEXT: Readonly<Record<SessionReason, string>> = {
@@ -54,6 +55,7 @@ export const REASON_TEXT: Readonly<Record<SessionReason, string>> = {
   declined: 'the DM turned the request away',
   kicked: 'the DM removed you from the session',
   'dm-gone': "the DM left and didn't come back",
+  'no-answer': "the DM's browser didn't answer",
   unknown: 'something went wrong connecting',
 }
 
@@ -130,6 +132,56 @@ const rememberRoom = (code: string): void => {
   }
 }
 
+const SEAT_SECRETS_KEY = 'hexcrawl.seatSecrets'
+
+/** How many seats' secrets a guest's browser keeps, newest last. */
+export const KEPT_SEAT_SECRETS = 50
+
+/** How long a guest waits on the host to ask for, then answer, its hello. */
+export const ANSWER_TIMEOUT_MS = 15_000
+
+/** Where a guest files the secret of the seat a name holds at a table: one map, any room. */
+export const seatSlot = (table: string, name: string): string => `${table}|${room.nameKey(name)}`
+
+/** The seat secrets this browser was given, by seat slot, as stored; anything else is dropped. */
+export const parseSeatSecrets = (stored: string | null): Map<string, string> => {
+  if (stored === null) return new Map()
+  try {
+    const parsed: unknown = JSON.parse(stored)
+    if (typeof parsed !== 'object' || parsed === null || Array.isArray(parsed)) return new Map()
+    return new Map(
+      Object.entries(parsed).filter(
+        (entry): entry is [string, string] =>
+          typeof entry[1] === 'string' && HEX_128.test(entry[1]),
+      ),
+    )
+  } catch {
+    return new Map()
+  }
+}
+
+const storedSeatSecrets = (): Map<string, string> => {
+  try {
+    return parseSeatSecrets(localStorage.getItem(SEAT_SECRETS_KEY))
+  } catch {
+    return new Map()
+  }
+}
+
+const keepSeatSecret = (slot: string, secret: string): void => {
+  try {
+    const secrets = storedSeatSecrets()
+    secrets.delete(slot)
+    secrets.set(slot, secret)
+    localStorage.setItem(
+      SEAT_SECRETS_KEY,
+      JSON.stringify(Object.fromEntries([...secrets].slice(-KEPT_SEAT_SECRETS))),
+    )
+  } catch {
+    // Without storage the seat is only reclaimed while this tab stays open.
+  }
+}
+
 /** Someone the DM has let in this session, whether connected now or not. */
 export interface Player {
   name: string
@@ -187,6 +239,19 @@ export const useSessionStore = defineStore('session', () => {
   let project: (() => PlayerProjection) | null = null
   let stopWatching: WatchHandle | null = null
   let retry: Retry | null = null
+  // The seat secrets hosts gave this tab, by seat slot, also for a browser
+  // that will not keep them in storage.
+  const givenSecrets = new Map<string, string>()
+  const seatSecretFor = (slot: string): string | undefined =>
+    givenSecrets.get(slot) ?? storedSeatSecrets().get(slot)
+  // A guest's connection: the table its host named in the challenge, once one
+  // has come, and the wait for an answer to its hello.
+  let table: string | null = null
+  let answerTimer: ReturnType<typeof setTimeout> | null = null
+  // A host's connections: the nonce each was challenged with, until it says
+  // hello, and the nonce of each hello whose proof is still being checked.
+  const nonces = new Map<string, string>()
+  const checking = new Map<string, string>()
   // Each host or join bumps this, so a room still opening when it is left or
   // replaced cannot write over the one that took its place.
   let run = 0
@@ -214,7 +279,16 @@ export const useSessionStore = defineStore('session', () => {
     session?.send({ type: 'seat', entityIds }, peerId)
   }
 
+  const stopWaiting = (): void => {
+    if (answerTimer !== null) clearTimeout(answerTimer)
+    answerTimer = null
+  }
+
   const stopSync = (): void => {
+    stopWaiting()
+    table = null
+    nonces.clear()
+    checking.clear()
     stopWatching?.()
     stopWatching = null
     broadcasts?.cancel()
@@ -302,20 +376,21 @@ export const useSessionStore = defineStore('session', () => {
   /**
    * Hands a guest just let in the token that is theirs: the one their name has
    * on this map, or a new one off the map for them to set down. The host is
-   * always the DM, whichever view this browser is showing.
+   * always the DM, whichever view this browser is showing. The map keeps the
+   * secret the guest was given, so it is asked for after a reload too.
    */
-  const seat = (peerId: string): void => {
+  const seat = (peerId: string, secret: string): void => {
     const key = [...door.value.online].find(([, peer]) => peer === peerId)?.[0]
     const name = key === undefined ? undefined : door.value.known.get(key)
     if (name === undefined) return
     const map = useHexMapStore()
     told.delete(peerId)
-    if (map.actAs(DM, () => map.seatPlayer(name))) tellSeats(name, peerId)
+    if (map.actAs(DM, () => map.seatPlayer(name, secret))) tellSeats(name, peerId)
   }
 
   // Made after the seat, so the token just handed over is on the map it is sent.
-  const admit = (peerId: string): void => {
-    seat(peerId)
+  const admit = (peerId: string, secret: string): void => {
+    seat(peerId, secret)
     if (project) stateHost?.sendSnapshot(peerId, project())
   }
 
@@ -334,7 +409,7 @@ export const useSessionStore = defineStore('session', () => {
     door.value = decision.state
     session?.send(decision.reply, to)
     if (decision.reply.type === 'refused') session?.drop(to)
-    if (decision.reply.type === 'welcome') admit(to)
+    if (decision.reply.type === 'welcome') admit(to, decision.reply.secret)
   }
 
   // A name with a token on this map was let in before, if not by this room:
@@ -344,27 +419,78 @@ export const useSessionStore = defineStore('session', () => {
     return seatOf(map.seats, name, (id) => map.entities.some((one) => one.id === id))
   }
 
-  const onHostMessage = (message: SessionMessage, from: string): void => {
+  const onHostMessage = (mine: number, message: SessionMessage, from: string): void => {
     if (stateHost?.receive(message, from)) return
     if (message.type !== 'hello') return
-    // A connection says hello once; another from one already in or waiting is ignored.
+    // A connection says hello once; another from one already in, waiting or
+    // being checked is ignored.
     const state = door.value
     if (state.pending.has(from) || [...state.online.values()].includes(from)) return
-    // A returning name shows as it was first seated, not as typed this time.
+    if (checking.has(from)) return
+    // A returning name shows as it was first seated, not as typed this time,
+    // and sits down again only with a proof of the secret its seat was given,
+    // made for the nonce this connection was challenged with.
     const seated = seatFor(message.name)
-    reply(room.decide(state, seated?.name ?? message.name, from, seated !== undefined), from)
+    const name = seated?.name ?? message.name
+    const saved = seated && secretOf(useHexMapStore().snapshot.seatSecrets, seated.name)
+    const held = room.secretToProve(state, name, saved)
+    const nonce = nonces.get(from)
+    nonces.delete(from)
+    if (message.proof === undefined || held === undefined || nonce === undefined) {
+      reply(room.decide(state, name, from, { held: saved }), from)
+      return
+    }
+    checking.set(from, nonce)
+    void room
+      .proves(message.proof, held, nonce, name)
+      .catch(() => false)
+      .then((proven) => {
+        // Gone while its proof was checked, or the room with it, or back on another connection.
+        if (mine !== run || checking.get(from) !== nonce) return
+        checking.delete(from)
+        const claim = { held: saved, proven: proven ? held : undefined }
+        reply(room.decide(door.value, name, from, claim), from)
+      })
   }
 
-  const onGuestMessage = (message: SessionMessage): void => {
+  /** Answers the host's challenge: the name, and a proof of its seat's secret at this table if held. */
+  const sayHello = async (mine: number, nonce: string, to: string): Promise<void> => {
+    const name = myName.value
+    const secret = table === null ? undefined : seatSecretFor(seatSlot(table, name))
+    const proof =
+      secret === undefined
+        ? undefined
+        : await room.seatProof(secret, nonce, name).catch(() => undefined)
+    if (mine !== run) return
+    session?.send(
+      proof === undefined ? { type: 'hello', name } : { type: 'hello', name, proof },
+      to,
+    )
+  }
+
+  const onGuestMessage = (mine: number, message: SessionMessage, from: string): void => {
     // The map is only the business of a guest the host has let in.
     if (admission.value === 'admitted' && stateGuest?.receive(message)) return
+    // Any answer to the hello ends the wait for one.
+    if (['pending', 'welcome', 'refused', 'kicked'].includes(message.type)) stopWaiting()
     switch (message.type) {
+      case 'challenge':
+        // One challenge per connection, before the hello.
+        if (admission.value !== 'asking' || table !== null) return
+        table = message.table
+        void sayHello(mine, message.nonce, from)
+        break
       case 'pending':
         admission.value = 'pending'
         break
       case 'welcome':
         // Let back in after a dropped connection is the same visit to the room.
         if (!reconnecting.value) capture('session_joined')
+        if (table !== null) {
+          const slot = seatSlot(table, myName.value)
+          givenSecrets.set(slot, message.secret)
+          keepSeatSecret(slot, message.secret)
+        }
         admission.value = 'admitted'
         stopRetrying()
         break
@@ -456,19 +582,38 @@ export const useSessionStore = defineStore('session', () => {
       },
       message: (message, from) => {
         if (mine !== run) return
-        if (as === 'host') onHostMessage(message, from)
-        else onGuestMessage(message)
+        if (as === 'host') onHostMessage(mine, message, from)
+        else onGuestMessage(mine, message, from)
       },
       peer: (peerId, connected) => {
         if (mine !== run) return
         if (!connected) {
           if (as !== 'host') return
+          nonces.delete(peerId)
+          checking.delete(peerId)
           door.value = room.disconnect(door.value, peerId)
           stateHost?.remove(peerId)
           return
         }
-        if (as === 'guest') admission.value = 'asking'
-        session?.send({ type: 'hello', name: myName.value }, peerId)
+        if (as === 'guest') {
+          // The host speaks first; a host that never does, or never answers,
+          // must not leave the guest asking for ever.
+          admission.value = 'asking'
+          stopWaiting()
+          answerTimer = setTimeout(() => {
+            answerTimer = null
+            if (mine !== run || admission.value !== 'asking') return
+            if (reconnecting.value) lost()
+            else fail('no-answer')
+          }, ANSWER_TIMEOUT_MS)
+          return
+        }
+        const nonce = room.newSecret()
+        nonces.set(peerId, nonce)
+        session?.send(
+          { type: 'challenge', nonce, table: useHexMapStore().snapshot.tableId },
+          peerId,
+        )
       },
     }
 

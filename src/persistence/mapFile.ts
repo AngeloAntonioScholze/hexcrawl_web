@@ -19,8 +19,10 @@ import {
 } from '../entities/merchant'
 import { SUPPLY_LIMITS, type Supply } from '../entities/supplies'
 import type { HexKey } from '../hex/coords'
+import { newSecret } from '../session/admission'
+import { HEX_128 } from '../session/messages'
 import type { Viewer } from '../session/permissions'
-import type { Seat } from '../session/seats'
+import type { Seat, SeatSecret } from '../session/seats'
 import type { TerrainControls } from '../stores/hexMap'
 import type { StepCause } from '../stores/history'
 import type { Json, JournalChange, JournalEntry } from '../stores/journal'
@@ -391,6 +393,8 @@ export const SNAPSHOT_FIELDS: { [K in keyof MapSnapshot]-?: Guard<MapSnapshot[K]
     }),
   ),
   seats: listOf(shape<Seat>({ name: isString, entityId: isString })),
+  seatSecrets: listOf(shape<SeatSecret>({ name: isString, secret: isString })),
+  tableId: (value): value is string => isString(value) && HEX_128.test(value),
   characters: isCharacters,
   journal: listOf(
     shape<JournalEntry>({
@@ -447,11 +451,20 @@ const ADDED_FIELD_DEFAULTS: {
   abilities: () => [],
   items: () => [],
   seats: () => [],
+  // Seats from before secrets are open to whoever the door lets in first under that name.
+  seatSecrets: () => [],
+  // Every file opens as a table of its own (see withDefault).
+  tableId: newSecret,
   characters: () => [],
   journal: () => [],
 }
 
 const withDefault = (key: string, value: unknown): unknown => {
+  // A map file is shared, so whoever has it could take any seat: its seats
+  // come in without secrets, open as seats from before secrets are. It is a
+  // table of its own too, so the secrets guests were given at the map it was
+  // saved from are not written over by ones given at this copy.
+  if (key === 'seatSecrets' || key === 'tableId') return ADDED_FIELD_DEFAULTS[key]()
   if (value === undefined && Object.hasOwn(ADDED_FIELD_DEFAULTS, key)) {
     return ADDED_FIELD_DEFAULTS[key as keyof typeof ADDED_FIELD_DEFAULTS]()
   }
@@ -476,9 +489,10 @@ const withDefault = (key: string, value: unknown): unknown => {
   return value
 }
 
+/** The map as a file to share: everything but the seat secrets, which stay with this browser. */
 export function serialiseMap(snapshot: MapSnapshot): string {
   return JSON.stringify(
-    { format: MAP_FILE_FORMAT, version: MAP_FILE_VERSION, map: snapshot },
+    { format: MAP_FILE_FORMAT, version: MAP_FILE_VERSION, map: { ...snapshot, seatSecrets: [] } },
     null,
     2,
   )

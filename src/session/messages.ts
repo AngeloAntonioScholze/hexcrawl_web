@@ -1,19 +1,34 @@
+import { plainName } from './names'
 import { parseChunk, type Chunk } from './wireChunks'
 
 /** Bumped when a message changes shape, so an older tab is turned away rather than misread. */
-export const PROTOCOL_VERSION = 4
+export const PROTOCOL_VERSION = 5
 
 export const MAX_NAME_LENGTH = 40
+
+/** A seat secret, challenge nonce or table id as the host makes them: 128 bits in lower-case hex. */
+export const HEX_128 = /^[0-9a-f]{32}$/
+
+/** A hello's proof: HMAC-SHA256 in lower-case hex. */
+const PROOF = /^[0-9a-f]{64}$/
 
 export const REFUSAL_REASONS = ['locked', 'declined', 'name-taken', 'kicked'] as const
 
 export type RefusalReason = (typeof REFUSAL_REASONS)[number]
 
 export type SessionMessage =
-  | { type: 'hello'; name: string }
+  /**
+   * The host's first word on a connection: `table` names the map, so a guest
+   * finds the seat secret it was given at it, and `nonce` is new each time, so
+   * a proof is no good on another connection.
+   */
+  | { type: 'challenge'; nonce: string; table: string }
+  /** `proof` shows the guest holds this name's seat secret at the table, without sending it. */
+  | { type: 'hello'; name: string; proof?: string }
   | { type: 'ping'; at: number }
   | { type: 'pong'; at: number }
-  | { type: 'welcome' }
+  /** `secret` is the guest's claim to its seat at this table, to prove in its next hellos. */
+  | { type: 'welcome'; secret: string }
   /**
    * The tokens that are the guest's to play, sent once it is in and again
    * whenever the DM hands it more or takes some away.
@@ -47,6 +62,9 @@ const hasExactly = (record: Record<string, unknown>, keys: readonly string[]): b
 const isSeq = (value: unknown): value is number =>
   Number.isSafeInteger(value) && (value as number) >= 0
 
+const isHex128 = (value: unknown): value is string =>
+  typeof value === 'string' && HEX_128.test(value)
+
 const isRefusalReason = (value: unknown): value is RefusalReason =>
   REFUSAL_REASONS.some((reason) => reason === value)
 
@@ -54,12 +72,27 @@ const parseMessage = (msg: unknown): SessionMessage | null => {
   if (!isRecord(msg)) return null
 
   switch (msg.type) {
+    case 'challenge': {
+      const { nonce, table } = msg
+      if (!hasExactly(msg, ['type', 'nonce', 'table']) || !isHex128(nonce) || !isHex128(table))
+        return null
+      return { type: 'challenge', nonce, table }
+    }
     case 'hello': {
-      const { name } = msg
-      if (!hasExactly(msg, ['type', 'name']) || typeof name !== 'string') return null
-      const trimmed = name.trim()
+      const { name, proof } = msg
+      const keys = proof === undefined ? ['type', 'name'] : ['type', 'name', 'proof']
+      if (!hasExactly(msg, keys) || typeof name !== 'string') return null
+      if (proof !== undefined && !(typeof proof === 'string' && PROOF.test(proof))) return null
+      const trimmed = plainName(name)
       if (trimmed.length === 0 || trimmed.length > MAX_NAME_LENGTH) return null
-      return { type: 'hello', name: trimmed }
+      return proof === undefined
+        ? { type: 'hello', name: trimmed }
+        : { type: 'hello', name: trimmed, proof }
+    }
+    case 'welcome': {
+      const { secret } = msg
+      if (!hasExactly(msg, ['type', 'secret']) || !isHex128(secret)) return null
+      return { type: 'welcome', secret }
     }
     case 'ping':
     case 'pong': {
@@ -68,7 +101,6 @@ const parseMessage = (msg: unknown): SessionMessage | null => {
         return null
       return { type: msg.type, at }
     }
-    case 'welcome':
     case 'pending':
     case 'kicked':
     case 'resync':

@@ -2,6 +2,7 @@ import { watch } from 'vue'
 import { cleanName, importedName, neighbourOf, nextMapName, uniqueName } from './mapIndex'
 import type { MapSnapshot } from './mapState'
 import type { MapCommand, MapResponse, MapResult, MapResults, OpenedMap } from './protocol'
+import { newSecret } from '../session/admission'
 import { MAX_SEED, type useHexMapStore } from '../stores/hexMap'
 import type { useMapLibraryStore } from '../stores/mapLibrary'
 
@@ -65,6 +66,8 @@ const plain = (snapshot: MapSnapshot): MapSnapshot => ({
   rivers: snapshot.rivers.map((one) => ({ ...one })),
   terrainOverrides: snapshot.terrainOverrides.map((one) => ({ ...one })),
   seats: snapshot.seats.map((one) => ({ ...one })),
+  seatSecrets: snapshot.seatSecrets.map((one) => ({ ...one })),
+  tableId: snapshot.tableId,
   characters: snapshot.characters.map((one) => ({ ...one })),
   // Entries are plain JSON from the moment they are written, and never changed after.
   journal: [...snapshot.journal],
@@ -172,6 +175,7 @@ export async function startMapSession(store: HexMapStore, library: MapLibrarySto
     store.restore(
       opened.snapshot ?? {
         ...blank,
+        tableId: newSecret(),
         terrain: { ...blank.terrain, seed: Math.floor(Math.random() * MAX_SEED) },
       },
     )

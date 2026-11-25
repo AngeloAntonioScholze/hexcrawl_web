@@ -39,12 +39,15 @@ const entity = (id: string, kind: Entity['kind'], hidden: boolean): Entity => ({
 
 const still = { carry: 0, pending: [], waypoints: [], riding: null }
 
+const SECRET = '0123456789abcdef0123456789abcdef'
+
 /**
  * A party walking from 0,0 to 1,0 to its caravan waiting there, and a hidden npc
  * and a hidden caravan far off to the west and east where nobody has looked.
  * A rider sits in the hidden caravan.
  */
 const snapshot = (): MapSnapshot => ({
+  tableId: 'a1b2c3d4e5f60718293a4b5c6d7e8f90',
   terrain: { seed: 1234, scale: 1, seaLevel: 0, relief: 1, style: 'classic' },
   worldRadius: 9,
   fog: true,
@@ -231,6 +234,7 @@ const snapshot = (): MapSnapshot => ({
   ],
   terrainOverrides: [{ hex: '-8,0', terrain: 'peaks' }],
   seats: [{ name: 'Mira', entityId: 'party' }],
+  seatSecrets: [{ name: 'Mira', secret: SECRET }],
   characters: [
     { entityId: 'spy', purse: 777, level: 11 },
     { entityId: 'party', purse: 12, level: 3 },
@@ -406,6 +410,8 @@ describe('what the players never get', () => {
       'fog',
       'fogSeeThrough',
       'seats',
+      'seatSecrets',
+      'tableId',
     ]) {
       expect(view).not.toHaveProperty(key)
     }
@@ -413,6 +419,22 @@ describe('what the players never get', () => {
 
   it('leaves out who is seated at which token', () => {
     expect(JSON.stringify(project())).not.toContain('Mira')
+  })
+
+  // A joined player's token carries their name, so names are no secret; the
+  // seat secret that lets a name back in must be.
+  it('leaves out the seat secrets, even for a token named after its player', () => {
+    const map = snapshot()
+    const named: MapSnapshot = {
+      ...map,
+      entities: map.entities.map((one) => (one.id === 'party' ? { ...one, name: 'Mira' } : one)),
+    }
+    const text = JSON.stringify(project(named))
+    expect(text).toContain('Mira')
+    expect(text).not.toContain(SECRET)
+    expect(text).not.toContain('secret')
+    expect(text).not.toContain('seat')
+    expect(text).not.toContain(map.tableId)
   })
 
   it('leaves out the change journal', () => {

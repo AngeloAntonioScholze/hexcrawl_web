@@ -9,6 +9,7 @@ import { MAP_FILE_FORMAT, MAP_FILE_VERSION, parseMapFile, serialiseMap } from '.
 import type { MapSnapshot } from './mapState'
 
 const snapshot = (): MapSnapshot => ({
+  tableId: 'a1b2c3d4e5f60718293a4b5c6d7e8f90',
   terrain: { seed: 4242, scale: 65, seaLevel: -0.15, relief: 9.5, style: 'pangaea' },
   worldRadius: 150,
   fog: true,
@@ -168,6 +169,7 @@ const snapshot = (): MapSnapshot => ({
   rivers: [{ a: '0,1' as HexKey, b: '1,0' as HexKey }],
   terrainOverrides: [{ hex: '1,0' as HexKey, terrain: 'mountains' }],
   seats: [{ name: 'Mira', entityId: 'party-1' }],
+  seatSecrets: [{ name: 'Mira', secret: '0123456789abcdef0123456789abcdef' }],
   characters: [{ entityId: 'party-1', purse: 120, level: 3 }],
   journal: [
     {
@@ -206,6 +208,13 @@ const tampered = (
   return JSON.stringify(file)
 }
 
+/** The snapshot as a file of it opens: no seat secrets, and a table id of its own. */
+const opened = (): MapSnapshot => ({
+  ...snapshot(),
+  seatSecrets: [],
+  tableId: expect.stringMatching(/^[0-9a-f]{32}$/),
+})
+
 const rejected = (text: string): string => {
   const result = parseMapFile(text)
   if (result.ok) throw new Error('expected the file to be rejected')
@@ -217,11 +226,19 @@ describe('serialiseMap', () => {
     const file = JSON.parse(serialiseMap(snapshot()))
     expect(file.format).toBe(MAP_FILE_FORMAT)
     expect(file.version).toBe(MAP_FILE_VERSION)
-    expect(file.map).toEqual(snapshot())
+    expect(file.map).toEqual({ ...snapshot(), seatSecrets: [] })
   })
 
-  it('reads back exactly what it wrote', () => {
-    expect(parseMapFile(serialiseMap(snapshot()))).toEqual({ ok: true, snapshot: snapshot() })
+  it('carries out no seat secret', () => {
+    const text = serialiseMap(snapshot())
+    expect(text).not.toContain(snapshot().seatSecrets[0].secret)
+    expect(JSON.parse(text).map.seatSecrets).toEqual([])
+  })
+
+  it('reads back what it wrote, as a table of its own', () => {
+    const result = parseMapFile(serialiseMap(snapshot()))
+    expect(result).toEqual({ ok: true, snapshot: opened() })
+    expect(result.ok && result.snapshot.tableId).not.toBe(snapshot().tableId)
   })
 
   it('keeps nothing from the file the snapshot does not have', () => {
@@ -427,12 +444,27 @@ describe('parseMapFile', () => {
     ['abilities', []],
     ['items', []],
     ['seats', []],
+    ['seatSecrets', []],
     ['playerReachCapped', true],
     ['characters', []],
     ['journal', []],
   ])('opens a file from before %s existed with the default', (field, fallback) => {
     const result = parseMapFile(tampered((file) => delete file.map[field]))
-    expect(result).toEqual({ ok: true, snapshot: { ...snapshot(), [field]: fallback } })
+    expect(result).toEqual({ ok: true, snapshot: { ...opened(), [field]: fallback } })
+  })
+
+  it('opens a file from before table ids as a table of its own', () => {
+    const result = parseMapFile(tampered((file) => delete file.map.tableId))
+    expect(result).toEqual({ ok: true, snapshot: opened() })
+  })
+
+  it.each<[string, unknown]>([
+    ['seat secrets', [{ name: 'Mira', secret: '0123456789abcdef0123456789abcdef' }]],
+    ['malformed seat secrets', [{ name: 7 }]],
+    ['seat secrets that are not a list', 'Mira'],
+  ])('leaves behind the %s a hand-made file brings', (_, seatSecrets) => {
+    const result = parseMapFile(tampered((file) => (file.map.seatSecrets = seatSecrets)))
+    expect(result).toEqual({ ok: true, snapshot: opened() })
   })
 
   it('opens an entity from before darkvision existed as blind by night', () => {
@@ -459,7 +491,7 @@ describe('parseMapFile', () => {
     const result = parseMapFile(tampered((file) => delete file.map.terrain.style))
     expect(result).toEqual({
       ok: true,
-      snapshot: { ...snapshot(), terrain: { ...snapshot().terrain, style: 'classic' } },
+      snapshot: { ...opened(), terrain: { ...snapshot().terrain, style: 'classic' } },
     })
   })
 
@@ -473,7 +505,7 @@ describe('parseMapFile', () => {
 
   it('opens a file that still carries a view mode, and leaves the view mode behind', () => {
     const result = parseMapFile(tampered((file) => (file.map.dmView = false)))
-    expect(result).toEqual({ ok: true, snapshot: snapshot() })
+    expect(result).toEqual({ ok: true, snapshot: opened() })
   })
 })
 
@@ -489,6 +521,12 @@ describe('a map carried out and back in', () => {
         { hex, terrain: 'grass', height: 1, level: 1, elevation: 1.5, color: new Color3(0, 0, 0) },
       ]),
     )
+
+  // A file opens as a table of its own; everything else comes back as it was.
+  const sameTable = (opened: MapSnapshot, saved: MapSnapshot): MapSnapshot => {
+    expect(opened.tableId).not.toBe(saved.tableId)
+    return { ...opened, tableId: saved.tableId }
+  }
 
   it('comes back identical on a fresh map', () => {
     const store = useHexMapStore()
@@ -543,9 +581,27 @@ describe('a map carried out and back in', () => {
     if (!result.ok) throw new Error(result.error)
     fresh.restore(result.snapshot)
 
-    expect(fresh.snapshot).toEqual(store.snapshot)
+    expect(sameTable(fresh.snapshot, store.snapshot)).toEqual(store.snapshot)
     expect(fresh.catalog).toEqual(store.catalog)
-    expect(serialiseMap(fresh.snapshot)).toBe(exported)
+    expect(serialiseMap(sameTable(fresh.snapshot, store.snapshot))).toBe(exported)
+  })
+
+  it('carries out the seats but not their secrets', () => {
+    const store = useHexMapStore()
+    store.setTiles(flatField())
+    const mira = store.seatPlayer('Mira', '0123456789abcdef0123456789abcdef')!
+    const exported = serialiseMap(store.snapshot)
+    expect(exported).not.toContain('0123456789abcdef0123456789abcdef')
+
+    setActivePinia(createPinia())
+    const fresh = useHexMapStore()
+    fresh.setTiles(flatField())
+    const result = parseMapFile(exported)
+    if (!result.ok) throw new Error(result.error)
+    fresh.restore(result.snapshot)
+
+    expect(fresh.seats).toEqual([{ name: 'Mira', entityId: mira.id }])
+    expect(fresh.snapshot.seatSecrets).toEqual([])
   })
 
   it("carries out no view mode, and a file opened leaves this browser's view as it was", () => {
@@ -576,7 +632,7 @@ describe('a map carried out and back in', () => {
     fresh.restore(result.snapshot)
 
     expect(fresh.entities).toEqual([])
-    expect(fresh.snapshot).toEqual(store.snapshot)
-    expect(serialiseMap(fresh.snapshot)).toBe(exported)
+    expect(sameTable(fresh.snapshot, store.snapshot)).toEqual(store.snapshot)
+    expect(serialiseMap(sameTable(fresh.snapshot, store.snapshot))).toBe(exported)
   })
 })

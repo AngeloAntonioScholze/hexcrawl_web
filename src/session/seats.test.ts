@@ -1,5 +1,15 @@
 import { describe, expect, it } from 'vitest'
-import { assignSeat, seatAt, seatOf, seatsOf, withSeat, type Seat } from './seats'
+import {
+  assignSeat,
+  seatAt,
+  seatOf,
+  seatsOf,
+  secretOf,
+  withSeat,
+  withSecret,
+  type Seat,
+  type SeatSecret,
+} from './seats'
 
 const seats: Seat[] = [
   { name: 'Mira', entityId: 'a' },
@@ -80,5 +90,26 @@ describe('assignSeat', () => {
 
   it('seats a name new to the map', () => {
     expect(assignSeat(seats, 'c', ' Ash ')).toEqual([...seats, { name: 'Ash', entityId: 'c' }])
+  })
+})
+
+describe('seat secrets', () => {
+  const secrets: SeatSecret[] = [
+    { name: 'Mira', secret: 'm' },
+    { name: 'Tom', secret: 't' },
+  ]
+
+  it('finds the secret a name holds, matched as the door matches names', () => {
+    expect(secretOf(secrets, ' MI​RA ')).toBe('m')
+    expect(secretOf(secrets, 'Ash')).toBeUndefined()
+  })
+
+  it('gives a name its secret in place of the old one, leaving the list alone', () => {
+    expect(withSecret(secrets, ' mira', 'n')).toEqual([
+      { name: 'Tom', secret: 't' },
+      { name: 'mira', secret: 'n' },
+    ])
+    expect(withSecret(secrets, 'Ash', 'a')).toEqual([...secrets, { name: 'Ash', secret: 'a' }])
+    expect(secrets).toHaveLength(2)
   })
 })
