@@ -1,5 +1,6 @@
 <script setup lang="ts">
 import { computed, nextTick, onMounted, ref, useTemplateRef, watch, type Ref } from 'vue'
+import { stripRoom } from '../analytics/scrub'
 import { configured, consent, decline, grant } from '../analytics/analytics'
 import { useEnterPrefs, type EnterChoice } from '../composables/useEnterPrefs'
 import { useStage, type StageMark } from '../composables/useStage'
@@ -18,6 +19,8 @@ const { name, choice } = useEnterPrefs()
 // A join link skips the title card: whoever sent it already chose for them.
 const linked = roomFromLink(window.location.search)
 const code = ref(linked ?? '')
+// Analytics reads the address bar, so the code must not stay in it.
+if (linked) window.history.replaceState(window.history.state, '', stripRoom(window.location.href))
 
 /** Null once the visitor is in the app. */
 const view = ref<View | null>(linked ? 'join' : 'title')

@@ -1,5 +1,6 @@
 // @vitest-environment happy-dom
 // @vitest-environment-options {"url": "http://localhost:5173/"}
+import { gunzipSync } from 'node:zlib'
 import type { PostHog } from 'posthog-js'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 
@@ -25,6 +26,12 @@ const settle = async (): Promise<void> => {
 const written = (): Promise<void> =>
   vi.waitFor(() => expect(document.cookie).toContain('ph_phc_test'), { timeout: 1000 })
 
+const bodyOf = async (init: RequestInit): Promise<string> => {
+  const bytes = new Uint8Array(await new Response(init.body).arrayBuffer())
+  const raw = bytes[0] === 0x1f && bytes[1] === 0x8b ? gunzipSync(bytes) : bytes
+  return new TextDecoder().decode(raw)
+}
+
 const clearCookies = (): void => {
   for (const pair of document.cookie.split(';')) {
     const name = pair.split('=')[0].trim()
@@ -49,6 +56,7 @@ beforeEach(() => {
 })
 
 afterEach(() => {
+  history.replaceState(null, '', '/')
   vi.unstubAllEnvs()
   vi.unstubAllGlobals()
   vi.restoreAllMocks()
@@ -196,6 +204,40 @@ describe('grant', () => {
     analytics.captureException(error)
 
     expect(captureException).toHaveBeenCalledWith(error)
+  })
+
+  it('sends no room code, even with one in the address bar', async () => {
+    vi.spyOn(navigator, 'userAgent', 'get').mockReturnValue(
+      'Mozilla/5.0 (Windows NT 10.0) Chrome/130 Safari/537.36',
+    )
+    vi.spyOn(navigator, 'webdriver', 'get').mockReturnValue(false)
+    history.replaceState(null, '', '/?room=abc234')
+    const analytics = await load(configuredEnv)
+    const posthog = await posthogOf()
+    const { scrubEvent } = await import('./scrub')
+    const init = vi.spyOn(posthog, 'init')
+
+    try {
+      analytics.grant()
+      analytics.capture('tool_used', { tool: 'paint' })
+      await settle()
+      posthog.capture('late', {}, { send_instantly: true })
+      await settle()
+
+      expect(init.mock.calls[0][1]!.before_send).toBe(scrubEvent)
+      expect(location.search).toContain('abc234')
+      const sent = await Promise.all(
+        (fetchSpy.mock.calls as unknown as [string, RequestInit][]).map(([, init]) => bodyOf(init)),
+      )
+      expect(sent.length).toBeGreaterThan(0)
+      expect(sent.join('')).not.toContain('abc234')
+    } finally {
+      // This instance outlives the test: opt out, then wait past its debounced saves.
+      analytics.decline()
+      await new Promise((done) => setTimeout(done, 400))
+      localStorage.clear()
+      clearCookies()
+    }
   })
 })
 
